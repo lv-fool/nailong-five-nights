@@ -52,6 +52,7 @@
 | `Assets/Audio/SFX/` | 音效（关门、开灯、脚步、尖叫） |
 | `Assets/Audio/Ambient/` | 环境音（风扇、电流嗡鸣） |
 | `Assets/Editor/` | 编辑器扩展脚本（打包后不进入游戏） |
+| `Assets/Tests/EditMode/` | 纯逻辑的单元测试，在 Test Runner 里跑 |
 | `Assets/Prefabs/` | 预制体 |
 | `Assets/Resources/` | 需要运行时按字符串加载的资源（慎用，会全量打进包体） |
 | `Assets/Scenes/` | 场景文件 |
@@ -105,6 +106,14 @@ FNAF 不是 3D 游戏，是一组**静态图 + 可点击区域 + 状态切换**�
 
 **没有 .NET SDK，无法在外部做语法检查**，所以代码要写得保守：
 不用冷门 API、不炫技、不依赖不确定是否存在的包。
+
+**程序集划分（asmdef）**：`Assets/Scripts/` 下有一个 `NailongFNAF.asmdef`，
+把游戏代码编成独立程序集 `NailongFNAF`；`Assets/Tests/EditMode/` 下是
+`NailongFNAF.EditModeTests`，引用前者 —— 测试要访问游戏代码，必须这样分。
+新增脚本丢进 `Assets/Scripts/` 子树就自动归入该程序集，不用改配置。
+
+**怎么跑测试**：Window → General → Test Runner → EditMode → Run All。
+电量、时间这类纯逻辑类不引用 UnityEngine，可以脱离 Unity 测，改动后务必跑一遍。
 
 ## 七、可用 skill 与使用时机
 

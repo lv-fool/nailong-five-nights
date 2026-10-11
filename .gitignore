@@ -55,3 +55,9 @@ desktop.ini
 # ===== AI 工具本地数据 =====
 # 项目记忆与工作日志，属于本地工具数据，不进版本库
 .workbuddy-ai/
+
+# ===== 开发工具包（本地嵌入，不进版本库）=====
+# MCP for Unity —— 让 AI 直接操作 Unity 编辑器的桥接包。
+# 因本机 git 无法直连 GitHub，改用本地嵌入方式安装。
+# 换机器时的恢复步骤见 docs/02-开发工具.md
+Packages/MCPForUnity/
