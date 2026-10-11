@@ -67,6 +67,20 @@ namespace NailongFNAF.Gameplay
             Level = Clamp(Level - drain, 0f, MaxLevel);
         }
 
+        /// <summary>
+        /// 直接扣掉指定百分点 —— 用于设备耗电之外的原因，比如奶龙偷电。
+        /// 与设备无关，因此不乘使用等级。
+        /// </summary>
+        public void DrainAmount(float percent)
+        {
+            if (percent <= 0f || IsDepleted)
+            {
+                return;
+            }
+
+            Level = Clamp(Level - percent, 0f, MaxLevel);
+        }
+
         private static int Clamp(int value, int min, int max)
         {
             if (value < min)

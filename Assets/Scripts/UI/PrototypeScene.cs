@@ -1,4 +1,6 @@
+using System.Text;
 using NailongFNAF.Core;
+using NailongFNAF.Gameplay;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -6,27 +8,30 @@ using UnityEngine.UI;
 namespace NailongFNAF.UI
 {
     /// <summary>
-    /// 占位原型：用纯代码生成的色块跑通一整夜，验证玩法流程。
+    /// 占位原型：用纯代码生成的色块跑通一整夜，验证玩法与敌人 AI。
     ///
     /// 这不是最终画面。等真素材按 docs/03-素材规格.md 的命名放进 Assets/Art 之后，
-    /// 把这里的色块换成对应图片即可，GameManager 那一层不用动。
+    /// 把这里的色块换成对应图片即可，GameManager / EnemyDirector 那一层不用动。
     ///
     /// 操作：
     ///   · 鼠标移到屏幕左右边缘 → 左右转头
     ///   · 底部按钮 → 开关左右门 / 灯，切换监控
+    ///   · 监控开着时按 1 / 2 / 3 → 切换机位
     ///   · R 键 → 重开一夜
+    ///   · [ / ] 键 → 上一夜 / 下一夜（调难度用）
     /// </summary>
     public class PrototypeScene : MonoBehaviour
     {
         /// <summary>鼠标进入屏幕两侧这个比例的范围内就转头。</summary>
         private const float EdgeZone = 0.08f;
 
-        private enum View
+        /// <summary>三个机位的显示名（大厅 / 左走廊 / 右走廊）。</summary>
+        private static readonly string[] CameraNames =
         {
-            Front,
-            Left,
-            Right
-        }
+            "CAM 1A    HALL",
+            "CAM 2A    LEFT HALL",
+            "CAM 3A    RIGHT HALL"
+        };
 
         private Canvas _canvas;
         private Image _background;
@@ -35,15 +40,23 @@ namespace NailongFNAF.UI
         private Text _powerText;
         private Text _timeText;
         private Text _statusText;
+        private Text _enemyText;
         private Text _hintText;
+        private Image _jumpscareOverlay;
+        private Text _jumpscareText;
         private Font _font;
 
-        private View _view = View.Front;
+        private EnemyDirector _enemyDirector;
+        private bool _hasJumpscare;
+        private EnemyId _jumpscareEnemy;
+
+        private ViewSide _view = ViewSide.Front;
 
         private void Awake()
         {
             EnsureGameManager();
             EnsureEventSystem();
+            EnsureEnemyDirector();
 
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_font == null)
@@ -52,6 +65,14 @@ namespace NailongFNAF.UI
             }
 
             BuildUi();
+        }
+
+        private void OnDestroy()
+        {
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.Attacked -= OnEnemyAttacked;
+            }
         }
 
         private void Update()
@@ -65,11 +86,16 @@ namespace NailongFNAF.UI
             if (Input.GetKeyDown(KeyCode.R))
             {
                 gm.Restart();
+                ClearJumpscare();
             }
 
-            UpdateView();
+            HandleNightKeys(gm);
+            HandleCameraKeys(gm);
+
+            UpdateView(gm);
             UpdateVisuals(gm);
             UpdateHud(gm);
+            UpdateJumpscareShake();
         }
 
         private static void EnsureGameManager()
@@ -91,26 +117,85 @@ namespace NailongFNAF.UI
             new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
         }
 
+        private void EnsureEnemyDirector()
+        {
+            _enemyDirector = FindObjectOfType<EnemyDirector>();
+            if (_enemyDirector == null)
+            {
+                var go = new GameObject("EnemyDirector");
+                _enemyDirector = go.AddComponent<EnemyDirector>();
+            }
+
+            _enemyDirector.Attacked += OnEnemyAttacked;
+        }
+
         // ---------------------------------------------------------------
         // 视角：鼠标靠边就转头
         // ---------------------------------------------------------------
 
-        private void UpdateView()
+        private void UpdateView(GameManager gm)
         {
             float width = Screen.width;
             float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
             if (x <= EdgeZone)
             {
-                _view = View.Left;
+                _view = ViewSide.Left;
             }
             else if (x >= 1f - EdgeZone)
             {
-                _view = View.Right;
+                _view = ViewSide.Right;
             }
             else
             {
-                _view = View.Front;
+                _view = ViewSide.Front;
+            }
+
+            gm.SetView(_view);
+        }
+
+        private void HandleCameraKeys(GameManager gm)
+        {
+            if (!gm.MonitorUp)
+            {
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.Alpha1))
+            {
+                gm.SetCamera(0);
+            }
+
+            if (Input.GetKeyDown(KeyCode.Alpha2))
+            {
+                gm.SetCamera(1);
+            }
+
+            if (Input.GetKeyDown(KeyCode.Alpha3))
+            {
+                gm.SetCamera(2);
+            }
+        }
+
+        private void HandleNightKeys(GameManager gm)
+        {
+            if (_enemyDirector == null)
+            {
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.LeftBracket))
+            {
+                _enemyDirector.SetNight(_enemyDirector.NightIndex - 1);
+                gm.Restart();
+                ClearJumpscare();
+            }
+
+            if (Input.GetKeyDown(KeyCode.RightBracket))
+            {
+                _enemyDirector.SetNight(_enemyDirector.NightIndex + 1);
+                gm.Restart();
+                ClearJumpscare();
             }
         }
 
@@ -123,7 +208,7 @@ namespace NailongFNAF.UI
             if (gm.MonitorUp)
             {
                 _monitorOverlay.gameObject.SetActive(true);
-                _monitorLabel.text = "CAM 1A    signal ok";
+                _monitorLabel.text = CameraName(gm.CurrentCameraIndex);
                 return;
             }
 
@@ -137,14 +222,14 @@ namespace NailongFNAF.UI
 
             switch (_view)
             {
-                case View.Left:
+                case ViewSide.Left:
                     // 关门时画面压暗，一眼能看出门是关着的
                     _background.color = gm.LeftDoorClosed
                         ? new Color(0.06f, 0.09f, 0.22f)
                         : new Color(0.18f, 0.30f, 0.58f);
                     break;
 
-                case View.Right:
+                case ViewSide.Right:
                     _background.color = gm.RightDoorClosed
                         ? new Color(0.05f, 0.16f, 0.09f)
                         : new Color(0.18f, 0.48f, 0.28f);
@@ -156,6 +241,52 @@ namespace NailongFNAF.UI
             }
         }
 
+        private static string CameraName(int index)
+        {
+            if (index < 0 || index >= CameraNames.Length)
+            {
+                return "CAM --";
+            }
+
+            return CameraNames[index];
+        }
+
+        // ---------------------------------------------------------------
+        // 跳杀（占位：全屏红 + 大字抖动。等 mp4 就绪后换成 VideoPlayer）
+        // ---------------------------------------------------------------
+
+        private void OnEnemyAttacked(EnemyId id)
+        {
+            _hasJumpscare = true;
+            _jumpscareEnemy = id;
+
+            _jumpscareOverlay.gameObject.SetActive(true);
+            _jumpscareText.text = "JUMPSCARE\n" + id.Code().ToUpperInvariant();
+            _jumpscareText.rectTransform.anchoredPosition = Vector2.zero;
+        }
+
+        private void ClearJumpscare()
+        {
+            _hasJumpscare = false;
+            _jumpscareOverlay.gameObject.SetActive(false);
+        }
+
+        private void UpdateJumpscareShake()
+        {
+            if (!_hasJumpscare)
+            {
+                return;
+            }
+
+            float t = Time.time;
+            float x = Mathf.Sin(t * 42f) * 14f;
+            float y = Mathf.Cos(t * 35f) * 10f;
+            _jumpscareText.rectTransform.anchoredPosition = new Vector2(x, y);
+
+            float pulse = 0.5f + 0.5f * Mathf.Abs(Mathf.Sin(t * 8f));
+            _jumpscareOverlay.color = new Color(0.45f + 0.45f * pulse, 0.02f, 0.05f);
+        }
+
         // ---------------------------------------------------------------
         // HUD
         // ---------------------------------------------------------------
@@ -165,6 +296,7 @@ namespace NailongFNAF.UI
             _powerText.text = "POWER " + Mathf.CeilToInt(gm.Power.Level) + "%";
             _timeText.text = FormatHour(gm.Clock.CurrentHour);
             _statusText.text = BuildStatus(gm);
+            _enemyText.text = BuildEnemyStatus();
             _hintText.text = BuildHint(gm);
         }
 
@@ -181,8 +313,86 @@ namespace NailongFNAF.UI
                  + "    LIGHT R " + (gm.RightLightOn ? "ON" : "OFF");
         }
 
-        private static string BuildHint(GameManager gm)
+        private string BuildEnemyStatus()
         {
+            if (_enemyDirector == null)
+            {
+                return string.Empty;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append("NIGHT ").Append(_enemyDirector.NightIndex + 1).Append("    ");
+
+            foreach (var id in EnemyIds.All)
+            {
+                var brain = _enemyDirector.GetBrain(id);
+                if (brain == null)
+                {
+                    continue;
+                }
+
+                sb.Append(id.Code().ToUpperInvariant())
+                  .Append(" ")
+                  .Append(DescribeBrain(brain))
+                  .Append(" (")
+                  .Append(brain.ActivityLevel)
+                  .Append(")    ");
+            }
+
+            return sb.ToString();
+        }
+
+        private static string DescribeBrain(EnemyBrain brain)
+        {
+            var door = brain as DoorEnemyBrain;
+            if (door != null)
+            {
+                switch (door.Stage)
+                {
+                    case 0:
+                        return "AWAY";
+                    case 1:
+                        return "CORRIDOR";
+                    default:
+                        return "AT DOOR";
+                }
+            }
+
+            var lulu = brain as LuluBrain;
+            if (lulu != null)
+            {
+                switch (lulu.Stage)
+                {
+                    case 0:
+                        return "AWAY";
+                    case 1:
+                        return "CORRIDOR";
+                    default:
+                        return "OUTSIDE " + lulu.Side.ToString().ToUpperInvariant();
+                }
+            }
+
+            var nailong = brain as NailongBrain;
+            if (nailong != null)
+            {
+                return "CAM " + (nailong.CameraIndex + 1);
+            }
+
+            return "-";
+        }
+
+        private string BuildHint(GameManager gm)
+        {
+            if (_hasJumpscare)
+            {
+                return "CAUGHT BY " + _jumpscareEnemy.Code().ToUpperInvariant() + "    |    R to restart";
+            }
+
+            if (gm.HasBeenCaught)
+            {
+                return "CAUGHT    |    R to restart";
+            }
+
             if (gm.HasSurvived)
             {
                 return "6 AM    YOU SURVIVED";
@@ -193,7 +403,7 @@ namespace NailongFNAF.UI
                 return "POWER OUT";
             }
 
-            return "Move the mouse to the screen edges to look around    |    R to restart";
+            return "Mouse to edges to look around    |    1/2/3 to switch camera    |    R restart    |    [ ] change night";
         }
 
         // ---------------------------------------------------------------
@@ -215,6 +425,7 @@ namespace NailongFNAF.UI
 
             BuildButtons();
             BuildHud();
+            BuildJumpscareLayer();
         }
 
         private Canvas GetOrCreateCanvas()
@@ -299,11 +510,27 @@ namespace NailongFNAF.UI
 
             _statusText = MakeText(hud.transform, "StatusText", string.Empty,
                 TextAnchor.LowerLeft, 24, new Color(0.75f, 0.75f, 0.82f));
-            PlaceBottomLeft(_statusText.rectTransform, 40f, 150f, 1200f, 40f);
+            PlaceBottomLeft(_statusText.rectTransform, 40f, 150f, 1500f, 40f);
+
+            _enemyText = MakeText(hud.transform, "EnemyText", string.Empty,
+                TextAnchor.LowerLeft, 22, new Color(0.86f, 0.68f, 0.72f));
+            PlaceBottomLeft(_enemyText.rectTransform, 40f, 196f, 1800f, 40f);
 
             _hintText = MakeText(hud.transform, "HintText", string.Empty,
                 TextAnchor.LowerCenter, 26, new Color(0.86f, 0.86f, 0.62f));
-            PlaceBottomCenter(_hintText.rectTransform, 0f, 12f, 1500f, 40f);
+            PlaceBottomCenter(_hintText.rectTransform, 0f, 12f, 1700f, 40f);
+        }
+
+        private void BuildJumpscareLayer()
+        {
+            _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", new Color(0.6f, 0.02f, 0.05f));
+            _jumpscareOverlay.transform.SetAsLastSibling();
+
+            _jumpscareText = MakeText(_jumpscareOverlay.transform, "JumpscareText", string.Empty,
+                TextAnchor.MiddleCenter, 120, Color.white);
+            StretchToParent(_jumpscareText.rectTransform);
+
+            _jumpscareOverlay.gameObject.SetActive(false);
         }
 
         // ---------------------------------------------------------------

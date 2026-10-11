@@ -18,7 +18,8 @@
 - 多个敌人各有独立 AI，在建筑内游走；逼近门口时构成威胁
 - 撑过五夜（含隐藏夜）通关
 
-> ⚠️ 具体数值、敌人设定、美术风格**尚未拍板**，待确认清单见 `README.md`。
+> ✅ **设计已定稿**，见 `docs/04-设计决策.md` —— 玩法、四个敌人、流程、跳杀方式都在那里。**写代码前先读它。**
+> 素材规格见 `docs/03-素材规格.md`。
 
 ## 二、技术栈（已锁定，不要擅自更换）
 
@@ -51,6 +52,7 @@
 | `Assets/Audio/BGM/` | 背景音乐 |
 | `Assets/Audio/SFX/` | 音效（关门、开灯、脚步、尖叫） |
 | `Assets/Audio/Ambient/` | 环境音（风扇、电流嗡鸣） |
+| `Assets/Video/Jumpscares/` | 跳杀视频（每个敌人一条 mp4） |
 | `Assets/Editor/` | 编辑器扩展脚本（打包后不进入游戏） |
 | `Assets/Tests/EditMode/` | 纯逻辑的单元测试，在 Test Runner 里跑 |
 | `Assets/Prefabs/` | 预制体 |
@@ -79,6 +81,9 @@
   - `char_nailong_idle.png`
   - `ui_btn_door_close.png`
 - 音频：`sfx_door_close.ogg` / `amb_fan_loop.ogg` / `bgm_menu.ogg`
+- 视频：`char_<角色名>_jumpscare.mp4`（如 `char_nailong_jumpscare.mp4`）
+- **四个角色的代号固定为**：`nailong`（奶龙）/ `niulai`（牛来）/ `daishu`（袋鼠）/ `lulu`（噜噜）。
+  文件名和代码里的枚举名都用这套，别用别的拼法
 
 ## 五、架构模式：静态场景 + 热点
 

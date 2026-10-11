@@ -1,3 +1,4 @@
+using System;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 
@@ -12,6 +13,9 @@ namespace NailongFNAF.Core
     public class GameManager : MonoBehaviour
     {
         public static GameManager Instance { get; private set; }
+
+        /// <summary>重开一夜时触发（R 键、换夜都走这里）。敌人 AI 订阅它来复位。</summary>
+        public event Action Restarted;
 
         [Header("节奏")]
         [Tooltip("每游戏小时对应的真实秒数。85 秒 → 一整夜约 8 分 30 秒。")]
@@ -29,6 +33,12 @@ namespace NailongFNAF.Core
         public bool RightLightOn { get; private set; }
         public bool MonitorUp { get; private set; }
 
+        /// <summary>玩家当前看向哪边，由视角控制脚本每帧写入。</summary>
+        public ViewSide CurrentView { get; private set; }
+
+        /// <summary>监控当前看着第几个机位（0 起）。</summary>
+        public int CurrentCameraIndex { get; private set; }
+
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
         {
@@ -39,6 +49,15 @@ namespace NailongFNAF.Core
         public bool HasPowerOut
         {
             get { return Power != null && Power.IsDepleted; }
+        }
+
+        /// <summary>是否已经被敌人抓到（走跳杀流程，时间与电量停止推进）。</summary>
+        public bool HasBeenCaught { get; private set; }
+
+        /// <summary>被敌人抓到，冻结本夜。</summary>
+        public void MarkCaught()
+        {
+            HasBeenCaught = true;
         }
 
         private void Awake()
@@ -63,7 +82,7 @@ namespace NailongFNAF.Core
 
         private void Update()
         {
-            if (Clock.IsNightComplete)
+            if (Clock.IsNightComplete || HasBeenCaught)
             {
                 return;
             }
@@ -86,6 +105,42 @@ namespace NailongFNAF.Core
             LeftLightOn = false;
             RightLightOn = false;
             MonitorUp = false;
+
+            CurrentView = ViewSide.Front;
+            CurrentCameraIndex = 0;
+            HasBeenCaught = false;
+
+            if (Restarted != null)
+            {
+                Restarted();
+            }
+        }
+
+        /// <summary>视角控制脚本每帧调用，写入玩家当前看向哪边。</summary>
+        public void SetView(ViewSide view)
+        {
+            CurrentView = view;
+        }
+
+        /// <summary>切换到指定监控机位（0 起，超出范围忽略）。</summary>
+        public void SetCamera(int index)
+        {
+            if (index >= 0)
+            {
+                CurrentCameraIndex = index;
+            }
+        }
+
+        /// <summary>按机位数量循环切换监控（供「下一个机位」按钮用）。</summary>
+        public void CycleCamera(int cameraCount)
+        {
+            if (cameraCount <= 1)
+            {
+                CurrentCameraIndex = 0;
+                return;
+            }
+
+            CurrentCameraIndex = (CurrentCameraIndex + 1) % cameraCount;
         }
 
         // ---------------- 操作入口（由 UI 按钮调用）----------------
@@ -130,10 +185,10 @@ namespace NailongFNAF.Core
             }
         }
 
-        /// <summary>断电或天亮之后，玩家不能再操作设备。</summary>
+        /// <summary>断电、天亮或被抓到之后，玩家不能再操作设备。</summary>
         private bool CanOperate()
         {
-            return !HasPowerOut && !HasSurvived;
+            return !HasPowerOut && !HasSurvived && !HasBeenCaught;
         }
 
         /// <summary>
