@@ -1,4 +1,5 @@
 using System.Text;
+using NailongFNAF.Audio;
 using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
@@ -33,8 +34,19 @@ namespace NailongFNAF.UI
             "CAM 3A    RIGHT HALL"
         };
 
+        [Header("素材（留空则用色块占位）")]
+        [SerializeField] private Sprite _bgFront;
+        [SerializeField] private Sprite _bgLeft;
+        [SerializeField] private Sprite _bgRight;
+        [SerializeField] private Sprite _doorLeftOpen;
+        [SerializeField] private Sprite _doorLeftClosed;
+        [SerializeField] private Sprite _doorRightOpen;
+        [SerializeField] private Sprite _doorRightClosed;
+
         private Canvas _canvas;
         private Image _background;
+        private Image _doorLeft;
+        private Image _doorRight;
         private Image _monitorOverlay;
         private Text _monitorLabel;
         private Text _powerText;
@@ -45,10 +57,14 @@ namespace NailongFNAF.UI
         private Image _jumpscareOverlay;
         private Text _jumpscareText;
         private Font _font;
+        private Sprite _solidSprite;
 
         private EnemyDirector _enemyDirector;
+        private AudioManager _audio;
         private bool _hasJumpscare;
         private EnemyId _jumpscareEnemy;
+        private bool _wasPowerOut;
+        private float _footstepTimer;
 
         private ViewSide _view = ViewSide.Front;
 
@@ -57,6 +73,7 @@ namespace NailongFNAF.UI
             EnsureGameManager();
             EnsureEventSystem();
             EnsureEnemyDirector();
+            EnsureAudioManager();
 
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_font == null)
@@ -96,6 +113,7 @@ namespace NailongFNAF.UI
             UpdateVisuals(gm);
             UpdateHud(gm);
             UpdateJumpscareShake();
+            UpdateAudio(gm);
         }
 
         private static void EnsureGameManager()
@@ -127,6 +145,16 @@ namespace NailongFNAF.UI
             }
 
             _enemyDirector.Attacked += OnEnemyAttacked;
+        }
+
+        private void EnsureAudioManager()
+        {
+            _audio = FindObjectOfType<AudioManager>();
+            if (_audio == null)
+            {
+                var go = new GameObject("AudioManager");
+                _audio = go.AddComponent<AudioManager>();
+            }
         }
 
         // ---------------------------------------------------------------
@@ -161,6 +189,8 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            int before = gm.CurrentCameraIndex;
+
             if (Input.GetKeyDown(KeyCode.Alpha1))
             {
                 gm.SetCamera(0);
@@ -174,6 +204,11 @@ namespace NailongFNAF.UI
             if (Input.GetKeyDown(KeyCode.Alpha3))
             {
                 gm.SetCamera(2);
+            }
+
+            if (_audio != null && gm.CurrentCameraIndex != before)
+            {
+                _audio.PlayCameraSwitch();
             }
         }
 
@@ -216,14 +251,55 @@ namespace NailongFNAF.UI
 
             if (gm.HasPowerOut)
             {
+                _background.sprite = _solidSprite;
                 _background.color = Color.black;
+                HideDoors();
                 return;
             }
+
+            ApplyBackground(gm);
+
+            if (_hasJumpscare)
+            {
+                HideDoors();
+                return;
+            }
+
+            SetDoorSprites(gm.LeftDoorClosed, gm.RightDoorClosed);
+        }
+
+        private void ApplyBackground(GameManager gm)
+        {
+            Sprite sprite = null;
 
             switch (_view)
             {
                 case ViewSide.Left:
-                    // 关门时画面压暗，一眼能看出门是关着的
+                    sprite = _bgLeft;
+                    break;
+
+                case ViewSide.Right:
+                    sprite = _bgRight;
+                    break;
+
+                default:
+                    sprite = _bgFront;
+                    break;
+            }
+
+            if (sprite != null)
+            {
+                _background.sprite = sprite;
+                _background.color = Color.white;
+                return;
+            }
+
+            // 没素材就用色块兜底
+            _background.sprite = _solidSprite;
+
+            switch (_view)
+            {
+                case ViewSide.Left:
                     _background.color = gm.LeftDoorClosed
                         ? new Color(0.06f, 0.09f, 0.22f)
                         : new Color(0.18f, 0.30f, 0.58f);
@@ -239,6 +315,27 @@ namespace NailongFNAF.UI
                     _background.color = new Color(0.20f, 0.20f, 0.23f);
                     break;
             }
+        }
+
+        private void HideDoors()
+        {
+            _doorLeft.gameObject.SetActive(false);
+            _doorRight.gameObject.SetActive(false);
+        }
+
+        /// <summary>门片：只在对应视角显示，素材缺失就隐藏（不会露出白块）。</summary>
+        private void SetDoorSprites(bool leftClosed, bool rightClosed)
+        {
+            Sprite left = leftClosed ? _doorLeftClosed : _doorLeftOpen;
+            Sprite right = rightClosed ? _doorRightClosed : _doorRightOpen;
+
+            _doorLeft.gameObject.SetActive(left != null && _view == ViewSide.Left);
+            _doorLeft.sprite = left;
+            _doorLeft.color = Color.white;
+
+            _doorRight.gameObject.SetActive(right != null && _view == ViewSide.Right);
+            _doorRight.sprite = right;
+            _doorRight.color = Color.white;
         }
 
         private static string CameraName(int index)
@@ -285,6 +382,72 @@ namespace NailongFNAF.UI
 
             float pulse = 0.5f + 0.5f * Mathf.Abs(Mathf.Sin(t * 8f));
             _jumpscareOverlay.color = new Color(0.45f + 0.45f * pulse, 0.02f, 0.05f);
+        }
+
+        // ---------------------------------------------------------------
+        // 音频：脚步与断电
+        // ---------------------------------------------------------------
+
+        private void UpdateAudio(GameManager gm)
+        {
+            if (_audio == null)
+            {
+                return;
+            }
+
+            if (gm.HasPowerOut)
+            {
+                if (!_wasPowerOut)
+                {
+                    _audio.PlayPowerOut();
+                }
+
+                _wasPowerOut = true;
+                return;
+            }
+
+            _wasPowerOut = false;
+
+            if (gm.HasBeenCaught || _enemyDirector == null || !AnyEnemyNearby())
+            {
+                _footstepTimer = 0f;
+                return;
+            }
+
+            // 有敌人在走廊或更近的位置 —— 按不规则的间隔传出脚步
+            _footstepTimer -= Time.deltaTime;
+            if (_footstepTimer <= 0f)
+            {
+                _audio.PlayFootstep();
+                _footstepTimer = Random.Range(0.7f, 1.5f);
+            }
+        }
+
+        private bool AnyEnemyNearby()
+        {
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                if (brain.Stage >= 1)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景与门片。</summary>
+        public void SetArtwork(Sprite bgFront, Sprite bgLeft, Sprite bgRight,
+            Sprite doorLeftOpen, Sprite doorLeftClosed,
+            Sprite doorRightOpen, Sprite doorRightClosed)
+        {
+            _bgFront = bgFront;
+            _bgLeft = bgLeft;
+            _bgRight = bgRight;
+            _doorLeftOpen = doorLeftOpen;
+            _doorLeftClosed = doorLeftClosed;
+            _doorRightOpen = doorRightOpen;
+            _doorRightClosed = doorRightClosed;
         }
 
         // ---------------------------------------------------------------
@@ -413,8 +576,16 @@ namespace NailongFNAF.UI
         private void BuildUi()
         {
             _canvas = GetOrCreateCanvas();
+            _solidSprite = MakeSolidSprite();
 
             _background = MakeFullScreenImage("Background", new Color(0.20f, 0.20f, 0.23f));
+
+            // 门片夹在背景与监控之间
+            _doorLeft = MakeFullScreenImage("DoorLeft", Color.white);
+            _doorLeft.gameObject.SetActive(false);
+
+            _doorRight = MakeFullScreenImage("DoorRight", Color.white);
+            _doorRight.gameObject.SetActive(false);
 
             // 监控层压在背景之上、按钮之下 —— 看监控时仍然能关门
             _monitorOverlay = MakeFullScreenImage("MonitorOverlay", new Color(0.04f, 0.05f, 0.06f));
@@ -471,27 +642,62 @@ namespace NailongFNAF.UI
 
         private void OnDoorLeft()
         {
-            GameManager.Instance.ToggleLeftDoor();
+            var gm = GameManager.Instance;
+            bool before = gm.LeftDoorClosed;
+            gm.ToggleLeftDoor();
+
+            if (_audio != null && gm.LeftDoorClosed != before)
+            {
+                _audio.PlayDoor(gm.LeftDoorClosed);
+            }
         }
 
         private void OnDoorRight()
         {
-            GameManager.Instance.ToggleRightDoor();
+            var gm = GameManager.Instance;
+            bool before = gm.RightDoorClosed;
+            gm.ToggleRightDoor();
+
+            if (_audio != null && gm.RightDoorClosed != before)
+            {
+                _audio.PlayDoor(gm.RightDoorClosed);
+            }
         }
 
         private void OnLightLeft()
         {
-            GameManager.Instance.ToggleLeftLight();
+            var gm = GameManager.Instance;
+            bool before = gm.LeftLightOn;
+            gm.ToggleLeftLight();
+
+            if (_audio != null && gm.LeftLightOn != before)
+            {
+                _audio.PlayLight(gm.LeftLightOn);
+            }
         }
 
         private void OnLightRight()
         {
-            GameManager.Instance.ToggleRightLight();
+            var gm = GameManager.Instance;
+            bool before = gm.RightLightOn;
+            gm.ToggleRightLight();
+
+            if (_audio != null && gm.RightLightOn != before)
+            {
+                _audio.PlayLight(gm.RightLightOn);
+            }
         }
 
         private void OnMonitor()
         {
-            GameManager.Instance.ToggleMonitor();
+            var gm = GameManager.Instance;
+            bool before = gm.MonitorUp;
+            gm.ToggleMonitor();
+
+            if (_audio != null && gm.MonitorUp != before)
+            {
+                _audio.PlayCameraSwitch();
+            }
         }
 
         private void BuildHud()
@@ -545,7 +751,7 @@ namespace NailongFNAF.UI
             StretchToParent(go.GetComponent<RectTransform>());
 
             var image = go.GetComponent<Image>();
-            image.sprite = MakeSolidSprite();
+            image.sprite = _solidSprite != null ? _solidSprite : MakeSolidSprite();
             image.color = color;
             image.raycastTarget = false;
 

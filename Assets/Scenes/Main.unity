@@ -282,6 +282,61 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &762128215
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 762128217}
+  - component: {fileID: 762128216}
+  m_Layer: 0
+  m_Name: AudioManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &762128216
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 762128215}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7422c29da26ffa340abec78088315160, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _ambFan: {fileID: 8300000, guid: e94dcd56a4ad4c44183a1f5d8ab0570f, type: 3}
+  _ambHum: {fileID: 8300000, guid: 21ee4e9a9886f5c45af86b8e38adbf41, type: 3}
+  _sfxDoorClose: {fileID: 8300000, guid: adb9d0424be5f98488e923a3402e39a3, type: 3}
+  _sfxDoorOpen: {fileID: 8300000, guid: 6548ee1057a62184792840caa8cecc23, type: 3}
+  _sfxLightOn: {fileID: 8300000, guid: 4df31a160cdbc9541883c7b153c6264f, type: 3}
+  _sfxLightOff: {fileID: 8300000, guid: 85e4cebc1ff133c429cf12a4b9afc1f3, type: 3}
+  _sfxCameraSwitch: {fileID: 8300000, guid: 2cd1bd0533d000542adeca6773f52b71, type: 3}
+  _sfxFootstep: {fileID: 8300000, guid: 60c5db299dbe95e449401f294719e97b, type: 3}
+  _sfxPowerOut: {fileID: 8300000, guid: e93d27b4e029a1f41a671154f758dacc, type: 3}
+  _ambientVolume: 0.3
+  _sfxVolume: 0.75
+--- !u!4 &762128217
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 762128215}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &889260265
 GameObject:
   m_ObjectHideFlags: 0
@@ -412,6 +467,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 35b606220086e714ca1b603060e3c228, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  _bgFront: {fileID: 21300000, guid: c216b973e51053242b380a309da4629f, type: 3}
+  _bgLeft: {fileID: 21300000, guid: 6411bab421da330489e3b92a4b457c54, type: 3}
+  _bgRight: {fileID: 21300000, guid: 5201cbbdcc9fe494e928d1f1737285e7, type: 3}
+  _doorLeftOpen: {fileID: 21300000, guid: 24e08c88fc30f2a4db81627b9f2e736e, type: 3}
+  _doorLeftClosed: {fileID: 21300000, guid: 9551c30ada4d78e4d8ab49026e065acb, type: 3}
+  _doorRightOpen: {fileID: 21300000, guid: 033dd42c080fcea4886e06013049813a, type: 3}
+  _doorRightClosed: {fileID: 21300000, guid: b16c5d288ad9cef408c218ad736de379, type: 3}
 --- !u!4 &2125327511
 Transform:
   m_ObjectHideFlags: 0
@@ -435,3 +497,4 @@ SceneRoots:
   - {fileID: 889260269}
   - {fileID: 644532098}
   - {fileID: 2125327511}
+  - {fileID: 762128217}
