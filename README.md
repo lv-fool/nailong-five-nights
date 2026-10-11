@@ -1,6 +1,6 @@
 # 奶龙的五夜后宫
 
-一款 FNAF（Five Nights at Freddy's）式的第一人称生存恐怖游戏。Unity 6.3 LTS + C#。
+一款 FNAF（Five Nights at Freddy's）式的第一人称生存恐怖游戏。Unity 2022.3 LTS + C#。
 
 ## 现在到哪一步了
 
@@ -14,8 +14,8 @@
 
 ## 开始之前
 
-本机**还没装 Unity**。先照 `docs/01-环境搭建.md` 装好 Unity Hub 和 Unity 6.3 LTS，
-再用 Hub 打开本目录。打开后菜单栏会出现「奶龙」，依次跑三个命令即可。
+Unity Hub 已装好（中国版 3.3.6），编辑器装 **2022.3.6f3c1**，细节见 `docs/01-环境搭建.md`。
+用 Hub 打开本目录后，菜单栏会出现「奶龙」，依次跑三个命令即可。
 
 ## 文档
 

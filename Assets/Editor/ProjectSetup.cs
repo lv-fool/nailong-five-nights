@@ -150,7 +150,7 @@ namespace NailongFNAF.EditorTools
         }
 
         /// <summary>
-        /// 挂输入模块。Unity 6 可能用新的 Input System，也可能用旧的 Input Manager，
+        /// 挂输入模块。项目可能用旧的 Input Manager，也可能装了新的 Input System，
         /// 这里动态判断，两种情况下都能跑起来。
         /// </summary>
         private static void AddInputModule(GameObject go)
