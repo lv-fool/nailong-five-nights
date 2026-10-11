@@ -1,0 +1,34 @@
+# Unity 项目的换行符规范
+# 文本文件统一用 LF，避免跨平台协作时 YAML 资产文件被反复改写
+* text=auto eol=lf
+
+# C# 与 Shader
+*.cs      text diff=csharp
+*.shader  text
+*.cginc   text
+*.hlsl    text
+
+# Unity 资产文件（YAML 文本）
+*.unity   text
+*.prefab  text
+*.asset   text
+*.meta    text
+*.mat     text
+*.controller text
+*.anim    text
+*.json    text
+*.md      text
+
+# 二进制资源
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.psd     binary
+*.tga     binary
+*.wav     binary
+*.mp3     binary
+*.ogg     binary
+*.ttf     binary
+*.otf     binary
+*.fbx     binary
+*.blend   binary

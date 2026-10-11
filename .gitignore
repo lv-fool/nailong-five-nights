@@ -1,0 +1,57 @@
+# ===== Unity 标准忽略规则 =====
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# 自动生成的工程文件
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# 构建产物
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# Unity 崩溃报告
+sysinfo.txt
+crashlytics-build.properties
+
+# Addressables
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+.vs/
+.vscode/
+.idea/
+
+# ===== 本地临时文件 =====
+*.bak
+*.orig
+*~
+
+# ===== AI 工具本地数据 =====
+# 项目记忆与工作日志，属于本地工具数据，不进版本库
+.workbuddy-ai/
