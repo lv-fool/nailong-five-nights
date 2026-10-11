@@ -24,7 +24,7 @@
 
 | 项 | 选择 | 说明 |
 |---|---|---|
-| 引擎 | **Unity 2022.3 LTS**（`2022.3.6f3c1`） | 版本记录在 `ProjectSettings/ProjectVersion.txt` |
+| 引擎 | **Unity 2022.3 LTS**（`2022.3.62f3c1`） | 版本记录在 `ProjectSettings/ProjectVersion.txt` |
 | 语言 | C# | 不引入第三方游戏框架 |
 | 渲染管线 | **Built-in** | 见下方说明 |
 | 画面方案 | **2D 静态场景 + 热点交互** | 最贴近 FNAF 原作 |
