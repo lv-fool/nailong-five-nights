@@ -279,6 +279,63 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
+        public void 奶龙_刚被看到不会立刻闪走()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            int original = brain.CameraIndex;
+
+            var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, original);
+            brain.Tick(0.3f, ctx);
+
+            Assert.IsTrue(brain.IsBeingWatched);
+            Assert.AreEqual(original, brain.CameraIndex);
+            Assert.AreEqual(0, brain.RelocateCount);
+            Assert.AreEqual(0f, brain.ConsumePendingDrain(), Tolerance);
+        }
+
+        [Test]
+        public void 奶龙_被盯着够久才换位()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            int original = brain.CameraIndex;
+
+            var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, original);
+
+            brain.Tick(0.3f, ctx);
+            Assert.AreEqual(original, brain.CameraIndex);
+
+            brain.Tick(NailongBrain.DefaultRevealSeconds, ctx);
+
+            Assert.IsFalse(brain.IsBeingWatched);
+            Assert.AreNotEqual(original, brain.CameraIndex);
+            Assert.AreEqual(1, brain.RelocateCount);
+        }
+
+        [Test]
+        public void 奶龙_视线移开后要重新计时()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            int original = brain.CameraIndex;
+            int other = (original + 1) % 3;
+
+            var watching = new EnemyContext(false, false, false, false, true, ViewSide.Front, original);
+            var away = new EnemyContext(false, false, false, false, true, ViewSide.Front, other);
+
+            brain.Tick(0.5f, watching);
+            Assert.IsTrue(brain.IsBeingWatched);
+
+            brain.Tick(0.1f, away);
+            Assert.IsFalse(brain.IsBeingWatched);
+            Assert.AreEqual(0f, brain.RevealTimer, Tolerance);
+
+            // 再切回来看，得从头数够
+            brain.Tick(0.5f, watching);
+
+            Assert.AreEqual(original, brain.CameraIndex);
+            Assert.AreEqual(0, brain.RelocateCount);
+        }
+
+        [Test]
         public void 奶龙_看的是别的机位则继续偷电()
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);

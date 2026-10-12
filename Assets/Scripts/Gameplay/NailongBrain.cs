@@ -18,6 +18,12 @@ namespace NailongFNAF.Gameplay
         /// <summary>每偷一次扣多少电量（百分点）。</summary>
         public const float DefaultStealPercentPerTick = 1f;
 
+        /// <summary>
+        /// 被监控照到之后，它会在原地愣这么久才换位。
+        /// 纯粹是给玩家看清它的时间 —— 否则一帧就闪走，等于没看见。
+        /// </summary>
+        public const float DefaultRevealSeconds = 1.2f;
+
         /// <summary>它现在蹲在第几个机位（0 起）。</summary>
         public int CameraIndex { get; private set; }
 
@@ -26,6 +32,13 @@ namespace NailongFNAF.Gameplay
 
         public float StealIntervalSeconds { get; private set; }
         public float StealPercentPerTick { get; private set; }
+        public float RevealSeconds { get; private set; }
+
+        /// <summary>正被玩家从监控里看着。</summary>
+        public bool IsBeingWatched { get; private set; }
+
+        /// <summary>已经被看了多久（秒）。</summary>
+        public float RevealTimer { get; private set; }
 
         /// <summary>被看到而换位的次数，供调试显示。</summary>
         public int RelocateCount { get; private set; }
@@ -41,6 +54,14 @@ namespace NailongFNAF.Gameplay
 
         public NailongBrain(int activityLevel, IRandomSource rng, int cameraCount,
             float moveIntervalSeconds, float stealIntervalSeconds, float stealPercentPerTick)
+            : this(activityLevel, rng, cameraCount, moveIntervalSeconds,
+                stealIntervalSeconds, stealPercentPerTick, DefaultRevealSeconds)
+        {
+        }
+
+        public NailongBrain(int activityLevel, IRandomSource rng, int cameraCount,
+            float moveIntervalSeconds, float stealIntervalSeconds, float stealPercentPerTick,
+            float revealSeconds)
             : base(EnemyId.Nailong, activityLevel, rng, moveIntervalSeconds)
         {
             CameraCount = cameraCount < 1 ? 1 : cameraCount;
@@ -51,6 +72,7 @@ namespace NailongFNAF.Gameplay
             StealPercentPerTick = stealPercentPerTick > 0f
                 ? stealPercentPerTick
                 : DefaultStealPercentPerTick;
+            RevealSeconds = revealSeconds > 0f ? revealSeconds : DefaultRevealSeconds;
         }
 
         /// <summary>奶龙不走路，永远不推进位置。</summary>
@@ -65,12 +87,24 @@ namespace NailongFNAF.Gameplay
 
         protected override void OnTick(float dt, EnemyContext ctx)
         {
-            // 被监控看到 → 停手 + 换位
+            // 监控正停在他这一格 → 现形、停手
             if (ctx.MonitorUp && ctx.CameraIndex == CameraIndex)
             {
-                Relocate();
+                IsBeingWatched = true;
+                RevealTimer += dt;
+
+                if (RevealTimer >= RevealSeconds)
+                {
+                    IsBeingWatched = false;
+                    RevealTimer = 0f;
+                    Relocate();
+                }
+
                 return;
             }
+
+            IsBeingWatched = false;
+            RevealTimer = 0f;
 
             _stealTimer += dt;
 
@@ -99,6 +133,8 @@ namespace NailongFNAF.Gameplay
 
             CameraIndex = index;
             _stealTimer = 0f;
+            RevealTimer = 0f;
+            IsBeingWatched = false;
         }
 
         private void Relocate()

@@ -478,6 +478,11 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   - {fileID: 0}
+  _characters:
+  - Id: 3
+    Idle: {fileID: 21300000, guid: e0d62dcfd5b3c964eb6da24ec3ea934d, type: 3}
+    Stare: {fileID: 21300000, guid: 25adaa5a4fc21914b8e1219ec276a474, type: 3}
+    Jumpscare: {fileID: 21300000, guid: feafbfdb1de2c934cb4917e3bf5d0ad1, type: 3}
 --- !u!4 &2125327511
 Transform:
   m_ObjectHideFlags: 0

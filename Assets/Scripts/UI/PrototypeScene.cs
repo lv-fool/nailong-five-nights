@@ -23,8 +23,27 @@ namespace NailongFNAF.UI
     /// </summary>
     public class PrototypeScene : MonoBehaviour
     {
+        /// <summary>一个角色的三张立绘。缺哪张哪张留空，运行时退回色块占位。</summary>
+        [System.Serializable]
+        public class CharacterArt
+        {
+            public EnemyId Id;
+            public Sprite Idle;
+            public Sprite Stare;
+            public Sprite Jumpscare;
+        }
+
         /// <summary>鼠标进入屏幕左右各这个比例就转头（左右各三分之一）。</summary>
         private const float TurnZone = 1f / 3f;
+
+        /// <summary>门口立绘的高度（UI 参考分辨率下的像素）。</summary>
+        private const float SideCharacterHeight = 940f;
+
+        /// <summary>监控画面里立绘的高度。</summary>
+        private const float MonitorCharacterHeight = 660f;
+
+        /// <summary>跳杀立绘按这个宽度铺满屏幕（UI 参考分辨率）。</summary>
+        private const float JumpscareWidth = 1920f;
 
         /// <summary>转头平滑时间（秒）。越大越慢、越"重"。</summary>
         private const float TurnSmoothTime = 0.12f;
@@ -75,10 +94,15 @@ namespace NailongFNAF.UI
         [SerializeField] private Sprite _doorRightClosed;
         [SerializeField] private Sprite[] _monitorFrames;
 
+        [Header("角色立绘（缺哪张哪张退回色块）")]
+        [SerializeField] private CharacterArt[] _characters;
+
         private Canvas _canvas;
         private Image _bgFrontImage;
         private Image _bgLeftImage;
         private Image _bgRightImage;
+        private Image _sideLeftCharacter;
+        private Image _sideRightCharacter;
         private Image _doorLeft;
         private Image _doorRight;
         private CanvasGroup _leftWallGroup;
@@ -88,6 +112,7 @@ namespace NailongFNAF.UI
         private Image _lightLeftButton;
         private Image _lightRightButton;
         private Image _monitorOverlay;
+        private Image _monitorCharacter;
         private CanvasGroup _monitorMapGroup;
         private Text _monitorLabel;
         private Image[] _camBoxes;
@@ -98,6 +123,7 @@ namespace NailongFNAF.UI
         private CanvasGroup _debugGroup;
         private Text _debugText;
         private Image _jumpscareOverlay;
+        private Image _jumpscareImage;
         private Text _jumpscareText;
         private Font _font;
         private Sprite _solidSprite;
@@ -106,6 +132,7 @@ namespace NailongFNAF.UI
         private AudioManager _audio;
         private bool _hasJumpscare;
         private EnemyId _jumpscareEnemy;
+        private float _jumpscareTime;
         private bool _wasPowerOut;
         private float _footstepTimer;
         private bool _debugVisible;
@@ -354,11 +381,15 @@ namespace NailongFNAF.UI
 
         private void UpdateVisuals(GameManager gm)
         {
-            // 背景与门片
+            // 跳杀 / 断电时玩家已经不能操作，界面一并收起来
+            bool locked = gm.HasPowerOut || _hasJumpscare;
+
+            // 背景、门片、门口立绘
             if (gm.HasPowerOut)
             {
                 SetBlackout();
                 HideDoors();
+                HideSideCharacters();
             }
             else
             {
@@ -367,15 +398,17 @@ namespace NailongFNAF.UI
                 if (_hasJumpscare)
                 {
                     HideDoors();
+                    HideSideCharacters();
                 }
                 else
                 {
                     ApplyDoors(gm);
+                    ApplySideCharacters(gm);
                 }
             }
 
             // 监控层
-            bool monitorUp = gm.MonitorUp;
+            bool monitorUp = gm.MonitorUp && !_hasJumpscare;
             if (monitorUp)
             {
                 ApplyMonitorOverlay(gm);
@@ -386,8 +419,8 @@ namespace NailongFNAF.UI
             _monitorMapGroup.blocksRaycasts = monitorUp;
 
             // 两侧墙上的按钮：跟着转头淡入淡出，看监控时收起来
-            float leftAlpha = monitorUp || gm.HasPowerOut ? 0f : Mathf.Clamp01(-_pan);
-            float rightAlpha = monitorUp || gm.HasPowerOut ? 0f : Mathf.Clamp01(_pan);
+            float leftAlpha = monitorUp || locked ? 0f : Mathf.Clamp01(-_pan);
+            float rightAlpha = monitorUp || locked ? 0f : Mathf.Clamp01(_pan);
 
             _leftWallGroup.alpha = leftAlpha;
             _rightWallGroup.alpha = rightAlpha;
@@ -462,6 +495,172 @@ namespace NailongFNAF.UI
             image.color = color;
         }
 
+        // ---------------------------------------------------------------
+        // 敌人立绘
+        // ---------------------------------------------------------------
+
+        private void ApplySideCharacters(GameManager gm)
+        {
+            ApplySideCharacter(gm, Side.Left, _sideLeftCharacter);
+            ApplySideCharacter(gm, Side.Right, _sideRightCharacter);
+        }
+
+        private void ApplySideCharacter(GameManager gm, Side side, Image image)
+        {
+            EnemyId id;
+            bool present = TryGetEnemyAtSide(gm, side, out id);
+
+            // 跟着转头淡入淡出 —— 正前方看不到两侧门外
+            float look = Mathf.Clamp01(side == Side.Left ? -_pan : _pan);
+            float alpha = present ? look : 0f;
+
+            if (alpha <= 0.01f)
+            {
+                image.gameObject.SetActive(false);
+                return;
+            }
+
+            // 噜噜是被灯照到才现形，用瞪着你那张；门类敌人用站姿
+            ShowCharacter(image, id, id == EnemyId.Lulu, SideCharacterHeight, alpha);
+        }
+
+        /// <summary>门口 / 门外站着谁。门类敌人要门没关；噜噜要那一侧的灯亮着。</summary>
+        private bool TryGetEnemyAtSide(GameManager gm, Side side, out EnemyId id)
+        {
+            id = EnemyId.Niulai;
+
+            if (_enemyDirector == null)
+            {
+                return false;
+            }
+
+            bool closed = side == Side.Left ? gm.LeftDoorClosed : gm.RightDoorClosed;
+            bool lightOn = side == Side.Left ? gm.LeftLightOn : gm.RightLightOn;
+
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                var door = brain as DoorEnemyBrain;
+                if (door == null || door.Side != side || door.IsAttacking || closed)
+                {
+                    continue;
+                }
+
+                // Stage 2 = 站在门口
+                if (door.Stage >= 2)
+                {
+                    id = door.Id;
+                    return true;
+                }
+            }
+
+            var lulu = _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain;
+            if (lulu != null && !lulu.IsAttacking && lulu.Stage >= 2
+                && lulu.Side == side && lightOn)
+            {
+                id = EnemyId.Lulu;
+                return true;
+            }
+
+            return false;
+        }
+
+        private void HideSideCharacters()
+        {
+            _sideLeftCharacter.gameObject.SetActive(false);
+            _sideRightCharacter.gameObject.SetActive(false);
+            _monitorCharacter.gameObject.SetActive(false);
+        }
+
+        /// <summary>按目标高度显示某个角色的立绘；没素材就退回该角色的代表色剪影。</summary>
+        private void ShowCharacter(Image image, EnemyId id, bool staring, float height,
+            float alpha = 1f)
+        {
+            var art = FindCharacter(id);
+            Sprite sprite = art != null
+                ? (staring && art.Stare != null ? art.Stare : art.Idle)
+                : null;
+
+            image.gameObject.SetActive(true);
+
+            if (sprite != null)
+            {
+                image.preserveAspect = true;
+                image.sprite = sprite;
+                image.color = new Color(1f, 1f, 1f, alpha);
+                FitHeight(image.rectTransform, sprite, height);
+            }
+            else
+            {
+                // 色块剪影是竖长条，不能按正方形等比缩放
+                Color tint = EnemyTint(id);
+                tint.a *= alpha;
+
+                image.preserveAspect = false;
+                image.sprite = _solidSprite;
+                image.color = tint;
+                image.rectTransform.sizeDelta = new Vector2(height * 0.46f, height);
+            }
+        }
+
+        private CharacterArt FindCharacter(EnemyId id)
+        {
+            if (_characters == null)
+            {
+                return null;
+            }
+
+            foreach (var art in _characters)
+            {
+                if (art != null && art.Id == id)
+                {
+                    return art;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>按精灵的宽高比把框设成指定高度 —— 配合 preserveAspect 就不会拉变形。</summary>
+        private static void FitHeight(RectTransform rect, Sprite sprite, float height)
+        {
+            float aspect = sprite.rect.height > 0f
+                ? sprite.rect.width / sprite.rect.height
+                : 1f;
+
+            rect.sizeDelta = new Vector2(height * aspect, height);
+        }
+
+        /// <summary>等比缩放到不超过给定的框，且尽量占满 —— 整张图完整可见，不裁切。</summary>
+        private static Vector2 ContainSize(Sprite sprite, float maxWidth, float maxHeight)
+        {
+            float width = sprite.rect.width;
+            float height = sprite.rect.height;
+
+            if (width <= 0f || height <= 0f)
+            {
+                return new Vector2(maxWidth, maxHeight);
+            }
+
+            float scale = Mathf.Min(maxWidth / width, maxHeight / height);
+            return new Vector2(width * scale, height * scale);
+        }
+
+        /// <summary>没有立绘素材时的兜底色，一个角色一个色。</summary>
+        private static Color EnemyTint(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai:
+                    return new Color(0.72f, 0.30f, 0.22f, 0.88f);
+                case EnemyId.Daishu:
+                    return new Color(0.30f, 0.62f, 0.34f, 0.88f);
+                case EnemyId.Lulu:
+                    return new Color(0.36f, 0.44f, 0.78f, 0.88f);
+                default:
+                    return new Color(0.88f, 0.80f, 0.34f, 0.88f);
+            }
+        }
+
         private void ApplyMonitorOverlay(GameManager gm)
         {
             int index = gm.CurrentCameraIndex;
@@ -476,10 +675,29 @@ namespace NailongFNAF.UI
             _monitorOverlay.color = frame != null ? Color.white : MonitorFallback;
             _monitorLabel.text = CameraName(index);
 
+            ApplyMonitorCharacter(gm);
+
             for (int i = 0; i < _camBoxes.Length; i++)
             {
                 _camBoxes[i].color = i == index ? CamBoxOn : CamBoxOff;
             }
+        }
+
+        /// <summary>奶龙蹲在当前机位时，把它叠在监控画面上（正对镜头，所以用 stare）。</summary>
+        private void ApplyMonitorCharacter(GameManager gm)
+        {
+            var nailong = _enemyDirector != null
+                ? _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain
+                : null;
+
+            if (nailong == null || nailong.IsAttacking
+                || nailong.CameraIndex != gm.CurrentCameraIndex)
+            {
+                _monitorCharacter.gameObject.SetActive(false);
+                return;
+            }
+
+            ShowCharacter(_monitorCharacter, EnemyId.Nailong, true, MonitorCharacterHeight);
         }
 
         private static string CameraName(int index)
@@ -508,10 +726,35 @@ namespace NailongFNAF.UI
         {
             _hasJumpscare = true;
             _jumpscareEnemy = id;
+            _jumpscareTime = 0f;
 
             _jumpscareOverlay.gameObject.SetActive(true);
-            _jumpscareText.text = "JUMPSCARE\n" + id.Code().ToUpperInvariant();
-            _jumpscareText.rectTransform.anchoredPosition = Vector2.zero;
+            _jumpscareOverlay.color = Color.black;
+
+            var art = FindCharacter(id);
+            Sprite scare = art != null ? art.Jumpscare : null;
+
+            if (scare != null)
+            {
+                // 有跳杀图：等比缩放到完整可见且尽量大，居中怼在屏幕上
+                _jumpscareImage.sprite = scare;
+                _jumpscareImage.color = Color.white;
+                _jumpscareImage.rectTransform.sizeDelta =
+                    ContainSize(scare, JumpscareWidth, 1080f);
+                _jumpscareImage.rectTransform.anchoredPosition = Vector2.zero;
+                _jumpscareImage.rectTransform.localScale = Vector3.one;
+
+                _jumpscareImage.gameObject.SetActive(true);
+                _jumpscareText.gameObject.SetActive(false);
+            }
+            else
+            {
+                // 没有图：退回大字占位
+                _jumpscareImage.gameObject.SetActive(false);
+                _jumpscareText.gameObject.SetActive(true);
+                _jumpscareText.text = "JUMPSCARE\n" + id.Code().ToUpperInvariant();
+                _jumpscareText.rectTransform.anchoredPosition = Vector2.zero;
+            }
         }
 
         private void ClearJumpscare()
@@ -520,6 +763,7 @@ namespace NailongFNAF.UI
             _jumpscareOverlay.gameObject.SetActive(false);
         }
 
+        /// <summary>跳杀：先是「冲脸」快速放大，然后一直抖。</summary>
         private void UpdateJumpscareShake()
         {
             if (!_hasJumpscare)
@@ -527,9 +771,20 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            _jumpscareTime += Time.deltaTime;
             float t = Time.time;
-            float x = Mathf.Sin(t * 42f) * 14f;
-            float y = Mathf.Cos(t * 35f) * 10f;
+
+            float grow = Mathf.Lerp(0.80f, 1.02f, Mathf.Clamp01(_jumpscareTime / 0.18f));
+            float x = Mathf.Sin(t * 46f) * 16f;
+            float y = Mathf.Cos(t * 37f) * 12f;
+
+            if (_jumpscareImage.gameObject.activeSelf)
+            {
+                _jumpscareImage.rectTransform.localScale = new Vector3(grow, grow, 1f);
+                _jumpscareImage.rectTransform.anchoredPosition = new Vector2(x, y);
+                return;
+            }
+
             _jumpscareText.rectTransform.anchoredPosition = new Vector2(x, y);
 
             float pulse = 0.5f + 0.5f * Mathf.Abs(Mathf.Sin(t * 8f));
@@ -588,11 +843,11 @@ namespace NailongFNAF.UI
             return false;
         }
 
-        /// <summary>由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景、门片与监控画面。</summary>
+        /// <summary>由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景、门片、监控画面与角色立绘。</summary>
         public void SetArtwork(Sprite bgFront, Sprite bgLeft, Sprite bgRight,
             Sprite doorLeftOpen, Sprite doorLeftClosed,
             Sprite doorRightOpen, Sprite doorRightClosed,
-            Sprite[] monitorFrames)
+            Sprite[] monitorFrames, CharacterArt[] characters)
         {
             _bgFront = bgFront;
             _bgLeft = bgLeft;
@@ -602,6 +857,7 @@ namespace NailongFNAF.UI
             _doorRightOpen = doorRightOpen;
             _doorRightClosed = doorRightClosed;
             _monitorFrames = monitorFrames;
+            _characters = characters;
         }
 
         // ---------------------------------------------------------------
@@ -753,6 +1009,8 @@ namespace NailongFNAF.UI
             _solidSprite = MakeSolidSprite();
 
             BuildBackgroundLayers();
+            BuildSideCharacters();
+            BuildDoorLayers();
             BuildWallButtons();
             BuildMonitorLayer();
             BuildMonitorHandle();
@@ -790,7 +1048,44 @@ namespace NailongFNAF.UI
             _bgFrontImage = MakeFullScreenImage("BgFront", FrontFallback);
             _bgLeftImage = MakeFullScreenImage("BgLeft", LeftFallback);
             _bgRightImage = MakeFullScreenImage("BgRight", RightFallback);
+        }
 
+        /// <summary>
+        /// 门口立绘：贴在屏幕左右下角，压在门片之下 —— 门关上了就盖住它。
+        /// 没有立绘素材时退回该角色的代表色剪影。
+        /// </summary>
+        private void BuildSideCharacters()
+        {
+            _sideLeftCharacter = MakeSideCharacter("SideCharacterLeft",
+                new Vector2(0f, 0f), new Vector2(0f, 0f));
+            _sideRightCharacter = MakeSideCharacter("SideCharacterRight",
+                new Vector2(1f, 0f), new Vector2(1f, 0f));
+        }
+
+        private Image MakeSideCharacter(string name, Vector2 anchor, Vector2 pivot)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = anchor;
+            rect.anchorMax = anchor;
+            rect.pivot = pivot;
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(620f, SideCharacterHeight);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = _solidSprite;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            image.color = new Color(0.5f, 0.5f, 0.5f, 0.85f);
+
+            go.SetActive(false);
+            return image;
+        }
+
+        private void BuildDoorLayers()
+        {
             _doorLeft = MakeFullScreenImage("DoorLeft", Color.white);
             _doorLeft.gameObject.SetActive(false);
 
@@ -821,6 +1116,24 @@ namespace NailongFNAF.UI
             _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1A",
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
+
+            // 监控画面里的敌人立绘（奶龙蹲在机位里）
+            var charGo = new GameObject("MonitorCharacter", typeof(RectTransform), typeof(Image));
+            charGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            var charRect = charGo.GetComponent<RectTransform>();
+            charRect.anchorMin = new Vector2(0.5f, 0f);
+            charRect.anchorMax = new Vector2(0.5f, 0f);
+            charRect.pivot = new Vector2(0.5f, 0f);
+            charRect.anchoredPosition = new Vector2(0f, 46f);
+            charRect.sizeDelta = new Vector2(420f, MonitorCharacterHeight);
+
+            _monitorCharacter = charGo.GetComponent<Image>();
+            _monitorCharacter.sprite = _solidSprite;
+            _monitorCharacter.preserveAspect = true;
+            _monitorCharacter.raycastTarget = false;
+            _monitorCharacter.color = Color.white;
+            charGo.SetActive(false);
 
             // 右侧小地图
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
@@ -935,9 +1248,27 @@ namespace NailongFNAF.UI
 
         private void BuildJumpscareLayer()
         {
-            _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", new Color(0.6f, 0.02f, 0.05f));
+            _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", Color.black);
             _jumpscareOverlay.transform.SetAsLastSibling();
 
+            // 跳杀立绘：等比缩放到完整可见且尽量大，居中铺在跳杀层上
+            var imageGo = new GameObject("JumpscareImage", typeof(RectTransform), typeof(Image));
+            imageGo.transform.SetParent(_jumpscareOverlay.transform, false);
+
+            var imageRect = imageGo.GetComponent<RectTransform>();
+            imageRect.anchorMin = new Vector2(0.5f, 0.5f);
+            imageRect.anchorMax = new Vector2(0.5f, 0.5f);
+            imageRect.pivot = new Vector2(0.5f, 0.5f);
+            imageRect.anchoredPosition = Vector2.zero;
+            imageRect.sizeDelta = new Vector2(JumpscareWidth, 1080f);
+
+            _jumpscareImage = imageGo.GetComponent<Image>();
+            _jumpscareImage.sprite = _solidSprite;
+            _jumpscareImage.color = Color.white;
+            _jumpscareImage.raycastTarget = false;
+            imageGo.SetActive(false);
+
+            // 没有跳杀素材时退回的大字占位
             _jumpscareText = MakeText(_jumpscareOverlay.transform, "JumpscareText", string.Empty,
                 TextAnchor.MiddleCenter, 120, Color.white);
             StretchToParent(_jumpscareText.rectTransform);
