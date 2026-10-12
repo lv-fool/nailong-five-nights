@@ -97,7 +97,7 @@ namespace NailongFNAF.Core
         /// <summary>重开一夜。</summary>
         public void Restart()
         {
-            Power = new PowerSystem();
+            Power = new PowerSystem(PowerSystem.InitialLevel);
             Clock = new NightClock(_secondsPerHour);
 
             LeftDoorClosed = false;

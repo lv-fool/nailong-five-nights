@@ -16,6 +16,7 @@ namespace NailongFNAF.EditorTools
     {
         private const string BackgroundDir = "Assets/Art/Backgrounds/";
         private const string UiDir = "Assets/Art/UI/";
+        private const string MonitoringDir = "Assets/Art/Monitoring/";
 
         [MenuItem("奶龙/5. 接入素材", false, 14)]
         public static void Bind()
@@ -36,7 +37,8 @@ namespace NailongFNAF.EditorTools
             {
                 "bg_office_front", "bg_office_left_01", "bg_office_right_01",
                 "ui_door_left_open", "ui_door_left_closed",
-                "ui_door_right_open", "ui_door_right_closed"
+                "ui_door_right_open", "ui_door_right_closed",
+                "mon_cam1", "mon_cam2", "mon_cam3"
             };
 
             foreach (var name in images)
@@ -53,7 +55,8 @@ namespace NailongFNAF.EditorTools
                 LoadSprite("ui_door_left_open"),
                 LoadSprite("ui_door_left_closed"),
                 LoadSprite("ui_door_right_open"),
-                LoadSprite("ui_door_right_closed"));
+                LoadSprite("ui_door_right_closed"),
+                LoadMonitorFrames());
 
             var audio = Object.FindObjectOfType<AudioManager>();
             if (audio == null)
@@ -80,12 +83,26 @@ namespace NailongFNAF.EditorTools
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
 
-            Debug.Log("[奶龙] 素材已接入：背景 3 张、门片 4 张、音频 9 条。按 Play 看效果。");
+            Debug.Log("[奶龙] 素材已接入：背景 3 张、门片 4 张、监控画面 3 张、音频 9 条。按 Play 看效果。");
+        }
+
+        /// <summary>按机位顺序读监控画面；缺哪张哪张留空，运行时退回色块。</summary>
+        private static Sprite[] LoadMonitorFrames()
+        {
+            string[] names = { "mon_cam1", "mon_cam2", "mon_cam3" };
+            var frames = new Sprite[names.Length];
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                frames[i] = LoadSprite(names[i]);
+            }
+
+            return frames;
         }
 
         private static string FindImage(string baseName)
         {
-            string[] dirs = { BackgroundDir, UiDir };
+            string[] dirs = { BackgroundDir, UiDir, MonitoringDir };
             string[] exts = { ".png", ".jpg", ".jpeg" };
 
             foreach (var dir in dirs)

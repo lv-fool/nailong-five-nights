@@ -15,6 +15,12 @@ namespace NailongFNAF.Gameplay
         /// <summary>电量上限（百分比）。</summary>
         public const float MaxLevel = 100f;
 
+        /// <summary>
+        /// 开局电量（百分比）。FNAF 1 从 99% 开始 —— 不是满的，
+        /// 让玩家第一眼就看见它在往下掉。
+        /// </summary>
+        public const float InitialLevel = 99f;
+
         /// <summary>基础使用等级下，掉 1% 电量所需的秒数。</summary>
         public const float SecondsPerPercentAtBaseUsage = 9.6f;
 

@@ -474,6 +474,10 @@ MonoBehaviour:
   _doorLeftClosed: {fileID: 21300000, guid: 9551c30ada4d78e4d8ab49026e065acb, type: 3}
   _doorRightOpen: {fileID: 21300000, guid: 033dd42c080fcea4886e06013049813a, type: 3}
   _doorRightClosed: {fileID: 21300000, guid: b16c5d288ad9cef408c218ad736de379, type: 3}
+  _monitorFrames:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
 --- !u!4 &2125327511
 Transform:
   m_ObjectHideFlags: 0

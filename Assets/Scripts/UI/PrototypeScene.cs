@@ -9,22 +9,28 @@ using UnityEngine.UI;
 namespace NailongFNAF.UI
 {
     /// <summary>
-    /// 占位原型：用纯代码生成的色块跑通一整夜，验证玩法与敌人 AI。
-    ///
-    /// 这不是最终画面。等真素材按 docs/03-素材规格.md 的命名放进 Assets/Art 之后，
-    /// 把这里的色块换成对应图片即可，GameManager / EnemyDirector 那一层不用动。
+    /// 可玩原型。操作方式与界面布置对齐 FNAF 1 官方：
+    /// 纯鼠标操作、按钮贴在两侧墙上、电量与使用等级在左下角、时钟在右上角。
     ///
     /// 操作：
-    ///   · 鼠标移到屏幕左右边缘 → 左右转头
-    ///   · 底部按钮 → 开关左右门 / 灯，切换监控
-    ///   · 监控开着时按 1 / 2 / 3 → 切换机位
-    ///   · R 键 → 重开一夜
-    ///   · [ / ] 键 → 上一夜 / 下一夜（调难度用）
+    ///   · 鼠标移到屏幕左 / 右 1/3 → 平滑转头
+    ///   · 鼠标移到屏幕底部边缘 → 升起 / 放下监控（hover 触发，不是点击）
+    ///   · 点击两侧墙上的 DOOR / LIGHT → 开关门与灯（门在上、灯在下）
+    ///   · 监控升起后，点右侧小地图的 CAM 框 → 切机位
+    ///
+    /// 调试快捷键（官方没有，留着方便调参）：
+    ///   · 1 / 2 / 3 切机位　· R 重开一夜　· [ / ] 换夜　· F1 显示 / 隐藏调试面板
     /// </summary>
     public class PrototypeScene : MonoBehaviour
     {
-        /// <summary>鼠标进入屏幕两侧这个比例的范围内就转头。</summary>
-        private const float EdgeZone = 0.08f;
+        /// <summary>鼠标进入屏幕左右各这个比例就转头（左右各三分之一）。</summary>
+        private const float TurnZone = 1f / 3f;
+
+        /// <summary>转头平滑时间（秒）。越大越慢、越"重"。</summary>
+        private const float TurnSmoothTime = 0.12f;
+
+        /// <summary>鼠标进入屏幕底部这个比例就切换监控。</summary>
+        private const float MonitorZone = 0.10f;
 
         /// <summary>三个机位的显示名（大厅 / 左走廊 / 右走廊）。</summary>
         private static readonly string[] CameraNames =
@@ -34,6 +40,31 @@ namespace NailongFNAF.UI
             "CAM 3A    RIGHT HALL"
         };
 
+        /// <summary>小地图上机位框的短标签。</summary>
+        private static readonly string[] CameraBoxLabels = { "CAM 1A", "CAM 2A", "CAM 3A" };
+
+        // 没有素材时的兜底色
+        private static readonly Color FrontFallback = new Color(0.20f, 0.20f, 0.23f);
+        private static readonly Color LeftFallback = new Color(0.18f, 0.30f, 0.58f);
+        private static readonly Color RightFallback = new Color(0.18f, 0.48f, 0.28f);
+        private static readonly Color MonitorFallback = new Color(0.05f, 0.06f, 0.07f);
+
+        // 按钮配色沿用官方：关门是红按钮，开灯是绿按钮
+        private static readonly Color DoorOn = new Color(0.78f, 0.16f, 0.16f);
+        private static readonly Color DoorOff = new Color(0.40f, 0.11f, 0.11f);
+        private static readonly Color LightOn = new Color(0.32f, 0.72f, 0.30f);
+        private static readonly Color LightOff = new Color(0.13f, 0.32f, 0.14f);
+
+        // 使用等级五格条：1~2 绿、3 黄、4~5 红
+        private static readonly Color UsageGreen = new Color(0.35f, 0.78f, 0.32f);
+        private static readonly Color UsageAmber = new Color(0.92f, 0.72f, 0.20f);
+        private static readonly Color UsageRed = new Color(0.90f, 0.26f, 0.22f);
+        private static readonly Color UsageOff = new Color(0.20f, 0.20f, 0.22f);
+
+        // 小地图机位框
+        private static readonly Color CamBoxOn = new Color(0.20f, 0.62f, 0.34f, 0.95f);
+        private static readonly Color CamBoxOff = new Color(0.16f, 0.17f, 0.20f, 0.92f);
+
         [Header("素材（留空则用色块占位）")]
         [SerializeField] private Sprite _bgFront;
         [SerializeField] private Sprite _bgLeft;
@@ -42,18 +73,30 @@ namespace NailongFNAF.UI
         [SerializeField] private Sprite _doorLeftClosed;
         [SerializeField] private Sprite _doorRightOpen;
         [SerializeField] private Sprite _doorRightClosed;
+        [SerializeField] private Sprite[] _monitorFrames;
 
         private Canvas _canvas;
-        private Image _background;
+        private Image _bgFrontImage;
+        private Image _bgLeftImage;
+        private Image _bgRightImage;
         private Image _doorLeft;
         private Image _doorRight;
+        private CanvasGroup _leftWallGroup;
+        private CanvasGroup _rightWallGroup;
+        private Image _doorLeftButton;
+        private Image _doorRightButton;
+        private Image _lightLeftButton;
+        private Image _lightRightButton;
         private Image _monitorOverlay;
+        private CanvasGroup _monitorMapGroup;
         private Text _monitorLabel;
+        private Image[] _camBoxes;
+        private Image _monitorHandle;
+        private Text _clockText;
         private Text _powerText;
-        private Text _timeText;
-        private Text _statusText;
-        private Text _enemyText;
-        private Text _hintText;
+        private Image[] _usageBars;
+        private CanvasGroup _debugGroup;
+        private Text _debugText;
         private Image _jumpscareOverlay;
         private Text _jumpscareText;
         private Font _font;
@@ -65,8 +108,13 @@ namespace NailongFNAF.UI
         private EnemyId _jumpscareEnemy;
         private bool _wasPowerOut;
         private float _footstepTimer;
+        private bool _debugVisible;
 
-        private ViewSide _view = ViewSide.Front;
+        /// <summary>转头进度：-1 全左、0 正前方、+1 全右。</summary>
+        private float _pan;
+        private float _panTarget;
+        private float _panVelocity;
+        private bool _wasInMonitorZone;
 
         private void Awake()
         {
@@ -100,6 +148,8 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            HandleDebugKeys();
+
             if (Input.GetKeyDown(KeyCode.R))
             {
                 gm.Restart();
@@ -110,6 +160,7 @@ namespace NailongFNAF.UI
             HandleCameraKeys(gm);
 
             UpdateView(gm);
+            HandleMonitorHotspot(gm);
             UpdateVisuals(gm);
             UpdateHud(gm);
             UpdateJumpscareShake();
@@ -158,7 +209,7 @@ namespace NailongFNAF.UI
         }
 
         // ---------------------------------------------------------------
-        // 视角：鼠标靠边就转头
+        // 视角：鼠标进左右三分之一就平滑转头
         // ---------------------------------------------------------------
 
         private void UpdateView(GameManager gm)
@@ -166,20 +217,68 @@ namespace NailongFNAF.UI
             float width = Screen.width;
             float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
-            if (x <= EdgeZone)
+            if (x <= TurnZone)
             {
-                _view = ViewSide.Left;
+                _panTarget = -1f;
             }
-            else if (x >= 1f - EdgeZone)
+            else if (x >= 1f - TurnZone)
             {
-                _view = ViewSide.Right;
+                _panTarget = 1f;
             }
             else
             {
-                _view = ViewSide.Front;
+                _panTarget = 0f;
             }
 
-            gm.SetView(_view);
+            // SmoothDamp 让转头有加速与减速，不是硬切
+            _pan = Mathf.SmoothDamp(_pan, _panTarget, ref _panVelocity, TurnSmoothTime);
+
+            // 供敌人 AI 判断"玩家在看哪边"：转过一半才算真的看向那一侧
+            ViewSide view;
+            if (_pan <= -0.5f)
+            {
+                view = ViewSide.Left;
+            }
+            else if (_pan >= 0.5f)
+            {
+                view = ViewSide.Right;
+            }
+            else
+            {
+                view = ViewSide.Front;
+            }
+
+            gm.SetView(view);
+        }
+
+        /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
+        private void HandleMonitorHotspot(GameManager gm)
+        {
+            float height = Screen.height;
+            bool inZone = height > 0f && Input.mousePosition.y / height <= MonitorZone;
+
+            if (inZone && !_wasInMonitorZone && CanOperate(gm))
+            {
+                ToggleMonitor(gm);
+            }
+
+            _wasInMonitorZone = inZone;
+        }
+
+        private static bool CanOperate(GameManager gm)
+        {
+            return !gm.HasPowerOut && !gm.HasSurvived && !gm.HasBeenCaught;
+        }
+
+        private void ToggleMonitor(GameManager gm)
+        {
+            bool before = gm.MonitorUp;
+            gm.ToggleMonitor();
+
+            if (_audio != null && gm.MonitorUp != before)
+            {
+                _audio.PlayCameraSwitch();
+            }
         }
 
         private void HandleCameraKeys(GameManager gm)
@@ -189,22 +288,26 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            int before = gm.CurrentCameraIndex;
-
             if (Input.GetKeyDown(KeyCode.Alpha1))
             {
-                gm.SetCamera(0);
+                SelectCamera(gm, 0);
             }
 
             if (Input.GetKeyDown(KeyCode.Alpha2))
             {
-                gm.SetCamera(1);
+                SelectCamera(gm, 1);
             }
 
             if (Input.GetKeyDown(KeyCode.Alpha3))
             {
-                gm.SetCamera(2);
+                SelectCamera(gm, 2);
             }
+        }
+
+        private void SelectCamera(GameManager gm, int index)
+        {
+            int before = gm.CurrentCameraIndex;
+            gm.SetCamera(index);
 
             if (_audio != null && gm.CurrentCameraIndex != before)
             {
@@ -234,87 +337,97 @@ namespace NailongFNAF.UI
             }
         }
 
+        private void HandleDebugKeys()
+        {
+            if (!Input.GetKeyDown(KeyCode.F1))
+            {
+                return;
+            }
+
+            _debugVisible = !_debugVisible;
+            _debugGroup.alpha = _debugVisible ? 1f : 0f;
+        }
+
         // ---------------------------------------------------------------
         // 画面
         // ---------------------------------------------------------------
 
         private void UpdateVisuals(GameManager gm)
         {
-            if (gm.MonitorUp)
-            {
-                _monitorOverlay.gameObject.SetActive(true);
-                _monitorLabel.text = CameraName(gm.CurrentCameraIndex);
-                return;
-            }
-
-            _monitorOverlay.gameObject.SetActive(false);
-
+            // 背景与门片
             if (gm.HasPowerOut)
             {
-                _background.sprite = _solidSprite;
-                _background.color = Color.black;
+                SetBlackout();
                 HideDoors();
-                return;
             }
-
-            ApplyBackground(gm);
-
-            if (_hasJumpscare)
+            else
             {
-                HideDoors();
-                return;
+                ApplyBackgroundLayers();
+
+                if (_hasJumpscare)
+                {
+                    HideDoors();
+                }
+                else
+                {
+                    ApplyDoors(gm);
+                }
             }
 
-            SetDoorSprites(gm.LeftDoorClosed, gm.RightDoorClosed);
+            // 监控层
+            bool monitorUp = gm.MonitorUp;
+            if (monitorUp)
+            {
+                ApplyMonitorOverlay(gm);
+            }
+
+            _monitorOverlay.gameObject.SetActive(monitorUp);
+            _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
+            _monitorMapGroup.blocksRaycasts = monitorUp;
+
+            // 两侧墙上的按钮：跟着转头淡入淡出，看监控时收起来
+            float leftAlpha = monitorUp || gm.HasPowerOut ? 0f : Mathf.Clamp01(-_pan);
+            float rightAlpha = monitorUp || gm.HasPowerOut ? 0f : Mathf.Clamp01(_pan);
+
+            _leftWallGroup.alpha = leftAlpha;
+            _rightWallGroup.alpha = rightAlpha;
+            _leftWallGroup.blocksRaycasts = leftAlpha > 0.5f;
+            _rightWallGroup.blocksRaycasts = rightAlpha > 0.5f;
+
+            UpdateWallButtonColors(gm);
+
+            // 底部监控把手：断电或被抓之后不再显示
+            _monitorHandle.gameObject.SetActive(!gm.HasPowerOut && !gm.HasBeenCaught);
         }
 
-        private void ApplyBackground(GameManager gm)
+        private void SetBlackout()
         {
-            Sprite sprite = null;
+            SetLayer(_bgFrontImage, null, Color.black, 1f);
+            SetLayer(_bgLeftImage, null, Color.black, 0f);
+            SetLayer(_bgRightImage, null, Color.black, 0f);
+        }
 
-            switch (_view)
-            {
-                case ViewSide.Left:
-                    sprite = _bgLeft;
-                    break;
+        /// <summary>三层背景交叉淡化 —— 中间是正面，靠边滑向左右视角。</summary>
+        private void ApplyBackgroundLayers()
+        {
+            float p = Mathf.Clamp(_pan, -1f, 1f);
+            float leftAlpha = Mathf.Clamp01(-p);
+            float rightAlpha = Mathf.Clamp01(p);
+            float frontAlpha = 1f - Mathf.Max(leftAlpha, rightAlpha);
 
-                case ViewSide.Right:
-                    sprite = _bgRight;
-                    break;
+            SetLayer(_bgFrontImage, _bgFront, FrontFallback, frontAlpha);
+            SetLayer(_bgLeftImage, _bgLeft, LeftFallback, leftAlpha);
+            SetLayer(_bgRightImage, _bgRight, RightFallback, rightAlpha);
+        }
 
-                default:
-                    sprite = _bgFront;
-                    break;
-            }
+        private void SetLayer(Image image, Sprite sprite, Color fallback, float alpha)
+        {
+            image.sprite = sprite != null ? sprite : _solidSprite;
 
-            if (sprite != null)
-            {
-                _background.sprite = sprite;
-                _background.color = Color.white;
-                return;
-            }
-
-            // 没素材就用色块兜底
-            _background.sprite = _solidSprite;
-
-            switch (_view)
-            {
-                case ViewSide.Left:
-                    _background.color = gm.LeftDoorClosed
-                        ? new Color(0.06f, 0.09f, 0.22f)
-                        : new Color(0.18f, 0.30f, 0.58f);
-                    break;
-
-                case ViewSide.Right:
-                    _background.color = gm.RightDoorClosed
-                        ? new Color(0.05f, 0.16f, 0.09f)
-                        : new Color(0.18f, 0.48f, 0.28f);
-                    break;
-
-                default:
-                    _background.color = new Color(0.20f, 0.20f, 0.23f);
-                    break;
-            }
+            Color color = sprite != null ? Color.white : fallback;
+            color.a = alpha;
+            image.color = color;
+            image.enabled = alpha > 0.001f;
         }
 
         private void HideDoors()
@@ -323,19 +436,50 @@ namespace NailongFNAF.UI
             _doorRight.gameObject.SetActive(false);
         }
 
-        /// <summary>门片：只在对应视角显示，素材缺失就隐藏（不会露出白块）。</summary>
-        private void SetDoorSprites(bool leftClosed, bool rightClosed)
+        /// <summary>门片跟着视角一起淡入淡出；没有素材就整体隐藏。</summary>
+        private void ApplyDoors(GameManager gm)
         {
-            Sprite left = leftClosed ? _doorLeftClosed : _doorLeftOpen;
-            Sprite right = rightClosed ? _doorRightClosed : _doorRightOpen;
+            float p = Mathf.Clamp(_pan, -1f, 1f);
+            SetDoorLayer(_doorLeft, gm.LeftDoorClosed ? _doorLeftClosed : _doorLeftOpen,
+                Mathf.Clamp01(-p));
+            SetDoorLayer(_doorRight, gm.RightDoorClosed ? _doorRightClosed : _doorRightOpen,
+                Mathf.Clamp01(p));
+        }
 
-            _doorLeft.gameObject.SetActive(left != null && _view == ViewSide.Left);
-            _doorLeft.sprite = left;
-            _doorLeft.color = Color.white;
+        private void SetDoorLayer(Image image, Sprite sprite, float alpha)
+        {
+            if (sprite == null || alpha <= 0.001f)
+            {
+                image.gameObject.SetActive(false);
+                return;
+            }
 
-            _doorRight.gameObject.SetActive(right != null && _view == ViewSide.Right);
-            _doorRight.sprite = right;
-            _doorRight.color = Color.white;
+            image.gameObject.SetActive(true);
+            image.sprite = sprite;
+
+            Color color = Color.white;
+            color.a = alpha;
+            image.color = color;
+        }
+
+        private void ApplyMonitorOverlay(GameManager gm)
+        {
+            int index = gm.CurrentCameraIndex;
+            Sprite frame = null;
+
+            if (_monitorFrames != null && index >= 0 && index < _monitorFrames.Length)
+            {
+                frame = _monitorFrames[index];
+            }
+
+            _monitorOverlay.sprite = frame != null ? frame : _solidSprite;
+            _monitorOverlay.color = frame != null ? Color.white : MonitorFallback;
+            _monitorLabel.text = CameraName(index);
+
+            for (int i = 0; i < _camBoxes.Length; i++)
+            {
+                _camBoxes[i].color = i == index ? CamBoxOn : CamBoxOff;
+            }
         }
 
         private static string CameraName(int index)
@@ -346,6 +490,14 @@ namespace NailongFNAF.UI
             }
 
             return CameraNames[index];
+        }
+
+        private void UpdateWallButtonColors(GameManager gm)
+        {
+            _doorLeftButton.color = gm.LeftDoorClosed ? DoorOn : DoorOff;
+            _doorRightButton.color = gm.RightDoorClosed ? DoorOn : DoorOff;
+            _lightLeftButton.color = gm.LeftLightOn ? LightOn : LightOff;
+            _lightRightButton.color = gm.RightLightOn ? LightOn : LightOff;
         }
 
         // ---------------------------------------------------------------
@@ -436,10 +588,11 @@ namespace NailongFNAF.UI
             return false;
         }
 
-        /// <summary>由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景与门片。</summary>
+        /// <summary>由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景、门片与监控画面。</summary>
         public void SetArtwork(Sprite bgFront, Sprite bgLeft, Sprite bgRight,
             Sprite doorLeftOpen, Sprite doorLeftClosed,
-            Sprite doorRightOpen, Sprite doorRightClosed)
+            Sprite doorRightOpen, Sprite doorRightClosed,
+            Sprite[] monitorFrames)
         {
             _bgFront = bgFront;
             _bgLeft = bgLeft;
@@ -448,19 +601,44 @@ namespace NailongFNAF.UI
             _doorLeftClosed = doorLeftClosed;
             _doorRightOpen = doorRightOpen;
             _doorRightClosed = doorRightClosed;
+            _monitorFrames = monitorFrames;
         }
 
         // ---------------------------------------------------------------
-        // HUD
+        // HUD：时钟在右上角，电量与使用等级在左下角（对齐官方）
         // ---------------------------------------------------------------
 
         private void UpdateHud(GameManager gm)
         {
-            _powerText.text = "POWER " + Mathf.CeilToInt(gm.Power.Level) + "%";
-            _timeText.text = FormatHour(gm.Clock.CurrentHour);
-            _statusText.text = BuildStatus(gm);
-            _enemyText.text = BuildEnemyStatus();
-            _hintText.text = BuildHint(gm);
+            _clockText.text = FormatHour(gm.Clock.CurrentHour);
+            _powerText.text = "Power left: " + Mathf.CeilToInt(gm.Power.Level) + "%";
+            UpdateUsageBars(gm.Power.UsageLevel);
+            _debugText.text = BuildDebugInfo(gm);
+        }
+
+        private void UpdateUsageBars(int usageLevel)
+        {
+            for (int i = 0; i < _usageBars.Length; i++)
+            {
+                if (i >= usageLevel)
+                {
+                    _usageBars[i].color = UsageOff;
+                    continue;
+                }
+
+                if (i < 2)
+                {
+                    _usageBars[i].color = UsageGreen;
+                }
+                else if (i == 2)
+                {
+                    _usageBars[i].color = UsageAmber;
+                }
+                else
+                {
+                    _usageBars[i].color = UsageRed;
+                }
+            }
         }
 
         private static string FormatHour(int hour)
@@ -468,39 +646,58 @@ namespace NailongFNAF.UI
             return hour == 0 ? "12 AM" : hour + " AM";
         }
 
-        private static string BuildStatus(GameManager gm)
+        private string BuildDebugInfo(GameManager gm)
         {
-            return "DOOR L " + (gm.LeftDoorClosed ? "CLOSED" : "OPEN")
-                 + "    DOOR R " + (gm.RightDoorClosed ? "CLOSED" : "OPEN")
-                 + "    LIGHT L " + (gm.LeftLightOn ? "ON" : "OFF")
-                 + "    LIGHT R " + (gm.RightLightOn ? "ON" : "OFF");
-        }
-
-        private string BuildEnemyStatus()
-        {
-            if (_enemyDirector == null)
-            {
-                return string.Empty;
-            }
-
             var sb = new StringBuilder();
-            sb.Append("NIGHT ").Append(_enemyDirector.NightIndex + 1).Append("    ");
 
-            foreach (var id in EnemyIds.All)
+            if (_enemyDirector != null)
             {
-                var brain = _enemyDirector.GetBrain(id);
-                if (brain == null)
+                sb.Append("NIGHT ").Append(_enemyDirector.NightIndex + 1).Append("    ");
+
+                foreach (var id in EnemyIds.All)
                 {
-                    continue;
+                    var brain = _enemyDirector.GetBrain(id);
+                    if (brain == null)
+                    {
+                        continue;
+                    }
+
+                    sb.Append(id.Code().ToUpperInvariant())
+                      .Append(' ')
+                      .Append(DescribeBrain(brain))
+                      .Append(" (")
+                      .Append(brain.ActivityLevel)
+                      .Append(")    ");
                 }
 
-                sb.Append(id.Code().ToUpperInvariant())
-                  .Append(" ")
-                  .Append(DescribeBrain(brain))
-                  .Append(" (")
-                  .Append(brain.ActivityLevel)
-                  .Append(")    ");
+                sb.Append('\n');
             }
+
+            sb.Append("DOOR L ").Append(gm.LeftDoorClosed ? "CLOSED" : "OPEN")
+              .Append("    DOOR R ").Append(gm.RightDoorClosed ? "CLOSED" : "OPEN")
+              .Append("    LIGHT L ").Append(gm.LeftLightOn ? "ON" : "OFF")
+              .Append("    LIGHT R ").Append(gm.RightLightOn ? "ON" : "OFF")
+              .Append('\n');
+
+            if (_hasJumpscare)
+            {
+                sb.Append("CAUGHT BY ").Append(_jumpscareEnemy.Code().ToUpperInvariant()).Append('\n');
+            }
+            else if (gm.HasBeenCaught)
+            {
+                sb.Append("CAUGHT\n");
+            }
+            else if (gm.HasSurvived)
+            {
+                sb.Append("6 AM - YOU SURVIVED\n");
+            }
+            else if (gm.HasPowerOut)
+            {
+                sb.Append("POWER OUT\n");
+            }
+
+            sb.Append("Mouse: side thirds = turn, bottom edge = monitor, CAM box = switch feed\n");
+            sb.Append("R restart    [ ] change night    F1 hide this panel");
 
             return sb.ToString();
         }
@@ -544,33 +741,10 @@ namespace NailongFNAF.UI
             return "-";
         }
 
-        private string BuildHint(GameManager gm)
-        {
-            if (_hasJumpscare)
-            {
-                return "CAUGHT BY " + _jumpscareEnemy.Code().ToUpperInvariant() + "    |    R to restart";
-            }
-
-            if (gm.HasBeenCaught)
-            {
-                return "CAUGHT    |    R to restart";
-            }
-
-            if (gm.HasSurvived)
-            {
-                return "6 AM    YOU SURVIVED";
-            }
-
-            if (gm.HasPowerOut)
-            {
-                return "POWER OUT";
-            }
-
-            return "Mouse to edges to look around    |    1/2/3 to switch camera    |    R restart    |    [ ] change night";
-        }
-
         // ---------------------------------------------------------------
         // 构建 UI（全部代码生成，不依赖任何素材文件）
+        //
+        // 层级自下而上：背景三层 → 门片 → 墙上按钮 → 监控层 → 把手 → HUD → 调试 → 跳杀
         // ---------------------------------------------------------------
 
         private void BuildUi()
@@ -578,24 +752,12 @@ namespace NailongFNAF.UI
             _canvas = GetOrCreateCanvas();
             _solidSprite = MakeSolidSprite();
 
-            _background = MakeFullScreenImage("Background", new Color(0.20f, 0.20f, 0.23f));
-
-            // 门片夹在背景与监控之间
-            _doorLeft = MakeFullScreenImage("DoorLeft", Color.white);
-            _doorLeft.gameObject.SetActive(false);
-
-            _doorRight = MakeFullScreenImage("DoorRight", Color.white);
-            _doorRight.gameObject.SetActive(false);
-
-            // 监控层压在背景之上、按钮之下 —— 看监控时仍然能关门
-            _monitorOverlay = MakeFullScreenImage("MonitorOverlay", new Color(0.04f, 0.05f, 0.06f));
-            _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel",
-                "CAM 1A", TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
-            StretchToParent(_monitorLabel.rectTransform);
-            _monitorOverlay.gameObject.SetActive(false);
-
-            BuildButtons();
+            BuildBackgroundLayers();
+            BuildWallButtons();
+            BuildMonitorLayer();
+            BuildMonitorHandle();
             BuildHud();
+            BuildDebugLayer();
             BuildJumpscareLayer();
         }
 
@@ -623,22 +785,169 @@ namespace NailongFNAF.UI
             return canvas;
         }
 
-        private void BuildButtons()
+        private void BuildBackgroundLayers()
         {
-            const float width = 170f;
-            const float height = 64f;
-            const float gap = 20f;
-            const float y = 60f;
+            _bgFrontImage = MakeFullScreenImage("BgFront", FrontFallback);
+            _bgLeftImage = MakeFullScreenImage("BgLeft", LeftFallback);
+            _bgRightImage = MakeFullScreenImage("BgRight", RightFallback);
 
-            float total = width * 5f + gap * 4f;
-            float startX = -total * 0.5f + width * 0.5f;
+            _doorLeft = MakeFullScreenImage("DoorLeft", Color.white);
+            _doorLeft.gameObject.SetActive(false);
 
-            MakeButton("BtnDoorLeft", "DOOR L", startX + (width + gap) * 0f, y, width, height, OnDoorLeft);
-            MakeButton("BtnLightLeft", "LIGHT L", startX + (width + gap) * 1f, y, width, height, OnLightLeft);
-            MakeButton("BtnMonitor", "CAM", startX + (width + gap) * 2f, y, width, height, OnMonitor);
-            MakeButton("BtnLightRight", "LIGHT R", startX + (width + gap) * 3f, y, width, height, OnLightRight);
-            MakeButton("BtnDoorRight", "DOOR R", startX + (width + gap) * 4f, y, width, height, OnDoorRight);
+            _doorRight = MakeFullScreenImage("DoorRight", Color.white);
+            _doorRight.gameObject.SetActive(false);
         }
+
+        /// <summary>两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。</summary>
+        private void BuildWallButtons()
+        {
+            _leftWallGroup = MakeGroup("WallLeft");
+            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR",
+                new Vector2(0.13f, 0.66f), OnDoorLeft);
+            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT",
+                new Vector2(0.13f, 0.34f), OnLightLeft);
+
+            _rightWallGroup = MakeGroup("WallRight");
+            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR",
+                new Vector2(0.87f, 0.66f), OnDoorRight);
+            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT",
+                new Vector2(0.87f, 0.34f), OnLightRight);
+        }
+
+        private void BuildMonitorLayer()
+        {
+            _monitorOverlay = MakeFullScreenImage("MonitorOverlay", MonitorFallback, true);
+
+            _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1A",
+                TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
+            StretchToParent(_monitorLabel.rectTransform);
+
+            // 右侧小地图
+            var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
+            map.transform.SetParent(_monitorOverlay.transform, false);
+
+            var mapRect = map.GetComponent<RectTransform>();
+            PlaceRect(mapRect, new Vector2(0.85f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(240f, 340f));
+
+            var mapBackground = map.GetComponent<Image>();
+            mapBackground.sprite = _solidSprite;
+            mapBackground.color = new Color(0.08f, 0.09f, 0.11f, 0.92f);
+            mapBackground.raycastTarget = false;
+
+            _monitorMapGroup = map.GetComponent<CanvasGroup>();
+
+            var mapTitle = MakeText(map.transform, "MapTitle", "CAMERAS",
+                TextAnchor.UpperCenter, 22, new Color(0.70f, 0.78f, 0.70f));
+            PlaceRect(mapTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -14f), new Vector2(210f, 30f));
+
+            _camBoxes = new Image[CameraBoxLabels.Length];
+            for (int i = 0; i < CameraBoxLabels.Length; i++)
+            {
+                int index = i;
+                var button = MakeButton(map.transform, "CamBox" + i, CameraBoxLabels[i],
+                    new Vector2(0.5f, 1f), new Vector2(0f, -62f - i * 78f),
+                    new Vector2(196f, 62f), delegate { OnCameraBox(index); });
+
+                _camBoxes[i] = button.GetComponent<Image>();
+            }
+
+            _monitorMapGroup.alpha = 0f;
+            _monitorMapGroup.blocksRaycasts = false;
+        }
+
+        private void BuildMonitorHandle()
+        {
+            var go = new GameObject("MonitorHandle", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            PlaceRect(rect, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 14f), new Vector2(260f, 26f));
+
+            _monitorHandle = go.GetComponent<Image>();
+            _monitorHandle.sprite = _solidSprite;
+            _monitorHandle.color = new Color(0.55f, 0.60f, 0.55f, 0.30f);
+            _monitorHandle.raycastTarget = false;
+
+            var label = MakeText(go.transform, "Label", "<<   MONITOR   >>",
+                TextAnchor.MiddleCenter, 18, new Color(0.88f, 0.92f, 0.88f, 0.80f));
+            StretchToParent(label.rectTransform);
+        }
+
+        private void BuildHud()
+        {
+            var hud = new GameObject("Hud", typeof(RectTransform));
+            hud.transform.SetParent(_canvas.transform, false);
+            StretchToParent(hud.GetComponent<RectTransform>());
+
+            // 时钟：右上角
+            _clockText = MakeText(hud.transform, "ClockText", "12 AM",
+                TextAnchor.UpperRight, 38, new Color(0.94f, 0.94f, 0.94f));
+            PlaceRect(_clockText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-40f, -28f), new Vector2(300f, 54f));
+
+            // 电量：左下角
+            _powerText = MakeText(hud.transform, "PowerText", "Power left: 99%",
+                TextAnchor.LowerLeft, 30, new Color(0.92f, 0.92f, 0.92f));
+            PlaceRect(_powerText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(40f, 104f), new Vector2(420f, 40f));
+
+            var usageLabel = MakeText(hud.transform, "UsageLabel", "Usage:",
+                TextAnchor.LowerLeft, 24, new Color(0.80f, 0.80f, 0.80f));
+            PlaceRect(usageLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(40f, 62f), new Vector2(110f, 30f));
+
+            _usageBars = new Image[PowerSystem.MaxUsageLevel];
+            for (int i = 0; i < _usageBars.Length; i++)
+            {
+                var go = new GameObject("UsageBar" + i, typeof(RectTransform), typeof(Image));
+                go.transform.SetParent(hud.transform, false);
+
+                PlaceRect(go.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(152f + i * 30f, 62f), new Vector2(22f, 26f));
+
+                var image = go.GetComponent<Image>();
+                image.sprite = _solidSprite;
+                image.color = UsageOff;
+                image.raycastTarget = false;
+
+                _usageBars[i] = image;
+            }
+        }
+
+        private void BuildDebugLayer()
+        {
+            var go = new GameObject("DebugLayer", typeof(RectTransform), typeof(CanvasGroup));
+            go.transform.SetParent(_canvas.transform, false);
+            StretchToParent(go.GetComponent<RectTransform>());
+
+            _debugGroup = go.GetComponent<CanvasGroup>();
+            _debugGroup.alpha = 0f;
+            _debugGroup.blocksRaycasts = false;
+
+            _debugText = MakeText(go.transform, "DebugText", string.Empty,
+                TextAnchor.UpperLeft, 20, new Color(0.70f, 0.88f, 0.72f));
+            PlaceRect(_debugText.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(40f, 210f), new Vector2(1500f, 300f));
+        }
+
+        private void BuildJumpscareLayer()
+        {
+            _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", new Color(0.6f, 0.02f, 0.05f));
+            _jumpscareOverlay.transform.SetAsLastSibling();
+
+            _jumpscareText = MakeText(_jumpscareOverlay.transform, "JumpscareText", string.Empty,
+                TextAnchor.MiddleCenter, 120, Color.white);
+            StretchToParent(_jumpscareText.rectTransform);
+
+            _jumpscareOverlay.gameObject.SetActive(false);
+        }
+
+        // ---------------------------------------------------------------
+        // 按钮回调
+        // ---------------------------------------------------------------
 
         private void OnDoorLeft()
         {
@@ -688,62 +997,42 @@ namespace NailongFNAF.UI
             }
         }
 
-        private void OnMonitor()
+        private void OnCameraBox(int index)
         {
             var gm = GameManager.Instance;
-            bool before = gm.MonitorUp;
-            gm.ToggleMonitor();
-
-            if (_audio != null && gm.MonitorUp != before)
+            if (gm != null)
             {
-                _audio.PlayCameraSwitch();
+                SelectCamera(gm, index);
             }
-        }
-
-        private void BuildHud()
-        {
-            var hud = new GameObject("Hud", typeof(RectTransform));
-            hud.transform.SetParent(_canvas.transform, false);
-            StretchToParent(hud.GetComponent<RectTransform>());
-
-            _powerText = MakeText(hud.transform, "PowerText", "POWER 100%",
-                TextAnchor.UpperRight, 34, new Color(0.92f, 0.92f, 0.92f));
-            PlaceTopRight(_powerText.rectTransform, -40f, -30f, 400f, 50f);
-
-            _timeText = MakeText(hud.transform, "TimeText", "12 AM",
-                TextAnchor.UpperLeft, 34, new Color(0.92f, 0.92f, 0.92f));
-            PlaceTopLeft(_timeText.rectTransform, 40f, -30f, 300f, 50f);
-
-            _statusText = MakeText(hud.transform, "StatusText", string.Empty,
-                TextAnchor.LowerLeft, 24, new Color(0.75f, 0.75f, 0.82f));
-            PlaceBottomLeft(_statusText.rectTransform, 40f, 150f, 1500f, 40f);
-
-            _enemyText = MakeText(hud.transform, "EnemyText", string.Empty,
-                TextAnchor.LowerLeft, 22, new Color(0.86f, 0.68f, 0.72f));
-            PlaceBottomLeft(_enemyText.rectTransform, 40f, 196f, 1800f, 40f);
-
-            _hintText = MakeText(hud.transform, "HintText", string.Empty,
-                TextAnchor.LowerCenter, 26, new Color(0.86f, 0.86f, 0.62f));
-            PlaceBottomCenter(_hintText.rectTransform, 0f, 12f, 1700f, 40f);
-        }
-
-        private void BuildJumpscareLayer()
-        {
-            _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", new Color(0.6f, 0.02f, 0.05f));
-            _jumpscareOverlay.transform.SetAsLastSibling();
-
-            _jumpscareText = MakeText(_jumpscareOverlay.transform, "JumpscareText", string.Empty,
-                TextAnchor.MiddleCenter, 120, Color.white);
-            StretchToParent(_jumpscareText.rectTransform);
-
-            _jumpscareOverlay.gameObject.SetActive(false);
         }
 
         // ---------------------------------------------------------------
         // 小工具
         // ---------------------------------------------------------------
 
-        private Image MakeFullScreenImage(string name, Color color)
+        private CanvasGroup MakeGroup(string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasGroup));
+            go.transform.SetParent(_canvas.transform, false);
+            StretchToParent(go.GetComponent<RectTransform>());
+
+            var group = go.GetComponent<CanvasGroup>();
+            group.alpha = 0f;
+            group.blocksRaycasts = false;
+
+            return group;
+        }
+
+        private Image MakeWallButton(Transform parent, string name, string label,
+            Vector2 anchor, UnityEngine.Events.UnityAction onClick)
+        {
+            var button = MakeButton(parent, name, label, anchor, Vector2.zero,
+                new Vector2(190f, 62f), onClick);
+
+            return button.GetComponent<Image>();
+        }
+
+        private Image MakeFullScreenImage(string name, Color color, bool raycast = false)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
             go.transform.SetParent(_canvas.transform, false);
@@ -753,23 +1042,19 @@ namespace NailongFNAF.UI
             var image = go.GetComponent<Image>();
             image.sprite = _solidSprite != null ? _solidSprite : MakeSolidSprite();
             image.color = color;
-            image.raycastTarget = false;
+            image.raycastTarget = raycast;
 
             return image;
         }
 
-        private Button MakeButton(string name, string label, float x, float y,
-            float width, float height, UnityEngine.Events.UnityAction onClick)
+        private Button MakeButton(Transform parent, string name, string label,
+            Vector2 anchor, Vector2 offset, Vector2 size,
+            UnityEngine.Events.UnityAction onClick)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(parent, false);
 
-            var rect = go.GetComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0.5f, 0f);
-            rect.anchorMax = new Vector2(0.5f, 0f);
-            rect.pivot = new Vector2(0.5f, 0f);
-            rect.anchoredPosition = new Vector2(x, y);
-            rect.sizeDelta = new Vector2(width, height);
+            PlaceRect(go.GetComponent<RectTransform>(), anchor, new Vector2(0.5f, 0.5f), offset, size);
 
             var image = go.GetComponent<Image>();
             image.sprite = MakeSolidSprite();
@@ -777,7 +1062,11 @@ namespace NailongFNAF.UI
 
             var button = go.GetComponent<Button>();
             button.targetGraphic = image;
-            button.onClick.AddListener(onClick);
+
+            if (onClick != null)
+            {
+                button.onClick.AddListener(onClick);
+            }
 
             var text = MakeText(go.transform, "Label", label,
                 TextAnchor.MiddleCenter, 24, Color.white);
@@ -831,40 +1120,14 @@ namespace NailongFNAF.UI
             rect.offsetMax = Vector2.zero;
         }
 
-        private static void PlaceTopRight(RectTransform rect, float x, float y, float width, float height)
+        private static void PlaceRect(RectTransform rect, Vector2 anchor, Vector2 pivot,
+            Vector2 offset, Vector2 size)
         {
-            rect.anchorMin = new Vector2(1f, 1f);
-            rect.anchorMax = new Vector2(1f, 1f);
-            rect.pivot = new Vector2(1f, 1f);
-            rect.anchoredPosition = new Vector2(x, y);
-            rect.sizeDelta = new Vector2(width, height);
-        }
-
-        private static void PlaceTopLeft(RectTransform rect, float x, float y, float width, float height)
-        {
-            rect.anchorMin = new Vector2(0f, 1f);
-            rect.anchorMax = new Vector2(0f, 1f);
-            rect.pivot = new Vector2(0f, 1f);
-            rect.anchoredPosition = new Vector2(x, y);
-            rect.sizeDelta = new Vector2(width, height);
-        }
-
-        private static void PlaceBottomLeft(RectTransform rect, float x, float y, float width, float height)
-        {
-            rect.anchorMin = new Vector2(0f, 0f);
-            rect.anchorMax = new Vector2(0f, 0f);
-            rect.pivot = new Vector2(0f, 0f);
-            rect.anchoredPosition = new Vector2(x, y);
-            rect.sizeDelta = new Vector2(width, height);
-        }
-
-        private static void PlaceBottomCenter(RectTransform rect, float x, float y, float width, float height)
-        {
-            rect.anchorMin = new Vector2(0.5f, 0f);
-            rect.anchorMax = new Vector2(0.5f, 0f);
-            rect.pivot = new Vector2(0.5f, 0f);
-            rect.anchoredPosition = new Vector2(x, y);
-            rect.sizeDelta = new Vector2(width, height);
+            rect.anchorMin = anchor;
+            rect.anchorMax = anchor;
+            rect.pivot = pivot;
+            rect.anchoredPosition = offset;
+            rect.sizeDelta = size;
         }
     }
 }
