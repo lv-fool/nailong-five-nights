@@ -485,12 +485,16 @@ MonoBehaviour:
     Idle: {fileID: 21300000, guid: aa1c69b990002af48a4a870bd38c4487, type: 3}
     Stare: {fileID: 21300000, guid: c58929f537a3a6f42bb45c056a72d256, type: 3}
     Peek: {fileID: 21300000, guid: 965dc8c8b314bf24f9640667bca3e99a, type: 3}
+    Startled: {fileID: 21300000, guid: 4aade0c723bc04647ac5eef05437c069, type: 3}
+    Angry: {fileID: 21300000, guid: 505a8ed0f2a8aba42ab352087a864b2e, type: 3}
     Jumpscare: {fileID: 0}
     Blackout: {fileID: 0}
   - Id: 3
     Idle: {fileID: 21300000, guid: e0d62dcfd5b3c964eb6da24ec3ea934d, type: 3}
     Stare: {fileID: 21300000, guid: 25adaa5a4fc21914b8e1219ec276a474, type: 3}
     Peek: {fileID: 0}
+    Startled: {fileID: 0}
+    Angry: {fileID: 0}
     Jumpscare: {fileID: 21300000, guid: feafbfdb1de2c934cb4917e3bf5d0ad1, type: 3}
     Blackout: {fileID: 21300000, guid: 927d21e120e48cc42a775a8ccd63dc68, type: 3}
 --- !u!4 &2125327511

@@ -28,6 +28,10 @@ JOBS = [
     (r"D:/QQmm/retouch_2026101222275753.png", "char_lulu_idle"),
     (r"D:/QQmm/com.ss.android.ugc.aweme_20261012222321_edit_3750.png", "char_lulu_stare"),
     (r"D:/QQmm/retouch_2026101222295201.png", "char_lulu_peek"),
+
+    # 噜噜的表情 —— 以 stare 那张为参考图生成（受惊 / 怒视）
+    (r"D:/QQmm/lulu_startled.png", "char_lulu_startled"),
+    (r"D:/QQmm/lulu_angry.png", "char_lulu_angry"),
 ]
 
 

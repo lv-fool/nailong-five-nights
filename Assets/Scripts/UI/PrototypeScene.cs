@@ -36,7 +36,13 @@ namespace NailongFNAF.UI
             Peek = 2,
 
             /// <summary>跳杀特写。</summary>
-            Jumpscare = 3
+            Jumpscare = 3,
+
+            /// <summary>受惊（被灯照到 / 被盯着）。</summary>
+            Startled = 4,
+
+            /// <summary>怒视。</summary>
+            Angry = 5
         }
 
         /// <summary>一个角色的立绘。缺哪张哪张留空，运行时退回色块占位。</summary>
@@ -50,6 +56,12 @@ namespace NailongFNAF.UI
             /// <summary>从门外探头那张（噜噜专用）。没给就退回 Stare。</summary>
             public Sprite Peek;
 
+            /// <summary>受惊那张（噜噜专用）。没给就退回 Stare。</summary>
+            public Sprite Startled;
+
+            /// <summary>怒视那张（噜噜专用）。没给就退回 Stare。</summary>
+            public Sprite Angry;
+
             public Sprite Jumpscare;
 
             /// <summary>断电后「收电费」用的那张。没给就退回 Jumpscare。</summary>
@@ -61,27 +73,34 @@ namespace NailongFNAF.UI
                 switch (pose)
                 {
                     case CharacterPose.Stare:
-                        return Stare != null ? Stare : Idle;
+                        return Fallback(Stare);
 
                     case CharacterPose.Peek:
-                        if (Peek != null)
-                        {
-                            return Peek;
-                        }
+                        return Fallback(Peek);
 
-                        return Stare != null ? Stare : Idle;
+                    case CharacterPose.Startled:
+                        return Fallback(Startled);
+
+                    case CharacterPose.Angry:
+                        return Fallback(Angry);
 
                     case CharacterPose.Jumpscare:
-                        if (Jumpscare != null)
-                        {
-                            return Jumpscare;
-                        }
-
-                        return Stare != null ? Stare : Idle;
+                        return Fallback(Jumpscare);
 
                     default:
                         return Idle;
                 }
+            }
+
+            /// <summary>有就用；没有就退 Stare，再没有退 Idle。</summary>
+            private Sprite Fallback(Sprite sprite)
+            {
+                if (sprite != null)
+                {
+                    return sprite;
+                }
+
+                return Stare != null ? Stare : Idle;
             }
         }
 
@@ -641,8 +660,23 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 噜噜是从门外探出头，用探头那张；门类敌人站在门口，用站姿
-            var pose = id == EnemyId.Lulu ? CharacterPose.Peek : CharacterPose.Idle;
+            // 噜噜在门外：平时是探出头偷看；被盯久了换成受惊那张。
+            // 门类敌人站在门口，用站姿。
+            CharacterPose pose = CharacterPose.Idle;
+
+            if (id == EnemyId.Lulu)
+            {
+                var lulu = _enemyDirector != null
+                    ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
+                    : null;
+
+                // 盯了半程之后它才慌起来 —— 前半程留给你看清它探头的样子
+                bool startled = lulu != null
+                    && lulu.StareProgress >= lulu.StareSeconds * 0.5f;
+
+                pose = startled ? CharacterPose.Startled : CharacterPose.Peek;
+            }
+
             ShowCharacter(image, id, pose, SideCharacterHeight, alpha);
         }
 
