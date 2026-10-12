@@ -23,6 +23,11 @@ JOBS = [
     (r"D:/QQmm/retouch_2026101220523820.png", "char_nailong_blackout"),
     (r"D:/QQmm/com.ss.android.ugc.aweme_20261012204701_edit_3695.png", "char_nailong_idle"),
     (r"D:/QQmm/retouch_2026101220485848.png", "char_nailong_stare"),
+
+    # 噜噜（水豚）—— 2026-10-12 绿子提供
+    (r"D:/QQmm/retouch_2026101222275753.png", "char_lulu_idle"),
+    (r"D:/QQmm/com.ss.android.ugc.aweme_20261012222321_edit_3750.png", "char_lulu_stare"),
+    (r"D:/QQmm/retouch_2026101222295201.png", "char_lulu_peek"),
 ]
 
 

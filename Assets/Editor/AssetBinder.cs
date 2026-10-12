@@ -46,7 +46,8 @@ namespace NailongFNAF.EditorTools
                 "char_nailong_blackout",
                 "char_niulai_idle", "char_niulai_stare", "char_niulai_jumpscare",
                 "char_daishu_idle", "char_daishu_stare", "char_daishu_jumpscare",
-                "char_lulu_idle", "char_lulu_stare", "char_lulu_jumpscare"
+                "char_lulu_idle", "char_lulu_stare", "char_lulu_peek",
+                "char_lulu_jumpscare"
             };
 
             foreach (var name in images)
@@ -127,10 +128,12 @@ namespace NailongFNAF.EditorTools
 
                 var idle = LoadSprite("char_" + code + "_idle");
                 var stare = LoadSprite("char_" + code + "_stare");
+                var peek = LoadSprite("char_" + code + "_peek");
                 var jumpscare = LoadSprite("char_" + code + "_jumpscare");
                 var blackout = LoadSprite("char_" + code + "_blackout");
 
-                if (idle == null && stare == null && jumpscare == null && blackout == null)
+                if (idle == null && stare == null && peek == null
+                    && jumpscare == null && blackout == null)
                 {
                     continue;
                 }
@@ -140,6 +143,7 @@ namespace NailongFNAF.EditorTools
                     Id = id,
                     Idle = idle,
                     Stare = stare,
+                    Peek = peek,
                     Jumpscare = jumpscare,
                     Blackout = blackout
                 });

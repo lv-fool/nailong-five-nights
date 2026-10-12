@@ -23,6 +23,22 @@ namespace NailongFNAF.UI
     /// </summary>
     public class PrototypeScene : MonoBehaviour
     {
+        /// <summary>立绘姿态。缺哪张按兜底链退，见 <see cref="CharacterArt.Get"/>。</summary>
+        public enum CharacterPose
+        {
+            /// <summary>静态站立（门口 / 监控）。</summary>
+            Idle = 0,
+
+            /// <summary>直视镜头（逼近时）。</summary>
+            Stare = 1,
+
+            /// <summary>从门外探出头（噜噜被灯照到时）。</summary>
+            Peek = 2,
+
+            /// <summary>跳杀特写。</summary>
+            Jumpscare = 3
+        }
+
         /// <summary>一个角色的立绘。缺哪张哪张留空，运行时退回色块占位。</summary>
         [System.Serializable]
         public class CharacterArt
@@ -30,10 +46,43 @@ namespace NailongFNAF.UI
             public EnemyId Id;
             public Sprite Idle;
             public Sprite Stare;
+
+            /// <summary>从门外探头那张（噜噜专用）。没给就退回 Stare。</summary>
+            public Sprite Peek;
+
             public Sprite Jumpscare;
 
             /// <summary>断电后「收电费」用的那张。没给就退回 Jumpscare。</summary>
             public Sprite Blackout;
+
+            /// <summary>取某个姿态的图；缺了就沿兜底链往下退，全缺返回 null（交给色块）。</summary>
+            public Sprite Get(CharacterPose pose)
+            {
+                switch (pose)
+                {
+                    case CharacterPose.Stare:
+                        return Stare != null ? Stare : Idle;
+
+                    case CharacterPose.Peek:
+                        if (Peek != null)
+                        {
+                            return Peek;
+                        }
+
+                        return Stare != null ? Stare : Idle;
+
+                    case CharacterPose.Jumpscare:
+                        if (Jumpscare != null)
+                        {
+                            return Jumpscare;
+                        }
+
+                        return Stare != null ? Stare : Idle;
+
+                    default:
+                        return Idle;
+                }
+            }
         }
 
         /// <summary>鼠标进入屏幕左右各这个比例就转头（左右各三分之一）。</summary>
@@ -592,8 +641,9 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 噜噜是被灯照到才现形，用瞪着你那张；门类敌人用站姿
-            ShowCharacter(image, id, id == EnemyId.Lulu, SideCharacterHeight, alpha);
+            // 噜噜是从门外探出头，用探头那张；门类敌人站在门口，用站姿
+            var pose = id == EnemyId.Lulu ? CharacterPose.Peek : CharacterPose.Idle;
+            ShowCharacter(image, id, pose, SideCharacterHeight, alpha);
         }
 
         /// <summary>门口 / 门外站着谁。门类敌人要门没关；噜噜要那一侧的灯亮着。</summary>
@@ -699,13 +749,11 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>按目标高度显示某个角色的立绘；没素材就退回该角色的代表色剪影。</summary>
-        private void ShowCharacter(Image image, EnemyId id, bool staring, float height,
+        private void ShowCharacter(Image image, EnemyId id, CharacterPose pose, float height,
             float alpha = 1f)
         {
             var art = FindCharacter(id);
-            Sprite sprite = art != null
-                ? (staring && art.Stare != null ? art.Stare : art.Idle)
-                : null;
+            Sprite sprite = art != null ? art.Get(pose) : null;
 
             image.gameObject.SetActive(true);
 
@@ -824,7 +872,8 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            ShowCharacter(_monitorCharacter, EnemyId.Nailong, true, MonitorCharacterHeight);
+            ShowCharacter(_monitorCharacter, EnemyId.Nailong, CharacterPose.Stare,
+                MonitorCharacterHeight);
         }
 
         private static string CameraName(int index)
