@@ -90,8 +90,26 @@ namespace NailongFNAF.Core
             float dt = Time.deltaTime;
 
             Clock.Tick(dt);
+
+            // 断电的一瞬间所有设备一起熄火 —— 门弹开、灯灭、监控掉线。
+            // 玩家也再打不开（CanOperate 会挡住），只剩黑暗和奶龙的闪脸。
+            if (Power.IsDepleted)
+            {
+                ReleaseAllDevices();
+            }
+
             Power.SetUsageLevel(CountUsageLevel());
             Power.Tick(dt);
+        }
+
+        /// <summary>断电后设备全部停摆。</summary>
+        private void ReleaseAllDevices()
+        {
+            LeftDoorClosed = false;
+            RightDoorClosed = false;
+            LeftLightOn = false;
+            RightLightOn = false;
+            MonitorUp = false;
         }
 
         /// <summary>重开一夜。</summary>

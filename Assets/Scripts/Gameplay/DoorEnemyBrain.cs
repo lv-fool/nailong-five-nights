@@ -1,14 +1,16 @@
 namespace NailongFNAF.Gameplay
 {
     /// <summary>
-    /// 门类敌人：牛来（左门）与袋鼠（右门）。
+    /// 门类敌人：牛来（左门）与袋鼠（右门）；奶龙也走这条路（右门）。
     ///
     /// 路线：远处(0) → 走廊(1) → 门口(2)。
     /// 到了门口：门关着 → 被挡回去；门开着 → 撑过 DoorGraceSeconds 就动手。
     ///
+    /// **右门是共用通道** —— 门口已经站着别人时，后来者停在走廊等（先来后到）。
+    ///
     /// 纯逻辑类，不引用 UnityEngine。
     /// </summary>
-    public sealed class DoorEnemyBrain : EnemyBrain
+    public class DoorEnemyBrain : EnemyBrain
     {
         /// <summary>到门口后，门开着能撑多久（秒）。给玩家留出关门的时间。</summary>
         public const float DefaultDoorGraceSeconds = 3f;
@@ -33,6 +35,22 @@ namespace NailongFNAF.Gameplay
         {
             Side = side;
             DoorGraceSeconds = doorGraceSeconds > 0f ? doorGraceSeconds : DefaultDoorGraceSeconds;
+        }
+
+        /// <summary>再走一步就到门口，可门口已经站着别人 —— 留在走廊等。</summary>
+        protected override bool CanAdvance(EnemyContext ctx)
+        {
+            if (Stage >= MaxStage)
+            {
+                return false;
+            }
+
+            if (Stage + 1 >= MaxStage && ctx.IsDoorTakenByOther(Side, Id))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         protected override void Advance(EnemyContext ctx)

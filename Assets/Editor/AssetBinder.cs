@@ -43,6 +43,7 @@ namespace NailongFNAF.EditorTools
                 "ui_door_right_open", "ui_door_right_closed",
                 "mon_cam1", "mon_cam2", "mon_cam3",
                 "char_nailong_idle", "char_nailong_stare", "char_nailong_jumpscare",
+                "char_nailong_blackout",
                 "char_niulai_idle", "char_niulai_stare", "char_niulai_jumpscare",
                 "char_daishu_idle", "char_daishu_stare", "char_daishu_jumpscare",
                 "char_lulu_idle", "char_lulu_stare", "char_lulu_jumpscare"
@@ -126,8 +127,9 @@ namespace NailongFNAF.EditorTools
                 var idle = LoadSprite("char_" + code + "_idle");
                 var stare = LoadSprite("char_" + code + "_stare");
                 var jumpscare = LoadSprite("char_" + code + "_jumpscare");
+                var blackout = LoadSprite("char_" + code + "_blackout");
 
-                if (idle == null && stare == null && jumpscare == null)
+                if (idle == null && stare == null && jumpscare == null && blackout == null)
                 {
                     continue;
                 }
@@ -137,7 +139,8 @@ namespace NailongFNAF.EditorTools
                     Id = id,
                     Idle = idle,
                     Stare = stare,
-                    Jumpscare = jumpscare
+                    Jumpscare = jumpscare,
+                    Blackout = blackout
                 });
             }
 

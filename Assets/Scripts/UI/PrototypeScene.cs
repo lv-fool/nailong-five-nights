@@ -23,7 +23,7 @@ namespace NailongFNAF.UI
     /// </summary>
     public class PrototypeScene : MonoBehaviour
     {
-        /// <summary>一个角色的三张立绘。缺哪张哪张留空，运行时退回色块占位。</summary>
+        /// <summary>一个角色的立绘。缺哪张哪张留空，运行时退回色块占位。</summary>
         [System.Serializable]
         public class CharacterArt
         {
@@ -31,6 +31,9 @@ namespace NailongFNAF.UI
             public Sprite Idle;
             public Sprite Stare;
             public Sprite Jumpscare;
+
+            /// <summary>断电后「收电费」用的那张。没给就退回 Jumpscare。</summary>
+            public Sprite Blackout;
         }
 
         /// <summary>鼠标进入屏幕左右各这个比例就转头（左右各三分之一）。</summary>
@@ -41,6 +44,16 @@ namespace NailongFNAF.UI
 
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
+
+        /// <summary>断电时奶龙立绘的高度。</summary>
+        private const float BlackoutCharacterHeight = 880f;
+
+        /// <summary>断电时奶龙贴左边多远（UI 参考分辨率下的像素）。</summary>
+        private const float BlackoutAnchorX = 60f;
+
+        /// <summary>断电闪烁的频率（次/秒）：刚断电 → 快撑不住。</summary>
+        private const float BlackoutBlinkSlowHz = 1.8f;
+        private const float BlackoutBlinkFastHz = 5.5f;
 
         /// <summary>跳杀立绘按这个宽度铺满屏幕（UI 参考分辨率）。</summary>
         private const float JumpscareWidth = 1920f;
@@ -120,11 +133,16 @@ namespace NailongFNAF.UI
         private Text _clockText;
         private Text _powerText;
         private Image[] _usageBars;
+
+        /// <summary>左下角「电量 + Usage」整组。断电后收起来，跟原版一样只剩黑暗。</summary>
+        private CanvasGroup _powerGroup;
+
         private CanvasGroup _debugGroup;
         private Text _debugText;
         private Image _jumpscareOverlay;
         private Image _jumpscareImage;
         private Text _jumpscareText;
+        private Image _blackoutCharacter;
         private Font _font;
         private Sprite _solidSprite;
 
@@ -241,19 +259,27 @@ namespace NailongFNAF.UI
 
         private void UpdateView(GameManager gm)
         {
-            float width = Screen.width;
-            float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
+            if (CanOperate(gm))
+            {
+                float width = Screen.width;
+                float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
-            if (x <= TurnZone)
-            {
-                _panTarget = -1f;
-            }
-            else if (x >= 1f - TurnZone)
-            {
-                _panTarget = 1f;
+                if (x <= TurnZone)
+                {
+                    _panTarget = -1f;
+                }
+                else if (x >= 1f - TurnZone)
+                {
+                    _panTarget = 1f;
+                }
+                else
+                {
+                    _panTarget = 0f;
+                }
             }
             else
             {
+                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
                 _panTarget = 0f;
             }
 
@@ -384,15 +410,26 @@ namespace NailongFNAF.UI
             // 跳杀 / 断电时玩家已经不能操作，界面一并收起来
             bool locked = gm.HasPowerOut || _hasJumpscare;
 
-            // 背景、门片、门口立绘
+            // 背景、门片、门口立绘、断电演出
             if (gm.HasPowerOut)
             {
                 SetBlackout();
                 HideDoors();
                 HideSideCharacters();
+
+                // 断电 → 奶龙来收电费：黑暗里一闪一闪
+                if (_hasJumpscare)
+                {
+                    _blackoutCharacter.gameObject.SetActive(false);
+                }
+                else
+                {
+                    ApplyBlackoutCharacter();
+                }
             }
             else
             {
+                _blackoutCharacter.gameObject.SetActive(false);
                 ApplyBackgroundLayers();
 
                 if (_hasJumpscare)
@@ -407,8 +444,8 @@ namespace NailongFNAF.UI
                 }
             }
 
-            // 监控层
-            bool monitorUp = gm.MonitorUp && !_hasJumpscare;
+            // 监控层：断电后整套掉线，别挡着断电演出
+            bool monitorUp = gm.MonitorUp && !_hasJumpscare && !gm.HasPowerOut;
             if (monitorUp)
             {
                 ApplyMonitorOverlay(gm);
@@ -569,6 +606,42 @@ namespace NailongFNAF.UI
             _sideLeftCharacter.gameObject.SetActive(false);
             _sideRightCharacter.gameObject.SetActive(false);
             _monitorCharacter.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// 断电演出：奶龙在黑暗里现形，脑袋一闪一闪。
+        /// 亮度在「几乎全黑」和「看清它」之间**硬切**（方波，不是渐隐）—— 原版就是这么闪的；
+        /// 越接近动手闪得越快，逼玩家盯着天亮。
+        /// </summary>
+        private void ApplyBlackoutCharacter()
+        {
+            var art = FindCharacter(EnemyId.Nailong);
+            Sprite sprite = art != null
+                ? (art.Blackout != null ? art.Blackout : art.Jumpscare)
+                : null;
+
+            if (sprite == null)
+            {
+                _blackoutCharacter.gameObject.SetActive(false);
+                return;
+            }
+
+            _blackoutCharacter.gameObject.SetActive(true);
+            _blackoutCharacter.preserveAspect = true;
+            _blackoutCharacter.sprite = sprite;
+            FitHeight(_blackoutCharacter.rectTransform, sprite, BlackoutCharacterHeight);
+
+            float progress = _enemyDirector != null && _enemyDirector.Blackout != null
+                ? _enemyDirector.Blackout.Progress
+                : 0f;
+
+            float hz = Mathf.Lerp(BlackoutBlinkSlowHz, BlackoutBlinkFastHz, progress);
+            bool lit = Mathf.Repeat(Time.time * hz, 1f) < 0.5f;
+
+            _blackoutCharacter.color = new Color(1f, 1f, 1f, lit ? 0.95f : 0.06f);
+            _blackoutCharacter.rectTransform.anchoredPosition = new Vector2(
+                BlackoutAnchorX + Mathf.Sin(Time.time * 29f) * 5f,
+                Mathf.Cos(Time.time * 23f) * 5f);
         }
 
         /// <summary>按目标高度显示某个角色的立绘；没素材就退回该角色的代表色剪影。</summary>
@@ -869,6 +942,10 @@ namespace NailongFNAF.UI
             _clockText.text = FormatHour(gm.Clock.CurrentHour);
             _powerText.text = "Power left: " + Mathf.CeilToInt(gm.Power.Level) + "%";
             UpdateUsageBars(gm.Power.UsageLevel);
+
+            // 断电了就没有「还剩多少电、用了几格」这回事了
+            _powerGroup.alpha = gm.HasPowerOut ? 0f : 1f;
+
             _debugText.text = BuildDebugInfo(gm);
         }
 
@@ -960,18 +1037,17 @@ namespace NailongFNAF.UI
 
         private static string DescribeBrain(EnemyBrain brain)
         {
+            // 奶龙既有路径位置、又蹲在某个机位，两个都要显示
+            var nailong = brain as NailongBrain;
+            if (nailong != null)
+            {
+                return "CAM " + (nailong.CameraIndex + 1) + " " + StageName(nailong.Stage);
+            }
+
             var door = brain as DoorEnemyBrain;
             if (door != null)
             {
-                switch (door.Stage)
-                {
-                    case 0:
-                        return "AWAY";
-                    case 1:
-                        return "CORRIDOR";
-                    default:
-                        return "AT DOOR";
-                }
+                return StageName(door.Stage);
             }
 
             var lulu = brain as LuluBrain;
@@ -988,13 +1064,20 @@ namespace NailongFNAF.UI
                 }
             }
 
-            var nailong = brain as NailongBrain;
-            if (nailong != null)
-            {
-                return "CAM " + (nailong.CameraIndex + 1);
-            }
-
             return "-";
+        }
+
+        private static string StageName(int stage)
+        {
+            switch (stage)
+            {
+                case 0:
+                    return "AWAY";
+                case 1:
+                    return "CORRIDOR";
+                default:
+                    return "AT DOOR";
+            }
         }
 
         // ---------------------------------------------------------------
@@ -1014,6 +1097,7 @@ namespace NailongFNAF.UI
             BuildWallButtons();
             BuildMonitorLayer();
             BuildMonitorHandle();
+            BuildBlackoutLayer();
             BuildHud();
             BuildDebugLayer();
             BuildJumpscareLayer();
@@ -1189,6 +1273,31 @@ namespace NailongFNAF.UI
             StretchToParent(label.rectTransform);
         }
 
+        /// <summary>
+        /// 断电后从黑暗里冒出来的奶龙。
+        /// 摆在**左门**位置 —— 它平时走右门，断电时却从另一边来「收电费」。
+        /// </summary>
+        private void BuildBlackoutLayer()
+        {
+            var go = new GameObject("BlackoutCharacter", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 0f);
+            rect.pivot = new Vector2(0f, 0f);
+            rect.anchoredPosition = new Vector2(BlackoutAnchorX, 0f);
+            rect.sizeDelta = new Vector2(600f, BlackoutCharacterHeight);
+
+            _blackoutCharacter = go.GetComponent<Image>();
+            _blackoutCharacter.sprite = _solidSprite;
+            _blackoutCharacter.preserveAspect = true;
+            _blackoutCharacter.raycastTarget = false;
+            _blackoutCharacter.color = Color.white;
+
+            go.SetActive(false);
+        }
+
         private void BuildHud()
         {
             var hud = new GameObject("Hud", typeof(RectTransform));
@@ -1201,13 +1310,18 @@ namespace NailongFNAF.UI
             PlaceRect(_clockText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
                 new Vector2(-40f, -28f), new Vector2(300f, 54f));
 
-            // 电量：左下角
-            _powerText = MakeText(hud.transform, "PowerText", "Power left: 99%",
+            // 电量 + Usage：左下角。装在同一个组里，断电后整组收起
+            var powerGroup = new GameObject("PowerGroup", typeof(RectTransform), typeof(CanvasGroup));
+            powerGroup.transform.SetParent(hud.transform, false);
+            StretchToParent(powerGroup.GetComponent<RectTransform>());
+            _powerGroup = powerGroup.GetComponent<CanvasGroup>();
+
+            _powerText = MakeText(powerGroup.transform, "PowerText", "Power left: 99%",
                 TextAnchor.LowerLeft, 30, new Color(0.92f, 0.92f, 0.92f));
             PlaceRect(_powerText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(40f, 104f), new Vector2(420f, 40f));
 
-            var usageLabel = MakeText(hud.transform, "UsageLabel", "Usage:",
+            var usageLabel = MakeText(powerGroup.transform, "UsageLabel", "Usage:",
                 TextAnchor.LowerLeft, 24, new Color(0.80f, 0.80f, 0.80f));
             PlaceRect(usageLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(40f, 62f), new Vector2(110f, 30f));
@@ -1216,7 +1330,7 @@ namespace NailongFNAF.UI
             for (int i = 0; i < _usageBars.Length; i++)
             {
                 var go = new GameObject("UsageBar" + i, typeof(RectTransform), typeof(Image));
-                go.transform.SetParent(hud.transform, false);
+                go.transform.SetParent(powerGroup.transform, false);
 
                 PlaceRect(go.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 0f),
                     new Vector2(152f + i * 30f, 62f), new Vector2(22f, 26f));

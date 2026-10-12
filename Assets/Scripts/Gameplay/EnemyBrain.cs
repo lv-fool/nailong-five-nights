@@ -7,7 +7,8 @@ namespace NailongFNAF.Gameplay
     /// 结果不超过活动度就前进一格。活动度越高，敌人越勤快；活动度 0 则整夜不动。
     ///
     /// 「格」的含义由子类定义 —— 门类敌人是「远处 → 走廊 → 门口」，
-    /// 噜噜多一层「门外」，奶龙干脆不走路、在机位之间跳。
+    /// 噜噜多一层「门外」，奶龙也走这条路（右门），只是它的每一步得先偷到电，
+    /// 所以它把 <see cref="CanAdvance"/> 覆盖成 false，关掉这里这套通用掷骰。
     ///
     /// 纯逻辑类，不引用 UnityEngine。
     /// </summary>
@@ -103,8 +104,8 @@ namespace NailongFNAF.Gameplay
         /// <summary>子类：掷骰成功，前进一格。</summary>
         protected abstract void Advance(EnemyContext ctx);
 
-        /// <summary>子类：位置阶梯的终点。</summary>
-        protected virtual int MaxStage
+        /// <summary>子类：位置阶梯的终点。公开是为了让调度层能判断「谁站在门口」。</summary>
+        public virtual int MaxStage
         {
             get { return 2; }
         }

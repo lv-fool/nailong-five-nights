@@ -20,6 +20,7 @@ OUT_DIR = os.path.join(ROOT, "Assets", "Art", "Characters")
 # (源图, 目标名不带扩展名)
 JOBS = [
     (r"D:/QQmm/retouch_2026101220575682.png", "char_nailong_jumpscare"),
+    (r"D:/QQmm/retouch_2026101220523820.png", "char_nailong_blackout"),
     (r"D:/QQmm/com.ss.android.ugc.aweme_20261012204701_edit_3695.png", "char_nailong_idle"),
     (r"D:/QQmm/retouch_2026101220485848.png", "char_nailong_stare"),
 ]

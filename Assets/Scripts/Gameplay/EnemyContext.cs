@@ -22,9 +22,25 @@ namespace NailongFNAF.Gameplay
         /// <summary>监控正看着第几个机位（0 起，仅 MonitorUp 时有意义）。</summary>
         public int CameraIndex;
 
+        /// <summary>
+        /// 右门口现在被谁占着（没人就是 null）。
+        ///
+        /// 右门是奶龙与袋鼠**共用的通道** —— 同一条路上不能同时挤两个威胁，
+        /// 先到的站门口，后到的在走廊等着。
+        /// </summary>
+        public EnemyId? RightDoorHolder;
+
         public EnemyContext(bool leftDoorClosed, bool rightDoorClosed,
             bool leftLightOn, bool rightLightOn, bool monitorUp,
             ViewSide view, int cameraIndex)
+            : this(leftDoorClosed, rightDoorClosed, leftLightOn, rightLightOn,
+                monitorUp, view, cameraIndex, null)
+        {
+        }
+
+        public EnemyContext(bool leftDoorClosed, bool rightDoorClosed,
+            bool leftLightOn, bool rightLightOn, bool monitorUp,
+            ViewSide view, int cameraIndex, EnemyId? rightDoorHolder)
         {
             LeftDoorClosed = leftDoorClosed;
             RightDoorClosed = rightDoorClosed;
@@ -33,6 +49,7 @@ namespace NailongFNAF.Gameplay
             MonitorUp = monitorUp;
             View = view;
             CameraIndex = cameraIndex;
+            RightDoorHolder = rightDoorHolder;
         }
 
         public bool IsDoorClosed(Side side)
@@ -43,6 +60,20 @@ namespace NailongFNAF.Gameplay
         public bool IsLightOn(Side side)
         {
             return side == Side.Left ? LeftLightOn : RightLightOn;
+        }
+
+        /// <summary>
+        /// 这一侧的门口是不是已经站着别人了。
+        /// 左门目前是牛来的专属通道，不存在争抢，所以只看右门。
+        /// </summary>
+        public bool IsDoorTakenByOther(Side side, EnemyId self)
+        {
+            if (side != Side.Right || !RightDoorHolder.HasValue)
+            {
+                return false;
+            }
+
+            return RightDoorHolder.Value != self;
         }
 
         /// <summary>玩家此刻是否正看着指定这一侧（开着监控时不算 —— 那时在看屏幕）。</summary>

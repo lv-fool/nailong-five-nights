@@ -247,8 +247,44 @@ namespace NailongFNAF.Tests
         }
 
         // ---------------------------------------------------------------
-        // 奶龙：偷电，看监控即止
+        // 奶龙：偷电 + 摸右门，看监控即止
         // ---------------------------------------------------------------
+
+        [Test]
+        public void 奶龙_活动度越高偷电越快()
+        {
+            var slowest = new NailongBrain(0, new FixedRandom(1), 3);
+            var fastest = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+
+            Assert.AreEqual(NailongBrain.DefaultSlowStealIntervalSeconds,
+                slowest.StealIntervalSeconds, Tolerance);
+            Assert.AreEqual(NailongBrain.DefaultFastStealIntervalSeconds,
+                fastest.StealIntervalSeconds, Tolerance);
+            Assert.Greater(slowest.StealIntervalSeconds, fastest.StealIntervalSeconds);
+        }
+
+        [Test]
+        public void 奶龙_走的是右门()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+
+            Assert.AreEqual(Side.Right, brain.Side);
+        }
+
+        [Test]
+        public void 奶龙_活动度为零时整夜不偷电也不推进()
+        {
+            var brain = new NailongBrain(0, new FixedRandom(1), 3);
+            var ctx = EnemyContext.Idle();
+
+            for (int i = 0; i < 200; i++)
+            {
+                brain.Tick(1f, ctx);
+            }
+
+            Assert.AreEqual(0f, brain.ConsumePendingDrain(), Tolerance);
+            Assert.AreEqual(0, brain.Stage);
+        }
 
         [Test]
         public void 奶龙_没人看时按间隔偷电()
@@ -256,12 +292,101 @@ namespace NailongFNAF.Tests
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(NailongBrain.DefaultStealIntervalSeconds, ctx);
+            brain.Tick(brain.StealIntervalSeconds, ctx);
 
             Assert.AreEqual(1f, brain.ConsumePendingDrain(), Tolerance);
 
             // 取过之后就清零了
             Assert.AreEqual(0f, brain.ConsumePendingDrain(), Tolerance);
+        }
+
+        [Test]
+        public void 奶龙_偷到电就沿右门推进一步()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            var ctx = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, ctx);
+
+            Assert.AreEqual(1f, brain.ConsumePendingDrain(), Tolerance);
+            Assert.AreEqual(1, brain.Stage);
+            Assert.AreEqual(1, brain.AdvanceCount);
+        }
+
+        [Test]
+        public void 奶龙_掷骰没过就不推进()
+        {
+            // 活动度 1，骰子固定掷 20 —— 过不了
+            var brain = new NailongBrain(1, new FixedRandom(EnemyBrain.MaxActivityLevel), 3);
+            var ctx = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, ctx);
+
+            Assert.AreEqual(1f, brain.ConsumePendingDrain(), Tolerance);
+            Assert.AreEqual(0, brain.Stage);
+            Assert.AreEqual(0, brain.AdvanceCount);
+        }
+
+        [Test]
+        public void 奶龙_右门口站着别人时在走廊等()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+
+            // 袋鼠已经站在右门口
+            var taken = new EnemyContext(false, false, false, false, false,
+                ViewSide.Front, 0, EnemyId.Daishu);
+
+            brain.Tick(brain.StealIntervalSeconds, taken);
+            Assert.AreEqual(1, brain.Stage);
+
+            // 再偷一次：走廊 → 门口这一步被挡住，停在走廊
+            brain.Tick(brain.StealIntervalSeconds, taken);
+            Assert.AreEqual(1, brain.Stage);
+        }
+
+        [Test]
+        public void 奶龙_门口站着的是自己就不挡()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+
+            var mine = new EnemyContext(false, false, false, false, false,
+                ViewSide.Front, 0, EnemyId.Nailong);
+
+            brain.Tick(brain.StealIntervalSeconds, mine);
+            brain.Tick(brain.StealIntervalSeconds, mine);
+
+            Assert.AreEqual(2, brain.Stage);
+        }
+
+        [Test]
+        public void 奶龙_到了右门口门关着会被挡回起点()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            var idle = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            Assert.AreEqual(2, brain.Stage);
+
+            var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
+            brain.Tick(0.1f, closed);
+
+            Assert.AreEqual(0, brain.Stage);
+        }
+
+        [Test]
+        public void 奶龙_到了右门口门开着撑够就动手()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            var idle = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            Assert.AreEqual(2, brain.Stage);
+
+            brain.Tick(NailongBrain.DefaultDoorGraceSeconds, idle);
+
+            Assert.IsTrue(brain.IsAttacking);
         }
 
         [Test]
@@ -271,9 +396,10 @@ namespace NailongFNAF.Tests
             int original = brain.CameraIndex;
 
             var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, original);
-            brain.Tick(NailongBrain.DefaultStealIntervalSeconds, ctx);
+            brain.Tick(NailongBrain.DefaultRevealSeconds, ctx);
 
             Assert.AreEqual(0f, brain.ConsumePendingDrain(), Tolerance);
+            Assert.AreEqual(0, brain.Stage);
             Assert.AreNotEqual(original, brain.CameraIndex);
             Assert.AreEqual(1, brain.RelocateCount);
         }
@@ -342,24 +468,10 @@ namespace NailongFNAF.Tests
             int other = (brain.CameraIndex + 1) % 3;
 
             var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, other);
-            brain.Tick(NailongBrain.DefaultStealIntervalSeconds, ctx);
+            brain.Tick(brain.StealIntervalSeconds, ctx);
 
             Assert.AreEqual(1f, brain.ConsumePendingDrain(), Tolerance);
             Assert.AreEqual(0, brain.RelocateCount);
-        }
-
-        [Test]
-        public void 奶龙永远不会攻击()
-        {
-            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
-            var ctx = EnemyContext.Idle();
-
-            for (int i = 0; i < 500; i++)
-            {
-                brain.Tick(1f, ctx);
-            }
-
-            Assert.IsFalse(brain.IsAttacking);
         }
 
         [Test]
@@ -368,11 +480,77 @@ namespace NailongFNAF.Tests
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 1);
             var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, 0);
 
-            brain.Tick(NailongBrain.DefaultStealIntervalSeconds, ctx);
+            brain.Tick(NailongBrain.DefaultRevealSeconds, ctx);
 
             Assert.AreEqual(0, brain.CameraIndex);
             Assert.AreEqual(0, brain.RelocateCount);
             Assert.AreEqual(0f, brain.ConsumePendingDrain(), Tolerance);
+        }
+
+        // ---------------------------------------------------------------
+        // 断电序列（奶龙收电费）
+        // ---------------------------------------------------------------
+
+        [Test]
+        public void 断电序列_没开始时不推进()
+        {
+            var sequence = new BlackoutSequence();
+
+            sequence.Tick(100f);
+
+            Assert.IsFalse(sequence.HasFired);
+            Assert.AreEqual(0f, sequence.Elapsed, Tolerance);
+        }
+
+        [Test]
+        public void 断电序列_撑过宽限时间就动手()
+        {
+            var sequence = new BlackoutSequence(10f);
+            sequence.Begin();
+
+            sequence.Tick(6f);
+            Assert.IsFalse(sequence.HasFired);
+            Assert.AreEqual(0.6f, sequence.Progress, Tolerance);
+
+            sequence.Tick(4f);
+            Assert.IsTrue(sequence.HasFired);
+            Assert.AreEqual(1f, sequence.Progress, Tolerance);
+        }
+
+        [Test]
+        public void 断电序列_到点后不再累计()
+        {
+            var sequence = new BlackoutSequence(10f);
+            sequence.Begin();
+
+            sequence.Tick(6f);
+            sequence.Tick(10f);
+            Assert.IsTrue(sequence.HasFired);
+
+            float atFire = sequence.Elapsed;
+            sequence.Tick(10f);
+
+            Assert.AreEqual(atFire, sequence.Elapsed, Tolerance);
+        }
+
+        [Test]
+        public void 断电序列_复位后可以重来()
+        {
+            var sequence = new BlackoutSequence(10f);
+            sequence.Begin();
+            sequence.Tick(20f);
+            Assert.IsTrue(sequence.HasFired);
+
+            sequence.Reset();
+
+            Assert.IsFalse(sequence.IsRunning);
+            Assert.IsFalse(sequence.HasFired);
+            Assert.AreEqual(0f, sequence.Elapsed, Tolerance);
+
+            sequence.Begin();
+            sequence.Tick(5f);
+
+            Assert.IsFalse(sequence.HasFired);
         }
 
         // ---------------------------------------------------------------

@@ -483,6 +483,7 @@ MonoBehaviour:
     Idle: {fileID: 21300000, guid: e0d62dcfd5b3c964eb6da24ec3ea934d, type: 3}
     Stare: {fileID: 21300000, guid: 25adaa5a4fc21914b8e1219ec276a474, type: 3}
     Jumpscare: {fileID: 21300000, guid: feafbfdb1de2c934cb4917e3bf5d0ad1, type: 3}
+    Blackout: {fileID: 21300000, guid: 927d21e120e48cc42a775a8ccd63dc68, type: 3}
 --- !u!4 &2125327511
 Transform:
   m_ObjectHideFlags: 0
