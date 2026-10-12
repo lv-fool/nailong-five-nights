@@ -3,41 +3,70 @@ namespace NailongFNAF.Gameplay
     /// <summary>
     /// 断电之后那一段：奶龙来「收电费」。
     ///
-    /// 电量归零 → 奶龙在黑暗里现形、脑袋一闪一闪 → 撑过 GraceSeconds 还没到 6 点就跳杀。
+    /// 流程照着 FNAF 1 原版的断电走，分三段：
     ///
-    /// 期间**时钟照走** —— 离天亮够近的话有机会躲过去（同 FNAF 1 的断电处理）。
+    /// 1. **静默**（默认 2 秒）—— 门弹开、灯灭、监控掉线，一片漆黑，它还没来。
+    /// 2. **音乐**（默认 13.5 秒，跟音频长度走）—— 它从左门现形，音乐盒响起，
+    ///    脸跟着**节拍**一亮一亮：拍点上看清它，其余时候沉在黑暗里。
+    /// 3. **漆黑**（默认 2.5 秒）—— 音乐停了，画面彻底黑掉，只剩一个勉强能辨认的轮廓。
+    ///
+    /// 三段走完就动手。期间**时钟照走** —— 离天亮够近的话有机会躲过去。
     /// 这段时间其他敌人全部停摆，只剩它。
     ///
     /// 纯逻辑类，不引用 UnityEngine。
     /// </summary>
     public sealed class BlackoutSequence
     {
-        /// <summary>断电后给玩家的宽限时间（秒）。</summary>
-        public const float DefaultGraceSeconds = 12f;
+        /// <summary>断电到它现身之间的静默（秒）。</summary>
+        public const float DefaultSilenceSeconds = 2f;
 
-        /// <summary>宽限时间。</summary>
-        public float GraceSeconds { get; private set; }
+        /// <summary>音乐盒的长度（秒）。运行时会按实际音频长度覆盖。</summary>
+        public const float DefaultMusicSeconds = 13.5f;
 
-        /// <summary>已经过去多久（秒）。</summary>
-        public float Elapsed { get; private set; }
+        /// <summary>音乐停下之后、动手之前的漆黑（秒）。</summary>
+        public const float DefaultDarkSeconds = 2.5f;
 
-        /// <summary>是否已经开始演出。</summary>
+        /// <summary>音乐盒一拍多长（秒）。脸就是跟着这个节拍闪的。</summary>
+        public const float DefaultBeatSeconds = 0.5f;
+
+        public float SilenceSeconds { get; private set; }
+        public float MusicSeconds { get; private set; }
+        public float DarkSeconds { get; private set; }
+        public float BeatSeconds { get; private set; }
+
+        /// <summary>当前处在哪一段。</summary>
+        public BlackoutPhase Phase { get; private set; }
+
+        /// <summary>演出是否正在进行。</summary>
         public bool IsRunning { get; private set; }
 
         /// <summary>是否已经到点、该动手了。</summary>
         public bool HasFired { get; private set; }
 
-        /// <summary>0 → 1 的进度。UI 拿它让闪烁越闪越快。</summary>
+        /// <summary>当前这一段已经走了多久（秒）。</summary>
+        public float Elapsed { get; private set; }
+
+        /// <summary>整段演出已经走了多久（秒）。</summary>
+        public float TotalElapsed { get; private set; }
+
+        /// <summary>整段演出的总长（秒）。</summary>
+        public float TotalSeconds
+        {
+            get { return SilenceSeconds + MusicSeconds + DarkSeconds; }
+        }
+
+        /// <summary>0 → 1 的总进度。</summary>
         public float Progress
         {
             get
             {
-                if (GraceSeconds <= 0f)
+                float total = TotalSeconds;
+                if (total <= 0f)
                 {
                     return 1f;
                 }
 
-                float progress = Elapsed / GraceSeconds;
+                float progress = TotalElapsed / total;
 
                 if (progress < 0f)
                 {
@@ -48,22 +77,56 @@ namespace NailongFNAF.Gameplay
             }
         }
 
+        /// <summary>
+        /// 音乐阶段里的拍相位（0 → 1）。UI 拿它让脸跟着节拍亮。
+        /// 不在音乐阶段时恒为 0。
+        /// </summary>
+        public float BeatPhase
+        {
+            get
+            {
+                if (BeatSeconds <= 0f)
+                {
+                    return 0f;
+                }
+
+                float phase = Elapsed % BeatSeconds;
+                return phase / BeatSeconds;
+            }
+        }
+
         public BlackoutSequence()
-            : this(DefaultGraceSeconds)
+            : this(DefaultSilenceSeconds, DefaultMusicSeconds,
+                DefaultDarkSeconds, DefaultBeatSeconds)
         {
         }
 
-        public BlackoutSequence(float graceSeconds)
+        public BlackoutSequence(float silenceSeconds, float musicSeconds,
+            float darkSeconds, float beatSeconds)
         {
-            GraceSeconds = graceSeconds > 0f ? graceSeconds : DefaultGraceSeconds;
+            SilenceSeconds = silenceSeconds > 0f ? silenceSeconds : DefaultSilenceSeconds;
+            MusicSeconds = musicSeconds > 0f ? musicSeconds : DefaultMusicSeconds;
+            DarkSeconds = darkSeconds > 0f ? darkSeconds : DefaultDarkSeconds;
+            BeatSeconds = beatSeconds > 0f ? beatSeconds : DefaultBeatSeconds;
         }
 
-        /// <summary>断电那一刻调用，开始倒数。</summary>
+        /// <summary>按实际音频长度调整音乐阶段 —— 音乐播完就该进漆黑段。</summary>
+        public void SetMusicSeconds(float seconds)
+        {
+            if (seconds > 0f)
+            {
+                MusicSeconds = seconds;
+            }
+        }
+
+        /// <summary>断电那一刻调用，从静默段开始。</summary>
         public void Begin()
         {
             IsRunning = true;
             HasFired = false;
+            Phase = BlackoutPhase.Silence;
             Elapsed = 0f;
+            TotalElapsed = 0f;
         }
 
         /// <summary>重新供电 / 重开一夜时复位。</summary>
@@ -71,7 +134,9 @@ namespace NailongFNAF.Gameplay
         {
             IsRunning = false;
             HasFired = false;
+            Phase = BlackoutPhase.Silence;
             Elapsed = 0f;
+            TotalElapsed = 0f;
         }
 
         /// <summary>推进一帧。dt 为真实秒数。</summary>
@@ -83,10 +148,56 @@ namespace NailongFNAF.Gameplay
             }
 
             Elapsed += dt;
+            TotalElapsed += dt;
 
-            if (Elapsed >= GraceSeconds)
+            // 掉帧时一帧可能跨过整段，所以用 while 把阶段一次推到位
+            while (!HasFired)
             {
-                HasFired = true;
+                float limit = LengthOf(Phase);
+                if (Elapsed < limit)
+                {
+                    break;
+                }
+
+                Elapsed -= limit;
+                Step();
+            }
+        }
+
+        private void Step()
+        {
+            switch (Phase)
+            {
+                case BlackoutPhase.Silence:
+                    Phase = BlackoutPhase.Music;
+                    break;
+
+                case BlackoutPhase.Music:
+                    Phase = BlackoutPhase.Dark;
+                    break;
+
+                default:
+                    Phase = BlackoutPhase.Done;
+                    HasFired = true;
+                    break;
+            }
+        }
+
+        private float LengthOf(BlackoutPhase phase)
+        {
+            switch (phase)
+            {
+                case BlackoutPhase.Silence:
+                    return SilenceSeconds;
+
+                case BlackoutPhase.Music:
+                    return MusicSeconds;
+
+                case BlackoutPhase.Dark:
+                    return DarkSeconds;
+
+                default:
+                    return 0f;
             }
         }
     }

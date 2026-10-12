@@ -41,9 +41,15 @@ namespace NailongFNAF.Gameplay
         [Tooltip("奶龙摸到右门后，门开着撑多久就动手（秒）。")]
         [SerializeField] private float _nailongDoorGraceSeconds = NailongBrain.DefaultDoorGraceSeconds;
 
-        [Header("断电")]
-        [Tooltip("断电后奶龙来「收电费」，给玩家这么多秒。期间到 6 点就算撑过去。")]
-        [SerializeField] private float _blackoutGraceSeconds = BlackoutSequence.DefaultGraceSeconds;
+        [Header("断电（照原版分三段走）")]
+        [Tooltip("断电到它现身之间的静默（秒）—— 一片漆黑，什么也看不见。")]
+        [SerializeField] private float _blackoutSilenceSeconds = BlackoutSequence.DefaultSilenceSeconds;
+
+        [Tooltip("音乐盒的长度（秒）。运行时会按实际音频长度自动覆盖。")]
+        [SerializeField] private float _blackoutMusicSeconds = BlackoutSequence.DefaultMusicSeconds;
+
+        [Tooltip("音乐停下之后、动手之前的漆黑（秒）—— 只剩一个勉强能辨认的轮廓。")]
+        [SerializeField] private float _blackoutDarkSeconds = BlackoutSequence.DefaultDarkSeconds;
 
         /// <summary>某个敌人动手了。参数是敌人代号，用来挑对应的跳杀视频 / 惊吓图。</summary>
         public event Action<EnemyId> Attacked;
@@ -54,6 +60,7 @@ namespace NailongFNAF.Gameplay
         private IRandomSource _rng;
         private NailongBrain _nailong;
         private BlackoutSequence _blackout;
+        private float _blackoutMusicSecondsOverride;
         private GameManager _game;
         private bool _attackFired;
 
@@ -61,6 +68,26 @@ namespace NailongFNAF.Gameplay
         public BlackoutSequence Blackout
         {
             get { return _blackout; }
+        }
+
+        /// <summary>
+        /// 按实际音乐素材的长度校准断电演出的音乐段 —— 音乐播完就该进漆黑段。
+        /// 由 PrototypeScene 拿到 AudioManager 之后调用；没素材就保持 Inspector 里的值。
+        /// 换夜会重建序列，所以这里把值记下来，<see cref="Build"/> 时重新应用。
+        /// </summary>
+        public void SetBlackoutMusicSeconds(float seconds)
+        {
+            if (seconds <= 0f)
+            {
+                return;
+            }
+
+            _blackoutMusicSecondsOverride = seconds;
+
+            if (_blackout != null)
+            {
+                _blackout.SetMusicSeconds(seconds);
+            }
         }
 
         public int NightIndex
@@ -114,7 +141,13 @@ namespace NailongFNAF.Gameplay
             _attackFired = false;
             _brains.Clear();
 
-            _blackout = new BlackoutSequence(_blackoutGraceSeconds);
+            float musicSeconds = _blackoutMusicSecondsOverride > 0f
+                ? _blackoutMusicSecondsOverride
+                : _blackoutMusicSeconds;
+
+            _blackout = new BlackoutSequence(_blackoutSilenceSeconds,
+                musicSeconds, _blackoutDarkSeconds,
+                BlackoutSequence.DefaultBeatSeconds);
 
             _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Left, 0, _rng);
             _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Right, 0, _rng);

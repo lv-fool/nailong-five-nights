@@ -23,6 +23,9 @@ namespace NailongFNAF.Audio
         [SerializeField] private AudioClip _sfxFootstep;
         [SerializeField] private AudioClip _sfxPowerOut;
 
+        [Header("断电音乐（音乐盒，单独一条轨）")]
+        [SerializeField] private AudioClip _powerOutMusic;
+
         [Header("音量")]
         [Range(0f, 1f)]
         [SerializeField] private float _ambientVolume = 0.30f;
@@ -30,15 +33,20 @@ namespace NailongFNAF.Audio
         [Range(0f, 1f)]
         [SerializeField] private float _sfxVolume = 0.75f;
 
+        [Range(0f, 1f)]
+        [SerializeField] private float _musicVolume = 0.62f;
+
         private AudioSource _ambientA;
         private AudioSource _ambientB;
         private AudioSource _sfx;
+        private AudioSource _music;
 
         private void Awake()
         {
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
             _ambientB = CreateSource("AmbientB", true, _ambientVolume);
             _sfx = CreateSource("Sfx", false, _sfxVolume);
+            _music = CreateSource("PowerOutMusic", false, _musicVolume);
 
             PlayLoop(_ambientA, _ambFan);
             PlayLoop(_ambientB, _ambHum);
@@ -94,6 +102,38 @@ namespace NailongFNAF.Audio
             Play(_sfxPowerOut);
         }
 
+        /// <summary>断电演出进入音乐段时调用。音乐盒不循环，播完自然停。</summary>
+        public void PlayPowerOutMusic()
+        {
+            if (_powerOutMusic == null || _music == null)
+            {
+                return;
+            }
+
+            // 先 Stop 再 Play：同一个 source 复用时必须停下来，
+            // 否则会从上次的位置接着放（调试时重进断电段就露馅了）
+            _music.Stop();
+            _music.clip = _powerOutMusic;
+            _music.Play();
+        }
+
+        /// <summary>音乐段结束（或提前跳杀）时把音乐掐掉。</summary>
+        public void StopPowerOutMusic()
+        {
+            if (_music == null)
+            {
+                return;
+            }
+
+            _music.Stop();
+        }
+
+        /// <summary>音乐盒素材的长度（秒）。没素材时返回 0。</summary>
+        public float PowerOutMusicLength
+        {
+            get { return _powerOutMusic != null ? _powerOutMusic.length : 0f; }
+        }
+
         private void Play(AudioClip clip)
         {
             if (clip == null || _sfx == null)
@@ -108,7 +148,8 @@ namespace NailongFNAF.Audio
         public void SetClips(AudioClip ambFan, AudioClip ambHum,
             AudioClip doorClose, AudioClip doorOpen,
             AudioClip lightOn, AudioClip lightOff,
-            AudioClip cameraSwitch, AudioClip footstep, AudioClip powerOut)
+            AudioClip cameraSwitch, AudioClip footstep, AudioClip powerOut,
+            AudioClip powerOutMusic)
         {
             _ambFan = ambFan;
             _ambHum = ambHum;
@@ -119,6 +160,7 @@ namespace NailongFNAF.Audio
             _sfxCameraSwitch = cameraSwitch;
             _sfxFootstep = footstep;
             _sfxPowerOut = powerOut;
+            _powerOutMusic = powerOutMusic;
         }
     }
 }

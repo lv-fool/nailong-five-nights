@@ -86,7 +86,8 @@ namespace NailongFNAF.EditorTools
                 LoadClip("Assets/Audio/SFX/sfx_light_off.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_camera_switch.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_footstep.ogg"),
-                LoadClip("Assets/Audio/SFX/sfx_power_out.ogg"));
+                LoadClip("Assets/Audio/SFX/sfx_power_out.ogg"),
+                LoadClip("Assets/Audio/SFX/sfx_power_out_music.wav"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);
@@ -95,7 +96,7 @@ namespace NailongFNAF.EditorTools
             EditorSceneManager.SaveScene(scene);
 
             Debug.Log("[奶龙] 素材已接入：背景 3 张、门片 4 张、监控画面 3 张、"
-                + "角色立绘 " + characters.Length + " 套、音频 9 条。按 Play 看效果。");
+                + "角色立绘 " + characters.Length + " 套、音频 10 条。按 Play 看效果。");
         }
 
         /// <summary>按机位顺序读监控画面；缺哪张哪张留空，运行时退回色块。</summary>

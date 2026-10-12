@@ -51,9 +51,23 @@ namespace NailongFNAF.UI
         /// <summary>断电时奶龙贴左边多远（UI 参考分辨率下的像素）。</summary>
         private const float BlackoutAnchorX = 60f;
 
-        /// <summary>断电闪烁的频率（次/秒）：刚断电 → 快撑不住。</summary>
-        private const float BlackoutBlinkSlowHz = 1.8f;
-        private const float BlackoutBlinkFastHz = 5.5f;
+        /// <summary>拍点上脸亮到这个程度 —— 那一刻看得清清楚楚。</summary>
+        private const float BlackoutLitAlpha = 0.96f;
+
+        /// <summary>拍与拍之间沉下去的程度 —— 几乎看不见。</summary>
+        private const float BlackoutDimAlpha = 0.05f;
+
+        /// <summary>音乐停之后的漆黑段：只剩一个勉强能辨认的轮廓。</summary>
+        private const float BlackoutFinalAlpha = 0.07f;
+
+        /// <summary>
+        /// 一拍里前这么长的一段时间是亮的，其余沉下去。
+        /// 硬切（不是渐隐）—— 原版 Freddy 的脸就是这么跟着音乐闪的。
+        /// </summary>
+        private const float BlackoutLitFraction = 0.5f;
+
+        /// <summary>音乐素材末尾这段衰减尾巴不算进音乐段 —— 音乐停下时画面正好黑下去。</summary>
+        private const float BlackoutMusicTailTrim = 0.5f;
 
         /// <summary>跳杀立绘按这个宽度铺满屏幕（UI 参考分辨率）。</summary>
         private const float JumpscareWidth = 1920f;
@@ -153,6 +167,7 @@ namespace NailongFNAF.UI
         private float _jumpscareTime;
         private bool _wasPowerOut;
         private float _footstepTimer;
+        private bool _musicPlaying;
         private bool _debugVisible;
 
         /// <summary>转头进度：-1 全左、0 正前方、+1 全右。</summary>
@@ -174,7 +189,27 @@ namespace NailongFNAF.UI
                 Debug.LogWarning("[奶龙] 没取到内置字体，HUD 上的文字不会显示（功能不受影响）。");
             }
 
+            SyncPowerOutMusicLength();
+
             BuildUi();
+        }
+
+        /// <summary>断电演出的音乐段有多长，由音频素材决定 —— 换素材不用改代码。</summary>
+        private void SyncPowerOutMusicLength()
+        {
+            if (_audio == null || _enemyDirector == null)
+            {
+                return;
+            }
+
+            float length = _audio.PowerOutMusicLength;
+            if (length <= 0f)
+            {
+                return;
+            }
+
+            // 末尾留一点衰减尾巴：音乐停下的那一刻，画面正好黑下去
+            _enemyDirector.SetBlackoutMusicSeconds(length - BlackoutMusicTailTrim);
         }
 
         private void OnDestroy()
@@ -615,6 +650,15 @@ namespace NailongFNAF.UI
         /// </summary>
         private void ApplyBlackoutCharacter()
         {
+            var blackout = _enemyDirector != null ? _enemyDirector.Blackout : null;
+
+            // 静默段：它还没来，画面就是纯黑
+            if (blackout == null || blackout.Phase == BlackoutPhase.Silence)
+            {
+                _blackoutCharacter.gameObject.SetActive(false);
+                return;
+            }
+
             var art = FindCharacter(EnemyId.Nailong);
             Sprite sprite = art != null
                 ? (art.Blackout != null ? art.Blackout : art.Jumpscare)
@@ -631,17 +675,27 @@ namespace NailongFNAF.UI
             _blackoutCharacter.sprite = sprite;
             FitHeight(_blackoutCharacter.rectTransform, sprite, BlackoutCharacterHeight);
 
-            float progress = _enemyDirector != null && _enemyDirector.Blackout != null
-                ? _enemyDirector.Blackout.Progress
-                : 0f;
+            float alpha;
+            float shake;
 
-            float hz = Mathf.Lerp(BlackoutBlinkSlowHz, BlackoutBlinkFastHz, progress);
-            bool lit = Mathf.Repeat(Time.time * hz, 1f) < 0.5f;
+            if (blackout.Phase == BlackoutPhase.Music)
+            {
+                // 跟着音乐盒的拍子亮：拍点前半段照亮它，后半段沉回黑暗
+                bool lit = blackout.BeatPhase < BlackoutLitFraction;
+                alpha = lit ? BlackoutLitAlpha : BlackoutDimAlpha;
+                shake = lit ? 5f : 2f;
+            }
+            else
+            {
+                // 音乐停了 —— 彻底黑掉，只剩一个勉强能辨认的轮廓
+                alpha = BlackoutFinalAlpha;
+                shake = 1.5f;
+            }
 
-            _blackoutCharacter.color = new Color(1f, 1f, 1f, lit ? 0.95f : 0.06f);
+            _blackoutCharacter.color = new Color(1f, 1f, 1f, alpha);
             _blackoutCharacter.rectTransform.anchoredPosition = new Vector2(
-                BlackoutAnchorX + Mathf.Sin(Time.time * 29f) * 5f,
-                Mathf.Cos(Time.time * 23f) * 5f);
+                BlackoutAnchorX + Mathf.Sin(Time.time * 29f) * shake,
+                Mathf.Cos(Time.time * 23f) * shake);
         }
 
         /// <summary>按目标高度显示某个角色的立绘；没素材就退回该角色的代表色剪影。</summary>
@@ -880,13 +934,20 @@ namespace NailongFNAF.UI
                 if (!_wasPowerOut)
                 {
                     _audio.PlayPowerOut();
+                    _wasPowerOut = true;
                 }
 
-                _wasPowerOut = true;
+                UpdatePowerOutMusic();
                 return;
             }
 
             _wasPowerOut = false;
+
+            if (_musicPlaying)
+            {
+                _audio.StopPowerOutMusic();
+                _musicPlaying = false;
+            }
 
             if (gm.HasBeenCaught || _enemyDirector == null || !AnyEnemyNearby())
             {
@@ -900,6 +961,32 @@ namespace NailongFNAF.UI
             {
                 _audio.PlayFootstep();
                 _footstepTimer = Random.Range(0.7f, 1.5f);
+            }
+        }
+
+        /// <summary>
+        /// 音乐盒只在断电演出的音乐段响。它一停，画面就该彻底黑下去 ——
+        /// 原版 Freddy 的脸就是这么跟着音乐亮完、然后归于一片漆黑的。
+        /// </summary>
+        private void UpdatePowerOutMusic()
+        {
+            var blackout = _enemyDirector != null ? _enemyDirector.Blackout : null;
+            bool wantMusic = blackout != null && blackout.Phase == BlackoutPhase.Music;
+
+            if (wantMusic == _musicPlaying)
+            {
+                return;
+            }
+
+            _musicPlaying = wantMusic;
+
+            if (wantMusic)
+            {
+                _audio.PlayPowerOutMusic();
+            }
+            else
+            {
+                _audio.StopPowerOutMusic();
             }
         }
 

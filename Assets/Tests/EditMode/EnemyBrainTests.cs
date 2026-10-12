@@ -494,51 +494,114 @@ namespace NailongFNAF.Tests
         [Test]
         public void 断电序列_没开始时不推进()
         {
-            var sequence = new BlackoutSequence();
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
 
             sequence.Tick(100f);
 
             Assert.IsFalse(sequence.HasFired);
             Assert.AreEqual(0f, sequence.Elapsed, Tolerance);
+            Assert.AreEqual(BlackoutPhase.Silence, sequence.Phase);
         }
 
         [Test]
-        public void 断电序列_撑过宽限时间就动手()
+        public void 断电序列_静默到音乐到漆黑依次推进()
         {
-            var sequence = new BlackoutSequence(10f);
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
             sequence.Begin();
 
-            sequence.Tick(6f);
-            Assert.IsFalse(sequence.HasFired);
-            Assert.AreEqual(0.6f, sequence.Progress, Tolerance);
+            Assert.AreEqual(BlackoutPhase.Silence, sequence.Phase);
 
-            sequence.Tick(4f);
+            sequence.Tick(1.9f);
+            Assert.AreEqual(BlackoutPhase.Silence, sequence.Phase);
+
+            // 跨过静默段 → 音乐盒响起
+            sequence.Tick(0.2f);
+            Assert.AreEqual(BlackoutPhase.Music, sequence.Phase);
+            Assert.IsFalse(sequence.HasFired);
+
+            sequence.Tick(9.5f);
+            Assert.AreEqual(BlackoutPhase.Music, sequence.Phase);
+
+            // 音乐播完 → 彻底漆黑
+            sequence.Tick(0.5f);
+            Assert.AreEqual(BlackoutPhase.Dark, sequence.Phase);
+            Assert.IsFalse(sequence.HasFired);
+
+            // 漆黑段走完才动手
+            sequence.Tick(3f);
             Assert.IsTrue(sequence.HasFired);
-            Assert.AreEqual(1f, sequence.Progress, Tolerance);
+            Assert.AreEqual(BlackoutPhase.Done, sequence.Phase);
+        }
+
+        [Test]
+        public void 断电序列_音乐段的脸跟着拍子走()
+        {
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
+            sequence.Begin();
+            sequence.Tick(2f);
+
+            Assert.AreEqual(BlackoutPhase.Music, sequence.Phase);
+            Assert.AreEqual(0f, sequence.BeatPhase, Tolerance);
+
+            // 半拍：相位到 0.5
+            sequence.Tick(0.25f);
+            Assert.AreEqual(0.5f, sequence.BeatPhase, Tolerance);
+
+            // 再过半拍正好一整拍，回到 0
+            sequence.Tick(0.25f);
+            Assert.AreEqual(0f, sequence.BeatPhase, Tolerance);
+        }
+
+        [Test]
+        public void 断电序列_音乐段长度可以按音频校准()
+        {
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
+            sequence.SetMusicSeconds(20f);
+
+            Assert.AreEqual(20f, sequence.MusicSeconds, Tolerance);
+
+            sequence.Begin();
+            sequence.Tick(2f);
+            sequence.Tick(19f);
+            Assert.AreEqual(BlackoutPhase.Music, sequence.Phase);
+
+            sequence.Tick(1f);
+            Assert.AreEqual(BlackoutPhase.Dark, sequence.Phase);
+        }
+
+        [Test]
+        public void 断电序列_掉帧跨过整段也会动手()
+        {
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
+            sequence.Begin();
+
+            sequence.Tick(100f);
+
+            Assert.IsTrue(sequence.HasFired);
         }
 
         [Test]
         public void 断电序列_到点后不再累计()
         {
-            var sequence = new BlackoutSequence(10f);
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
             sequence.Begin();
 
             sequence.Tick(6f);
-            sequence.Tick(10f);
+            sequence.Tick(20f);
             Assert.IsTrue(sequence.HasFired);
 
-            float atFire = sequence.Elapsed;
+            float atFire = sequence.TotalElapsed;
             sequence.Tick(10f);
 
-            Assert.AreEqual(atFire, sequence.Elapsed, Tolerance);
+            Assert.AreEqual(atFire, sequence.TotalElapsed, Tolerance);
         }
 
         [Test]
         public void 断电序列_复位后可以重来()
         {
-            var sequence = new BlackoutSequence(10f);
+            var sequence = new BlackoutSequence(2f, 10f, 3f, 0.5f);
             sequence.Begin();
-            sequence.Tick(20f);
+            sequence.Tick(100f);
             Assert.IsTrue(sequence.HasFired);
 
             sequence.Reset();
@@ -546,9 +609,10 @@ namespace NailongFNAF.Tests
             Assert.IsFalse(sequence.IsRunning);
             Assert.IsFalse(sequence.HasFired);
             Assert.AreEqual(0f, sequence.Elapsed, Tolerance);
+            Assert.AreEqual(BlackoutPhase.Silence, sequence.Phase);
 
             sequence.Begin();
-            sequence.Tick(5f);
+            sequence.Tick(1f);
 
             Assert.IsFalse(sequence.HasFired);
         }
