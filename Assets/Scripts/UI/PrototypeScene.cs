@@ -113,6 +113,12 @@ namespace NailongFNAF.UI
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
 
+        /// <summary>左走廊的机位索引（0 = 大厅，1 = 左走廊，2 = 右走廊）。</summary>
+        private const int LeftHallCameraIndex = 1;
+
+        /// <summary>右走廊的机位索引。</summary>
+        private const int RightHallCameraIndex = 2;
+
         /// <summary>断电时奶龙立绘的高度。</summary>
         private const float BlackoutCharacterHeight = 880f;
 
@@ -892,22 +898,47 @@ namespace NailongFNAF.UI
             }
         }
 
-        /// <summary>奶龙蹲在当前机位时，把它叠在监控画面上（正对镜头，所以用 stare）。</summary>
+        /// <summary>
+        /// 监控画面里叠谁。奶龙优先（它蹲在机位偷电，正对镜头所以用 stare）；
+        /// 其次噜噜 —— 它从某条走廊摸过来，玩家能在监控里提前看到它从哪边来。
+        /// </summary>
         private void ApplyMonitorCharacter(GameManager gm)
         {
             var nailong = _enemyDirector != null
                 ? _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain
                 : null;
 
-            if (nailong == null || nailong.IsAttacking
-                || nailong.CameraIndex != gm.CurrentCameraIndex)
+            if (nailong != null && !nailong.IsAttacking
+                && nailong.CameraIndex == gm.CurrentCameraIndex)
             {
-                _monitorCharacter.gameObject.SetActive(false);
+                ShowCharacter(_monitorCharacter, EnemyId.Nailong, CharacterPose.Stare,
+                    MonitorCharacterHeight);
                 return;
             }
 
-            ShowCharacter(_monitorCharacter, EnemyId.Nailong, CharacterPose.Stare,
-                MonitorCharacterHeight);
+            var lulu = _enemyDirector != null
+                ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
+                : null;
+
+            if (lulu != null && !lulu.IsAttacking && lulu.Stage >= 1
+                && CameraIndexForSide(lulu.Side) == gm.CurrentCameraIndex)
+            {
+                // 走廊里站着用站姿；摸到门外就换成瞪着镜头那张
+                CharacterPose pose = lulu.Stage >= lulu.MaxStage
+                    ? CharacterPose.Angry
+                    : CharacterPose.Idle;
+
+                ShowCharacter(_monitorCharacter, EnemyId.Lulu, pose, MonitorCharacterHeight);
+                return;
+            }
+
+            _monitorCharacter.gameObject.SetActive(false);
+        }
+
+        /// <summary>某条走廊对应哪个机位。</summary>
+        private static int CameraIndexForSide(Side side)
+        {
+            return side == Side.Left ? LeftHallCameraIndex : RightHallCameraIndex;
         }
 
         private static string CameraName(int index)

@@ -45,6 +45,27 @@ namespace NailongFNAF.Tests
             }
         }
 
+        /// <summary>
+        /// 只对「选边」这次调用做区分：掷骰（范围大于 2）永远成功，
+        /// 选边（范围正好是 2）第一次给左边、第二次给右边。
+        /// 用来验证「边只在走廊阶段掷一次」—— 要是到门外又重掷，第二次会翻到右边。
+        /// </summary>
+        private sealed class SidePickRandom : IRandomSource
+        {
+            public int SidePicks;
+
+            public int Range(int minInclusive, int maxExclusive)
+            {
+                if (maxExclusive - minInclusive > 2)
+                {
+                    return minInclusive;
+                }
+
+                SidePicks++;
+                return SidePicks == 1 ? minInclusive : minInclusive + 1;
+            }
+        }
+
         private static void AdvanceToStage(EnemyBrain brain, EnemyContext ctx, int targetStage)
         {
             for (int i = 0; i < 50 && brain.Stage < targetStage; i++)
@@ -244,6 +265,39 @@ namespace NailongFNAF.Tests
             brain.Tick(3f, ctx);
 
             Assert.AreEqual(0f, brain.StareProgress, Tolerance);
+        }
+
+        // --- 走廊阶段就定边（这样监控里能提前看到它从哪边来）---
+
+        [Test]
+        public void 噜噜_走到走廊就定下走哪边()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var ctx = EnemyContext.Idle();
+
+            AdvanceToStage(brain, ctx, 1);
+
+            Assert.AreEqual(1, brain.Stage);
+            // FixedRandom(1) 选边结果：Range(0,2) = 1 → 右侧
+            Assert.AreEqual(Side.Right, brain.Side);
+        }
+
+        [Test]
+        public void 噜噜_边只在走廊阶段掷一次()
+        {
+            var rng = new SidePickRandom();
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, rng);
+            var ctx = EnemyContext.Idle();
+
+            AdvanceToStage(brain, ctx, 1);
+            Assert.AreEqual(Side.Left, brain.Side);
+
+            AdvanceToStage(brain, ctx, 2);
+
+            // 到门外不再重掷 —— 重掷的话这里会变成右侧
+            Assert.AreEqual(2, brain.Stage);
+            Assert.AreEqual(Side.Left, brain.Side);
+            Assert.AreEqual(1, rng.SidePicks);
         }
 
         // --- 门外宽限跟活动度走 ---

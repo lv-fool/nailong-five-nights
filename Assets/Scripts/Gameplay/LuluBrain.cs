@@ -119,13 +119,15 @@ namespace NailongFNAF.Gameplay
         {
             if (Stage == 0)
             {
+                // 一离开起点就把路线定下来 —— 这样它在走廊阶段就能被监控看到，
+                // 玩家能提前知道它从哪边来（不然走到门口才现形，等于突然出现）
                 Stage = 1;
+                Side = Rng.Range(0, 2) == 0 ? Side.Left : Side.Right;
                 return;
             }
 
-            // 走到门外，随机挑一侧
+            // 走到门外。边在走廊阶段已经定好，这里不再重掷
             Stage = 2;
-            Side = Rng.Range(0, 2) == 0 ? Side.Left : Side.Right;
             OutsideTimer = 0f;
             StareProgress = 0f;
         }
