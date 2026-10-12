@@ -193,7 +193,7 @@ namespace NailongFNAF.Tests
 
             AdvanceToStage(brain, ctx, 2);
 
-            brain.Tick(LuluBrain.DefaultOutsideGraceSeconds, ctx);
+            brain.Tick(brain.OutsideGraceSeconds, ctx);
 
             Assert.IsTrue(brain.IsAttacking);
         }
@@ -207,7 +207,7 @@ namespace NailongFNAF.Tests
 
             AdvanceToStage(brain, ctx, 2);
 
-            brain.Tick(LuluBrain.DefaultOutsideGraceSeconds, ctx);
+            brain.Tick(brain.OutsideGraceSeconds, ctx);
 
             Assert.IsTrue(brain.IsAttacking);
         }
@@ -244,6 +244,93 @@ namespace NailongFNAF.Tests
             brain.Tick(3f, ctx);
 
             Assert.AreEqual(0f, brain.StareProgress, Tolerance);
+        }
+
+        // --- 门外宽限跟活动度走 ---
+
+        [Test]
+        public void 噜噜_活动度越高门外宽限越短()
+        {
+            var easy = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1));
+            var hard = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+
+            Assert.AreEqual(LuluBrain.GraceAtZeroActivity, easy.OutsideGraceSeconds, Tolerance);
+            Assert.AreEqual(LuluBrain.GraceAtMaxActivity, hard.OutsideGraceSeconds, Tolerance);
+            Assert.Greater(easy.OutsideGraceSeconds, hard.OutsideGraceSeconds);
+        }
+
+        [Test]
+        public void 噜噜_宽限按活动度线性折算_两端会被夹住()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1));
+            float mid = (LuluBrain.GraceAtZeroActivity + LuluBrain.GraceAtMaxActivity) * 0.5f;
+
+            Assert.AreEqual(mid, brain.GraceForActivity(10), Tolerance);
+            Assert.AreEqual(LuluBrain.GraceAtZeroActivity, brain.GraceForActivity(-5), Tolerance);
+            Assert.AreEqual(LuluBrain.GraceAtMaxActivity,
+                brain.GraceForActivity(EnemyBrain.MaxActivityLevel + 5), Tolerance);
+        }
+
+        [Test]
+        public void 噜噜_宽限的两端可以按项目改()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            Assert.AreEqual(LuluBrain.GraceAtMaxActivity, brain.OutsideGraceSeconds, Tolerance);
+
+            brain.SetGraceRange(20f, 10f);
+
+            Assert.AreEqual(10f, brain.OutsideGraceSeconds, Tolerance);
+            Assert.AreEqual(20f, brain.GraceForActivity(0), Tolerance);
+        }
+
+        [Test]
+        public void 噜噜_切夜时宽限跟着活动度重算()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1));
+            Assert.AreEqual(LuluBrain.GraceAtZeroActivity, brain.OutsideGraceSeconds, Tolerance);
+
+            brain.SetActivityLevel(EnemyBrain.MaxActivityLevel);
+
+            Assert.AreEqual(LuluBrain.GraceAtMaxActivity, brain.OutsideGraceSeconds, Tolerance);
+        }
+
+        [Test]
+        public void 噜噜_显式传的宽限不受活动度影响()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1), 5f, 2f, 3f);
+
+            brain.SetActivityLevel(EnemyBrain.MaxActivityLevel);
+
+            Assert.AreEqual(3f, brain.OutsideGraceSeconds, Tolerance);
+        }
+
+        [Test]
+        public void 噜噜_默认曲线下第1夜比隐藏夜宽松得多()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1));
+            var difficulty = NightDifficulty.CreateDefault();
+
+            float night1 = brain.GraceForActivity(difficulty.GetLevel(0, EnemyId.Lulu));
+            float hidden = brain.GraceForActivity(
+                difficulty.GetLevel(NightDifficulty.NightCount - 1, EnemyId.Lulu));
+
+            Assert.AreEqual(15.6f, night1, 0.1f);
+            Assert.AreEqual(9.2f, hidden, 0.1f);
+        }
+
+        [Test]
+        public void 噜噜_低活动度给的时间足够转头开灯再盯满两秒()
+        {
+            // 第 1 夜：活动度 1 → 15.6 秒，扣掉盯视的 2 秒还剩 13 秒多留给玩家反应
+            var brain = new LuluBrain(EnemyId.Lulu, 1, new FixedRandom(1));
+            var watching = new EnemyContext(false, false, false, true, false, ViewSide.Right, 0);
+
+            AdvanceToStage(brain, watching, 2);
+
+            brain.Tick(LuluBrain.DefaultStareSeconds, watching);
+
+            Assert.AreEqual(0, brain.Stage);
+            Assert.IsFalse(brain.IsAttacking);
         }
 
         // ---------------------------------------------------------------

@@ -118,8 +118,13 @@ namespace NailongFNAF.Gameplay
             RetreatedThisTick = true;
         }
 
-        /// <summary>运行中调整活动度（切夜、调试用）。</summary>
-        public void SetActivityLevel(int level)
+        /// <summary>
+        /// 运行中调整活动度（切夜、调试用）。
+        ///
+        /// 子类可以覆盖，把活动度再折算成别的参数 —— 比如噜噜的门外宽限就跟活动度走。
+        /// 覆盖时记得先调 base，否则 <see cref="ActivityLevel"/> 还是旧值。
+        /// </summary>
+        public virtual void SetActivityLevel(int level)
         {
             ActivityLevel = ClampActivity(level);
         }

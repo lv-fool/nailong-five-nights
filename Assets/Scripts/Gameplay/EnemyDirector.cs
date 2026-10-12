@@ -25,6 +25,13 @@ namespace NailongFNAF.Gameplay
         [Tooltip("监控机位数量。默认 3：大厅 / 左走廊 / 右走廊。")]
         [SerializeField] private int _cameraCount = 3;
 
+        [Header("噜噜")]
+        [Tooltip("门外宽限：活动度 0 时（秒）—— 最宽松。活动度越高，这个时间越短。")]
+        [SerializeField] private float _luluGraceAtZeroActivity = LuluBrain.GraceAtZeroActivity;
+
+        [Tooltip("门外宽限：活动度满级时（秒）—— 最紧。")]
+        [SerializeField] private float _luluGraceAtMaxActivity = LuluBrain.GraceAtMaxActivity;
+
         [Header("奶龙")]
         [Tooltip("偷电间隔：活动度 0 时（秒）。活动度越高偷得越勤。")]
         [SerializeField] private float _nailongSlowStealSeconds = NailongBrain.DefaultSlowStealIntervalSeconds;
@@ -151,7 +158,10 @@ namespace NailongFNAF.Gameplay
 
             _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Left, 0, _rng);
             _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Right, 0, _rng);
-            _brains[EnemyId.Lulu] = new LuluBrain(EnemyId.Lulu, 0, _rng);
+
+            var lulu = new LuluBrain(EnemyId.Lulu, 0, _rng);
+            lulu.SetGraceRange(_luluGraceAtZeroActivity, _luluGraceAtMaxActivity);
+            _brains[EnemyId.Lulu] = lulu;
 
             _nailong = new NailongBrain(0, _rng, _cameraCount,
                 _nailongSlowStealSeconds,
