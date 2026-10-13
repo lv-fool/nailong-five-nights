@@ -184,8 +184,16 @@ namespace NailongFNAF.UI
         private const float MapPanelHeight =
             MapPanelWidth * (MapViewY1 - MapViewY0) / (MapViewX1 - MapViewX0);
 
-        /// <summary>面板离屏幕右下角留出的边距。</summary>
+        /// <summary>面板离屏幕右边留出的边距。</summary>
         private const float MapPanelMargin = 26f;
+
+        /// <summary>
+        /// 面板离屏幕**底边**留出的距离。
+        /// 必须大于 <see cref="MonitorZone"/> × 参考高度（0.10 × 1080 = 108），
+        /// 否则点地图下半截（CAM 2B / 4B / YOU 那几行）时鼠标会落进
+        /// 「碰到底边就收监控」的热区，监控会莫名其妙关掉。
+        /// </summary>
+        private const float MapPanelBottomOffset = 140f;
 
         /// <summary>房间轮廓的线宽。</summary>
         private const float MapBorderThickness = 2f;
@@ -1549,7 +1557,7 @@ namespace NailongFNAF.UI
 
             var mapRect = map.GetComponent<RectTransform>();
             PlaceRect(mapRect, new Vector2(1f, 0f), new Vector2(1f, 0f),
-                new Vector2(-MapPanelMargin, MapPanelMargin),
+                new Vector2(-MapPanelMargin, MapPanelBottomOffset),
                 new Vector2(MapPanelWidth, MapPanelHeight));
 
             var mapBackground = map.GetComponent<Image>();
