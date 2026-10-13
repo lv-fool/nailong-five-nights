@@ -12,6 +12,9 @@ namespace NailongFNAF.Gameplay
     /// **右门是它和袋鼠共用的通道**：门口已经站着对方时，它留在走廊等（先来后到）。
     /// 到了门口，门关着就被挡回起点，门开着撑过宽限时间就动手。
     ///
+    /// 它**只在「能去的机位表」里换位** —— 不去的机位（比如只有声音、没有画面的厨房）
+    /// 在构造时从表里剔掉即可，见 <see cref="NailongBrain(int, IRandomSource, int[])"/>。
+    ///
     /// 断电之后它是另一副样子：从左门冒出来「收电费」，见 <see cref="BlackoutSequence"/>。
     ///
     /// 纯逻辑类，不引用 UnityEngine。
@@ -36,7 +39,7 @@ namespace NailongFNAF.Gameplay
         /// <summary>它现在蹲在第几个机位（0 起）。</summary>
         public int CameraIndex { get; private set; }
 
-        /// <summary>监控一共有几个机位。</summary>
+        /// <summary>它**可以去**的机位个数 —— 它不去的机位（比如只有声音的厨房）不算在内。</summary>
         public int CameraCount { get; private set; }
 
         /// <summary>活动度 0 时的偷电间隔（秒）。</summary>
@@ -71,6 +74,9 @@ namespace NailongFNAF.Gameplay
         private float _stealTimer;
         private float _pendingDrain;
 
+        /// <summary>它能蹲的机位（升序）—— 不去的机位不在这张表里。</summary>
+        private readonly int[] _cameras;
+
         public NailongBrain(int activityLevel, IRandomSource rng, int cameraCount)
             : this(activityLevel, rng, cameraCount,
                 DefaultSlowStealIntervalSeconds, DefaultFastStealIntervalSeconds,
@@ -81,11 +87,35 @@ namespace NailongFNAF.Gameplay
         public NailongBrain(int activityLevel, IRandomSource rng, int cameraCount,
             float slowStealIntervalSeconds, float fastStealIntervalSeconds,
             float stealPercentPerTick, float revealSeconds, float doorGraceSeconds)
+            : this(activityLevel, rng, AllCameras(cameraCount),
+                slowStealIntervalSeconds, fastStealIntervalSeconds,
+                stealPercentPerTick, revealSeconds, doorGraceSeconds)
+        {
+        }
+
+        public NailongBrain(int activityLevel, IRandomSource rng, int[] allowedCameras)
+            : this(activityLevel, rng, allowedCameras,
+                DefaultSlowStealIntervalSeconds, DefaultFastStealIntervalSeconds,
+                DefaultStealPercentPerTick, DefaultRevealSeconds, DefaultDoorGraceSeconds)
+        {
+        }
+
+        /// <summary>
+        /// 用「它能去的机位表」构造 —— 空表（或 null）时退回「第 0 ~ cameraCount-1 个全都能去」。
+        /// 想让它绕开某个机位（比如只有声音、没有画面的厨房），从表里剔掉即可。
+        /// </summary>
+        public NailongBrain(int activityLevel, IRandomSource rng, int[] allowedCameras,
+            float slowStealIntervalSeconds, float fastStealIntervalSeconds,
+            float stealPercentPerTick, float revealSeconds, float doorGraceSeconds)
             : base(EnemyId.Nailong, Side.Right, activityLevel, rng,
                 DefaultMoveIntervalSeconds, doorGraceSeconds)
         {
-            CameraCount = cameraCount < 1 ? 1 : cameraCount;
-            CameraIndex = Rng.Range(0, CameraCount);
+            _cameras = (allowedCameras != null && allowedCameras.Length > 0)
+                ? (int[])allowedCameras.Clone()
+                : AllCameras(1);
+
+            CameraCount = _cameras.Length;
+            CameraIndex = _cameras[Rng.Range(0, CameraCount)];
 
             SlowStealIntervalSeconds = slowStealIntervalSeconds > 0f
                 ? slowStealIntervalSeconds
@@ -100,6 +130,24 @@ namespace NailongFNAF.Gameplay
                 : DefaultStealPercentPerTick;
 
             RevealSeconds = revealSeconds > 0f ? revealSeconds : DefaultRevealSeconds;
+        }
+
+        /// <summary>「第 0 ~ count-1 个机位」这张表（count 至少 1）。</summary>
+        private static int[] AllCameras(int count)
+        {
+            if (count < 1)
+            {
+                count = 1;
+            }
+
+            var cameras = new int[count];
+
+            for (int i = 0; i < count; i++)
+            {
+                cameras[i] = i;
+            }
+
+            return cameras;
         }
 
         protected override void OnTick(float dt, EnemyContext ctx)
@@ -193,10 +241,10 @@ namespace NailongFNAF.Gameplay
             return drain;
         }
 
-        /// <summary>强制换到指定机位（调试 / 测试用）。</summary>
+        /// <summary>强制换到指定机位（调试 / 测试用）。不在它能去的表里就忽略。</summary>
         public void ForceCamera(int index)
         {
-            if (index < 0 || index >= CameraCount)
+            if (SlotOf(index) < 0)
             {
                 return;
             }
@@ -234,15 +282,31 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
-            // 随机挑一个「不同的」机位
+            // 在它能去的表里随机挑一个「不同的」机位
+            int current = SlotOf(CameraIndex);
             int next = Rng.Range(0, CameraCount - 1);
-            if (next >= CameraIndex)
+
+            if (current >= 0 && next >= current)
             {
                 next++;
             }
 
-            CameraIndex = next;
+            CameraIndex = _cameras[next];
             RelocateCount++;
+        }
+
+        /// <summary>机位号在 <see cref="_cameras"/> 里的位置；不在表里返回 -1。</summary>
+        private int SlotOf(int cameraIndex)
+        {
+            for (int i = 0; i < _cameras.Length; i++)
+            {
+                if (_cameras[i] == cameraIndex)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
     }
 }

@@ -45,6 +45,25 @@ namespace NailongFNAF.Tests
             }
         }
 
+        /// <summary>确定性骰子：从下界开始 0,1,2,... 循环（用来把「换位」走遍整张机位表）。</summary>
+        private sealed class CyclingRandom : IRandomSource
+        {
+            private int _next;
+
+            public int Range(int minInclusive, int maxExclusive)
+            {
+                if (maxExclusive <= minInclusive)
+                {
+                    return minInclusive;
+                }
+
+                int span = maxExclusive - minInclusive;
+                int value = minInclusive + _next % span;
+                _next++;
+                return value;
+            }
+        }
+
         /// <summary>
         /// 只对「选边」这次调用做区分：掷骰（范围大于 2）永远成功，
         /// 选边（范围正好是 2）第一次给左边、第二次给右边。
@@ -626,6 +645,59 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(0, brain.CameraIndex);
             Assert.AreEqual(0, brain.RelocateCount);
             Assert.AreEqual(0f, brain.ConsumePendingDrain(), Tolerance);
+        }
+
+        [Test]
+        public void 奶龙_不会去被剔掉的机位()
+        {
+            // 11 个机位里剔掉厨房（下标 9）
+            int[] allowed = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10 };
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new CyclingRandom(), allowed);
+
+            Assert.AreEqual(10, brain.CameraCount, "能去的机位是 10 个");
+            Assert.AreNotEqual(9, brain.CameraIndex, "一开始就不该落在被剔掉的机位上");
+
+            // 反复被看到 → 反复换位，把整张表走一遍
+            for (int i = 0; i < 60; i++)
+            {
+                int before = brain.CameraIndex;
+                var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, before);
+                brain.Tick(NailongBrain.DefaultRevealSeconds, ctx);
+
+                Assert.AreNotEqual(9, brain.CameraIndex, "换位后也不该落在被剔掉的机位上");
+                Assert.AreNotEqual(before, brain.CameraIndex, "换位必须换到别的机位");
+            }
+
+            Assert.Greater(brain.RelocateCount, 50);
+        }
+
+        [Test]
+        public void 奶龙_允许表只剩一个机位时不换位()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), new int[] { 4 });
+
+            Assert.AreEqual(1, brain.CameraCount);
+            Assert.AreEqual(4, brain.CameraIndex);
+
+            var ctx = new EnemyContext(false, false, false, false, true, ViewSide.Front, 4);
+            brain.Tick(NailongBrain.DefaultRevealSeconds, ctx);
+
+            Assert.AreEqual(4, brain.CameraIndex);
+            Assert.AreEqual(0, brain.RelocateCount);
+        }
+
+        [Test]
+        public void 奶龙_强制换到被剔掉的机位会被忽略()
+        {
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                new int[] { 0, 1, 3 });
+            int before = brain.CameraIndex;
+
+            brain.ForceCamera(9);
+            Assert.AreEqual(before, brain.CameraIndex, "不在表里的机位应当忽略");
+
+            brain.ForceCamera(3);
+            Assert.AreEqual(3, brain.CameraIndex, "表里的机位照常生效");
         }
 
         // ---------------------------------------------------------------

@@ -171,11 +171,17 @@ namespace NailongFNAF.UI
         /// <summary>右走廊（东走廊）的机位号。</summary>
         private const int RightHallCameraIndex = 6;
 
+        /// <summary>
+        /// 厨房（CAM 6）的机位号 —— 官方这个机位**只有声音、没有画面**，
+        /// 照官方处理：切到它就一片黑、只留机位名，全靠听。
+        /// 奶龙也不去这里（见 <c>EnemyDirector._nailongSkipCameras</c>）。
+        /// </summary>
+        private const int KitchenCameraIndex = 9;
+
         // ---------------------------------------------------------------
         // 小地图：整张 FNAF 1 官方平面图 —— 舞台 / 餐厅 / 海盗湾 / 西走廊 /
         // 储藏室 / 东走廊 / 后台 / 厨房 / 厕所 / 办公室，位置照官方那张图。
-        // 我们只有 3 个机位（1B 餐厅 / 2A 西走廊 / 4A 东走廊），这三间可点，
-        // 其余房间照原样画出来，但暗一档、不可点。
+        // 图上那 11 个 CAM 框全部可点，点一下切到对应机位。
         //
         // 房间坐标直接按官方图的原始像素写（967×791），画的时候统一缩放到面板 ——
         // 以后照图微调只改数字，不用自己换算。
@@ -1026,6 +1032,18 @@ namespace NailongFNAF.UI
         private void ApplyMonitorOverlay(GameManager gm)
         {
             int index = gm.CurrentCameraIndex;
+
+            // 厨房只有声音没有画面 —— 照官方，切过去一片黑，也不显示任何角色
+            if (index == KitchenCameraIndex)
+            {
+                _monitorOverlay.sprite = _solidSprite;
+                _monitorOverlay.color = Color.black;
+                _monitorLabel.text = CameraName(index) + "    (AUDIO ONLY)";
+                _monitorCharacter.gameObject.SetActive(false);
+                UpdateCameraBoxes(index);
+                return;
+            }
+
             Sprite frame = null;
 
             if (_monitorFrames != null && index >= 0 && index < _monitorFrames.Length)
@@ -1039,6 +1057,12 @@ namespace NailongFNAF.UI
 
             ApplyMonitorCharacter(gm);
 
+            UpdateCameraBoxes(index);
+        }
+
+        /// <summary>小地图上把当前机位那一格点亮。</summary>
+        private void UpdateCameraBoxes(int index)
+        {
             for (int i = 0; i < _camBoxes.Length; i++)
             {
                 _camBoxes[i].color = i == index ? CamBoxOn : CamBoxOff;

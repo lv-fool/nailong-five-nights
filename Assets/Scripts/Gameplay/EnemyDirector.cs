@@ -26,6 +26,10 @@ namespace NailongFNAF.Gameplay
             + "必须与 PrototypeScene.CameraNames 的长度一致（照官方平面图是 11 个）。")]
         [SerializeField] private int _cameraCount = 11;
 
+        [Tooltip("奶龙**不去**的机位（下标）。厨房（CAM 6，下标 9）只有声音、没有画面，"
+            + "奶龙不走那里。留空表示 11 个机位它都去。")]
+        [SerializeField] private int[] _nailongSkipCameras = { 9 };
+
         [Header("噜噜")]
         [Tooltip("门外宽限：活动度 0 时（秒）—— 最宽松。活动度越高，这个时间越短。")]
         [SerializeField] private float _luluGraceAtZeroActivity = LuluBrain.GraceAtZeroActivity;
@@ -164,7 +168,7 @@ namespace NailongFNAF.Gameplay
             lulu.SetGraceRange(_luluGraceAtZeroActivity, _luluGraceAtMaxActivity);
             _brains[EnemyId.Lulu] = lulu;
 
-            _nailong = new NailongBrain(0, _rng, _cameraCount,
+            _nailong = new NailongBrain(0, _rng, NailongCameras(),
                 _nailongSlowStealSeconds,
                 _nailongFastStealSeconds,
                 _nailongStealPercent,
@@ -173,6 +177,31 @@ namespace NailongFNAF.Gameplay
             _brains[EnemyId.Nailong] = _nailong;
 
             ApplyDifficulty();
+        }
+
+        /// <summary>
+        /// 奶龙能去的机位表 —— 从 0 ~ <see cref="_cameraCount"/>-1 里剔掉
+        /// <see cref="_nailongSkipCameras"/>。一个都没剔时返回 null，
+        /// 让 <see cref="NailongBrain"/> 用默认的「整段机位」。
+        /// </summary>
+        private int[] NailongCameras()
+        {
+            if (_nailongSkipCameras == null || _nailongSkipCameras.Length == 0)
+            {
+                return null;
+            }
+
+            var cameras = new List<int>();
+
+            for (int i = 0; i < _cameraCount; i++)
+            {
+                if (Array.IndexOf(_nailongSkipCameras, i) < 0)
+                {
+                    cameras.Add(i);
+                }
+            }
+
+            return cameras.Count > 0 ? cameras.ToArray() : null;
         }
 
         /// <summary>换夜：重设活动度。</summary>
