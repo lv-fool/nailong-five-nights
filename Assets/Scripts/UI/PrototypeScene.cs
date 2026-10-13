@@ -152,16 +152,82 @@ namespace NailongFNAF.UI
         /// <summary>鼠标进入屏幕底部这个比例就切换监控。</summary>
         private const float MonitorZone = 0.10f;
 
-        /// <summary>三个机位的显示名（大厅 / 左走廊 / 右走廊）。</summary>
+        /// <summary>
+        /// 三个机位的显示名。编号与房间名照 FNAF 1 官方 ——
+        /// 大厅就是官方那张图上的餐厅（CAM 1B），左右走廊对应西 / 东走廊（CAM 2A / 4A）。
+        /// </summary>
         private static readonly string[] CameraNames =
         {
-            "CAM 1A    HALL",
-            "CAM 2A    LEFT HALL",
-            "CAM 3A    RIGHT HALL"
+            "CAM 1B    DINING AREA",
+            "CAM 2A    WEST HALL",
+            "CAM 4A    EAST HALL"
         };
 
-        /// <summary>小地图上机位框的短标签。</summary>
-        private static readonly string[] CameraBoxLabels = { "CAM 1A", "CAM 2A", "CAM 3A" };
+        // ---------------------------------------------------------------
+        // 小地图：照 FNAF 1 官方那张平面图画，只留我们用得到的房间 ——
+        // 餐厅（大厅）/ 西走廊（左走廊）/ 东走廊（右走廊）+ 办公室。
+        // 舞台、后台、海盗湾、储藏室、厨房、厕所、走廊转角这些用不到的一律不画。
+        //
+        // 坐标是地图面板的本地坐标：原点在面板正中，x 向右、y 向上。
+        // ---------------------------------------------------------------
+
+        /// <summary>地图面板的尺寸。</summary>
+        private const float MapPanelWidth = 370f;
+        private const float MapPanelHeight = 460f;
+
+        /// <summary>面板离屏幕右下角留出的边距。</summary>
+        private const float MapPanelMargin = 26f;
+
+        /// <summary>房间外圈描边的厚度。</summary>
+        private const float MapBorderThickness = 3f;
+
+        /// <summary>平面图上的一块矩形（房间或走廊）。</summary>
+        private struct MapRectSpec
+        {
+            public string Label;
+            public Vector2 Center;
+            public Vector2 Size;
+        }
+
+        /// <summary>三个机位房间，顺序必须与机位索引一致。</summary>
+        private static readonly MapRectSpec[] MapCameraRooms =
+        {
+            new MapRectSpec
+            {
+                Label = "CAM 1B\nDINING",
+                Center = new Vector2(0f, 155f),
+                Size = new Vector2(320f, 150f)
+            },
+            new MapRectSpec
+            {
+                Label = "CAM 2A\nW HALL",
+                Center = new Vector2(-66f, -6f),
+                Size = new Vector2(72f, 120f)
+            },
+            new MapRectSpec
+            {
+                Label = "CAM 4A\nE HALL",
+                Center = new Vector2(66f, -6f),
+                Size = new Vector2(72f, 120f)
+            }
+        };
+
+        /// <summary>办公室 —— 玩家坐的地方，不是机位，只显示不点。</summary>
+        private static readonly MapRectSpec MapOfficeRoom = new MapRectSpec
+        {
+            Label = "OFFICE",
+            Center = new Vector2(0f, -150f),
+            Size = new Vector2(140f, 62f)
+        };
+
+        /// <summary>把各房间连起来的走廊（细条），画在房间下面。</summary>
+        private static readonly MapRectSpec[] MapCorridors =
+        {
+            new MapRectSpec { Center = new Vector2(-66f, 68f), Size = new Vector2(30f, 30f) },
+            new MapRectSpec { Center = new Vector2(66f, 68f), Size = new Vector2(30f, 30f) },
+            new MapRectSpec { Center = new Vector2(-52f, -92f), Size = new Vector2(30f, 50f) },
+            new MapRectSpec { Center = new Vector2(52f, -92f), Size = new Vector2(30f, 50f) }
+        };
 
         // 没有素材时的兜底色
         private static readonly Color FrontFallback = new Color(0.20f, 0.20f, 0.23f);
@@ -181,9 +247,13 @@ namespace NailongFNAF.UI
         private static readonly Color UsageRed = new Color(0.90f, 0.26f, 0.22f);
         private static readonly Color UsageOff = new Color(0.20f, 0.20f, 0.22f);
 
-        // 小地图机位框
-        private static readonly Color CamBoxOn = new Color(0.20f, 0.62f, 0.34f, 0.95f);
-        private static readonly Color CamBoxOff = new Color(0.16f, 0.17f, 0.20f, 0.92f);
+        // 小地图：房间描边 / 房间底色 / 走廊 / 文字
+        private static readonly Color CamBoxOn = new Color(0.22f, 0.60f, 0.34f, 0.98f);
+        private static readonly Color CamBoxOff = new Color(0.14f, 0.16f, 0.18f, 0.95f);
+        private static readonly Color MapBorderColor = new Color(0.50f, 0.60f, 0.52f, 0.95f);
+        private static readonly Color MapCorridorColor = new Color(0.20f, 0.22f, 0.24f, 0.95f);
+        private static readonly Color MapOfficeFill = new Color(0.26f, 0.28f, 0.32f, 0.95f);
+        private static readonly Color MapLabelColor = new Color(0.80f, 0.88f, 0.80f, 1f);
 
         [Header("素材（留空则用色块占位）")]
         [SerializeField] private Sprite _bgFront;
@@ -1398,7 +1468,7 @@ namespace NailongFNAF.UI
         {
             _monitorOverlay = MakeFullScreenImage("MonitorOverlay", MonitorFallback, true);
 
-            _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1A",
+            _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1B",
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
 
@@ -1420,36 +1490,42 @@ namespace NailongFNAF.UI
             _monitorCharacter.color = Color.white;
             charGo.SetActive(false);
 
-            // 右侧小地图
+            // 小地图 —— 照 FNAF 1 官方那张平面图画，只留我们用得到的房间
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
             map.transform.SetParent(_monitorOverlay.transform, false);
 
             var mapRect = map.GetComponent<RectTransform>();
-            PlaceRect(mapRect, new Vector2(0.85f, 0.5f), new Vector2(0.5f, 0.5f),
-                Vector2.zero, new Vector2(240f, 340f));
+            PlaceRect(mapRect, new Vector2(1f, 0f), new Vector2(1f, 0f),
+                new Vector2(-MapPanelMargin, MapPanelMargin),
+                new Vector2(MapPanelWidth, MapPanelHeight));
 
             var mapBackground = map.GetComponent<Image>();
             mapBackground.sprite = _solidSprite;
-            mapBackground.color = new Color(0.08f, 0.09f, 0.11f, 0.92f);
+            mapBackground.color = new Color(0.06f, 0.07f, 0.08f, 0.90f);
             mapBackground.raycastTarget = false;
 
             _monitorMapGroup = map.GetComponent<CanvasGroup>();
 
-            var mapTitle = MakeText(map.transform, "MapTitle", "CAMERAS",
-                TextAnchor.UpperCenter, 22, new Color(0.70f, 0.78f, 0.70f));
-            PlaceRect(mapTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -14f), new Vector2(210f, 30f));
+            // 走廊先铺，房间盖在上面，接缝才干净
+            for (int i = 0; i < MapCorridors.Length; i++)
+            {
+                MakeMapBox(map.transform, "Corridor" + i, MapCorridors[i],
+                    MapCorridorColor, MapCorridorColor, null, null);
+            }
 
-            _camBoxes = new Image[CameraBoxLabels.Length];
-            for (int i = 0; i < CameraBoxLabels.Length; i++)
+            // 三个机位房间（可点）
+            _camBoxes = new Image[MapCameraRooms.Length];
+            for (int i = 0; i < MapCameraRooms.Length; i++)
             {
                 int index = i;
-                var button = MakeButton(map.transform, "CamBox" + i, CameraBoxLabels[i],
-                    new Vector2(0.5f, 1f), new Vector2(0f, -62f - i * 78f),
-                    new Vector2(196f, 62f), delegate { OnCameraBox(index); });
-
-                _camBoxes[i] = button.GetComponent<Image>();
+                _camBoxes[i] = MakeMapBox(map.transform, "CamRoom" + i, MapCameraRooms[i],
+                    CamBoxOff, MapBorderColor, MapCameraRooms[i].Label,
+                    delegate { OnCameraBox(index); });
             }
+
+            // 办公室：玩家坐的地方，不是机位，只显示不点
+            MakeMapBox(map.transform, "OfficeRoom", MapOfficeRoom,
+                MapOfficeFill, MapBorderColor, MapOfficeRoom.Label, null);
 
             _monitorMapGroup.alpha = 0f;
             _monitorMapGroup.blocksRaycasts = false;
@@ -1719,6 +1795,59 @@ namespace NailongFNAF.UI
             StretchToParent(text.rectTransform);
 
             return button;
+        }
+
+        /// <summary>
+        /// 平面图上的一块矩形：外圈描边、里面填色。
+        /// <paramref name="onClick"/> 不为空就做成可点的机位框。
+        /// 返回里面那张 —— 高亮时改它的颜色。
+        /// </summary>
+        private Image MakeMapBox(Transform parent, string name, MapRectSpec spec,
+            Color fill, Color border, string label,
+            UnityEngine.Events.UnityAction onClick)
+        {
+            var outer = new GameObject(name, typeof(RectTransform), typeof(Image));
+            outer.transform.SetParent(parent, false);
+            PlaceRect(outer.GetComponent<RectTransform>(), new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), spec.Center, spec.Size);
+
+            var outerImage = outer.GetComponent<Image>();
+            outerImage.sprite = _solidSprite;
+            outerImage.color = border;
+            outerImage.raycastTarget = false;
+
+            var innerGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
+            innerGo.transform.SetParent(outer.transform, false);
+
+            var innerRect = innerGo.GetComponent<RectTransform>();
+            innerRect.anchorMin = Vector2.zero;
+            innerRect.anchorMax = Vector2.one;
+            innerRect.offsetMin = new Vector2(MapBorderThickness, MapBorderThickness);
+            innerRect.offsetMax = new Vector2(-MapBorderThickness, -MapBorderThickness);
+
+            var innerImage = innerGo.GetComponent<Image>();
+            innerImage.sprite = _solidSprite;
+            innerImage.color = fill;
+
+            if (!string.IsNullOrEmpty(label))
+            {
+                var text = MakeText(innerGo.transform, "Label", label,
+                    TextAnchor.MiddleCenter, 18, MapLabelColor);
+                StretchToParent(text.rectTransform);
+            }
+
+            if (onClick != null)
+            {
+                var button = innerGo.AddComponent<Button>();
+                button.targetGraphic = innerImage;
+                button.onClick.AddListener(onClick);
+            }
+            else
+            {
+                innerImage.raycastTarget = false;
+            }
+
+            return innerImage;
         }
 
         private Text MakeText(Transform parent, string name, string content,
