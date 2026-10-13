@@ -179,8 +179,11 @@ namespace NailongFNAF.UI
         private const float MapViewX1 = 934f;
         private const float MapViewY1 = 792f;
 
+        /// <summary>地图整体缩放倍数（1 = 原始大小）。</summary>
+        private const float MapPanelScale = 1.2f;
+
         /// <summary>地图面板的宽度；高度按官方图比例算。</summary>
-        private const float MapPanelWidth = 420f;
+        private const float MapPanelWidth = 420f * MapPanelScale;
         private const float MapPanelHeight =
             MapPanelWidth * (MapViewY1 - MapViewY0) / (MapViewX1 - MapViewX0);
 
@@ -196,13 +199,13 @@ namespace NailongFNAF.UI
         private const float MapPanelBottomOffset = 140f;
 
         /// <summary>房间轮廓的线宽。</summary>
-        private const float MapBorderThickness = 2f;
+        private const float MapBorderThickness = 2f * MapPanelScale;
 
         /// <summary>CAM 标号框的线宽。</summary>
-        private const float MapButtonBorderThickness = 3f;
+        private const float MapButtonBorderThickness = 3f * MapPanelScale;
 
         /// <summary>CAM 标号框里的字号。</summary>
-        private const int MapLabelFontSize = 13;
+        private const int MapLabelFontSize = 16;
 
         /// <summary>平面图上的一块矩形（房间 / 走廊 / CAM 标号框）。</summary>
         private struct MapRectSpec
