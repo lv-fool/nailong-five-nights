@@ -173,27 +173,30 @@ namespace NailongFNAF.UI
         // 以后照图微调只改数字，不用自己换算。
         // ---------------------------------------------------------------
 
-        /// <summary>只取官方图上有用的那块（四周留白与 CAM 按钮框不算）。</summary>
-        private const float MapViewX0 = 90f;
-        private const float MapViewY0 = 55f;
-        private const float MapViewX1 = 930f;
+        /// <summary>只取官方图上有用的那块（四周留白不算）。</summary>
+        private const float MapViewX0 = 28f;
+        private const float MapViewY0 = 14f;
+        private const float MapViewX1 = 934f;
         private const float MapViewY1 = 792f;
 
         /// <summary>地图面板的宽度；高度按官方图比例算。</summary>
-        private const float MapPanelWidth = 460f;
+        private const float MapPanelWidth = 420f;
         private const float MapPanelHeight =
             MapPanelWidth * (MapViewY1 - MapViewY0) / (MapViewX1 - MapViewX0);
 
         /// <summary>面板离屏幕右下角留出的边距。</summary>
         private const float MapPanelMargin = 26f;
 
-        /// <summary>房间外圈描边的厚度。</summary>
+        /// <summary>房间轮廓的线宽。</summary>
         private const float MapBorderThickness = 2f;
 
-        /// <summary>房间名 / 机位号的字号。</summary>
-        private const int MapLabelFontSize = 15;
+        /// <summary>CAM 标号框的线宽。</summary>
+        private const float MapButtonBorderThickness = 3f;
 
-        /// <summary>平面图上的一块矩形（房间或走廊）。</summary>
+        /// <summary>CAM 标号框里的字号。</summary>
+        private const int MapLabelFontSize = 13;
+
+        /// <summary>平面图上的一块矩形（房间 / 走廊 / CAM 标号框）。</summary>
         private struct MapRectSpec
         {
             public string Label;
@@ -225,21 +228,22 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 全部房间，坐标照官方平面图。三间可点的在 CameraIndex 里标了机位号，
-        /// 顺序与 CameraNames 一致（0 = 1B 餐厅 / 1 = 2A 西走廊 / 2 = 4A 东走廊）。
+        /// 房间轮廓 —— 跟官方原图一样**只描边、不填色**。
+        /// 坐标是照原图量下来的，所以餐厅（大厅）看着大是因为它在原图上就这么大，
+        /// 但因为不填色，不会糊成一大块。
         /// </summary>
         private static readonly MapRectSpec[] MapRooms =
         {
-            MapRoom(437f, 71f, 588f, 145f, "1A", -1),                 // 舞台
-            MapRoom(210f, 145f, 735f, 452f, "CAM 1B\nDINING", 0),     // 餐厅（大厅）
-            MapRoom(132f, 330f, 210f, 440f, "1C", -1),                // 海盗湾
-            MapRoom(313f, 452f, 441f, 748f, "CAM 2A\nW HALL", 1),     // 西走廊（左走廊）
-            MapRoom(205f, 519f, 284f, 668f, "3", -1),                 // 储藏室
-            MapRoom(549f, 452f, 675f, 748f, "CAM 4A\nE HALL", 2),     // 东走廊（右走廊）
-            MapRoom(100f, 145f, 185f, 300f, "5", -1),                 // 后台
-            MapRoom(666f, 480f, 845f, 628f, "6", -1),                 // 厨房
-            MapRoom(764f, 193f, 917f, 448f, "7", -1),                 // 厕所
-            MapRoom(437f, 652f, 517f, 780f, "YOU", -1)                // 办公室
+            MapRoom(437f, 71f, 588f, 145f, null, -1),      // 舞台
+            MapRoom(210f, 145f, 735f, 452f, null, -1),     // 餐厅（大厅）
+            MapRoom(132f, 330f, 210f, 440f, null, -1),     // 海盗湾
+            MapRoom(313f, 452f, 441f, 748f, null, -1),     // 西走廊（含转角）
+            MapRoom(205f, 519f, 284f, 668f, null, -1),     // 储藏室
+            MapRoom(549f, 452f, 675f, 748f, null, -1),     // 东走廊（含转角）
+            MapRoom(100f, 145f, 185f, 300f, null, -1),     // 后台
+            MapRoom(666f, 480f, 845f, 628f, null, -1),     // 厨房
+            MapRoom(764f, 193f, 917f, 448f, null, -1),     // 厕所
+            MapRoom(437f, 652f, 517f, 780f, "YOU", -1)     // 办公室
         };
 
         /// <summary>把各房间连起来的走廊（细条），画在房间下面。</summary>
@@ -250,6 +254,25 @@ namespace NailongFNAF.UI
             MapRoom(282f, 565f, 315f, 612f, null, -1),   // 储藏室 ↔ 西走廊
             MapRoom(515f, 690f, 551f, 732f, null, -1),   // 办公室 ↔ 东走廊
             MapRoom(798f, 446f, 832f, 482f, null, -1)    // 厨房 ↔ 厕所
+        };
+
+        /// <summary>
+        /// 官方原图上那 11 个 CAM 标号框 —— 位置、大小都照原图量下来的。
+        /// 只有我们有的三个（1B 餐厅 / 2A 西走廊 / 4A 东走廊）可点，其余照原样摆着但不能点。
+        /// </summary>
+        private static readonly MapRectSpec[] MapCamButtons =
+        {
+            MapRoom(316f, 25f, 441f, 105f, "CAM\n1A", -1),
+            MapRoom(272f, 144f, 397f, 228f, "CAM\n1B", 0),
+            MapRoom(40f, 205f, 164f, 287f, "CAM\n5", -1),
+            MapRoom(782f, 208f, 908f, 290f, "CAM\n7", -1),
+            MapRoom(201f, 318f, 327f, 400f, "CAM\n1C", -1),
+            MapRoom(132f, 533f, 257f, 614f, "CAM\n3", -1),
+            MapRoom(313f, 572f, 441f, 655f, "CAM\n2A", 1),
+            MapRoom(313f, 661f, 441f, 743f, "CAM\n2B", -1),
+            MapRoom(549f, 575f, 675f, 657f, "CAM\n4A", 2),
+            MapRoom(549f, 663f, 675f, 745f, "CAM\n4B", -1),
+            MapRoom(762f, 497f, 888f, 578f, "CAM\n6", -1)
         };
 
         // 没有素材时的兜底色
@@ -270,15 +293,20 @@ namespace NailongFNAF.UI
         private static readonly Color UsageRed = new Color(0.90f, 0.26f, 0.22f);
         private static readonly Color UsageOff = new Color(0.20f, 0.20f, 0.22f);
 
-        // 小地图：可点机位的选中 / 未选中，以及不可点房间的暗色
-        private static readonly Color CamBoxOn = new Color(0.22f, 0.60f, 0.34f, 0.98f);
-        private static readonly Color CamBoxOff = new Color(0.14f, 0.16f, 0.18f, 0.95f);
-        private static readonly Color MapBorderColor = new Color(0.50f, 0.60f, 0.52f, 0.95f);
-        private static readonly Color MapCorridorColor = new Color(0.20f, 0.22f, 0.24f, 0.95f);
-        private static readonly Color MapInactiveFill = new Color(0.11f, 0.12f, 0.14f, 0.95f);
-        private static readonly Color MapInactiveBorder = new Color(0.28f, 0.32f, 0.28f, 0.85f);
-        private static readonly Color MapLabelColor = new Color(0.80f, 0.88f, 0.80f, 1f);
-        private static readonly Color MapLabelDim = new Color(0.50f, 0.55f, 0.50f, 1f);
+        // 小地图 —— 照官方原图：房间只描边不填色，CAM 标号是深色小方块
+        private static readonly Color MapPanelFill = new Color(0.055f, 0.065f, 0.075f, 1f);
+        private static readonly Color MapRoomFill = new Color(0.075f, 0.085f, 0.095f, 1f);
+        private static readonly Color MapRoomBorder = new Color(0.42f, 0.47f, 0.44f, 0.90f);
+        private static readonly Color MapCorridorColor = new Color(0.34f, 0.38f, 0.36f, 0.85f);
+        private static readonly Color MapButtonFill = new Color(0.11f, 0.12f, 0.14f, 1f);
+        private static readonly Color MapButtonBorder = new Color(0.34f, 0.38f, 0.35f, 0.95f);
+        private static readonly Color MapButtonText = new Color(0.52f, 0.57f, 0.52f, 1f);
+
+        // 我们自己的三个机位
+        private static readonly Color CamBoxOn = new Color(0.22f, 0.60f, 0.34f, 1f);
+        private static readonly Color CamBoxOff = new Color(0.14f, 0.16f, 0.18f, 1f);
+        private static readonly Color CamBoxBorder = new Color(0.50f, 0.60f, 0.52f, 0.95f);
+        private static readonly Color CamBoxText = new Color(0.86f, 0.93f, 0.86f, 1f);
 
         [Header("素材（留空则用色块占位）")]
         [SerializeField] private Sprite _bgFront;
@@ -1526,7 +1554,7 @@ namespace NailongFNAF.UI
 
             var mapBackground = map.GetComponent<Image>();
             mapBackground.sprite = _solidSprite;
-            mapBackground.color = new Color(0.06f, 0.07f, 0.08f, 0.90f);
+            mapBackground.color = MapPanelFill;
             mapBackground.raycastTarget = false;
 
             _monitorMapGroup = map.GetComponent<CanvasGroup>();
@@ -1535,15 +1563,23 @@ namespace NailongFNAF.UI
             for (int i = 0; i < MapCorridors.Length; i++)
             {
                 MakeMapBox(map.transform, "Corridor" + i, MapCorridors[i],
-                    MapCorridorColor, MapCorridorColor, null,
-                    MapLabelFontSize, MapLabelColor, null);
+                    MapRoomFill, MapCorridorColor, null,
+                    MapBorderThickness, MapLabelFontSize, MapCorridorColor, null);
             }
 
-            // 所有房间；只有机位那三间可点，其余照原样画但暗一档
-            _camBoxes = new Image[CameraNames.Length];
+            // 房间：只描边不填色（内层填成面板底色），跟官方原图一样
             for (int i = 0; i < MapRooms.Length; i++)
             {
-                MapRectSpec spec = MapRooms[i];
+                MakeMapBox(map.transform, "MapRoom" + i, MapRooms[i],
+                    MapRoomFill, MapRoomBorder, MapRooms[i].Label,
+                    MapBorderThickness, MapLabelFontSize, MapRoomBorder, null);
+            }
+
+            // CAM 标号框：位置照官方原图；只有我们有的三个可点
+            _camBoxes = new Image[CameraNames.Length];
+            for (int i = 0; i < MapCamButtons.Length; i++)
+            {
+                MapRectSpec spec = MapCamButtons[i];
                 int camIndex = spec.CameraIndex;
                 bool isCamera = camIndex >= 0;
 
@@ -1554,11 +1590,11 @@ namespace NailongFNAF.UI
                     onClick = delegate { OnCameraBox(index); };
                 }
 
-                Image box = MakeMapBox(map.transform, "MapRoom" + i, spec,
-                    isCamera ? CamBoxOff : MapInactiveFill,
-                    isCamera ? MapBorderColor : MapInactiveBorder,
-                    spec.Label, MapLabelFontSize,
-                    isCamera ? MapLabelColor : MapLabelDim,
+                Image box = MakeMapBox(map.transform, "CamButton" + i, spec,
+                    isCamera ? CamBoxOff : MapButtonFill,
+                    isCamera ? CamBoxBorder : MapButtonBorder,
+                    spec.Label, MapButtonBorderThickness, MapLabelFontSize,
+                    isCamera ? CamBoxText : MapButtonText,
                     onClick);
 
                 if (isCamera)
@@ -1839,11 +1875,13 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 平面图上的一块矩形：外圈描边、里面填色。
+        /// 内层填成和底色一样就是「只描边不填色」的房间。
         /// <paramref name="onClick"/> 不为空就做成可点的机位框。
         /// 返回里面那张 —— 高亮时改它的颜色。
         /// </summary>
         private Image MakeMapBox(Transform parent, string name, MapRectSpec spec,
-            Color fill, Color border, string label, int fontSize, Color labelColor,
+            Color fill, Color border, string label,
+            float borderThickness, int fontSize, Color labelColor,
             UnityEngine.Events.UnityAction onClick)
         {
             var outer = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -1862,8 +1900,8 @@ namespace NailongFNAF.UI
             var innerRect = innerGo.GetComponent<RectTransform>();
             innerRect.anchorMin = Vector2.zero;
             innerRect.anchorMax = Vector2.one;
-            innerRect.offsetMin = new Vector2(MapBorderThickness, MapBorderThickness);
-            innerRect.offsetMax = new Vector2(-MapBorderThickness, -MapBorderThickness);
+            innerRect.offsetMin = new Vector2(borderThickness, borderThickness);
+            innerRect.offsetMax = new Vector2(-borderThickness, -borderThickness);
 
             var innerImage = innerGo.GetComponent<Image>();
             innerImage.sprite = _solidSprite;
