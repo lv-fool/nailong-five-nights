@@ -77,7 +77,7 @@
 - 场景：`Assets/Scenes/` 下，PascalCase，如 `Main.unity`
 - 美术素材：`snake_case` + 类型前缀
   - `bg_office_front.png` / `bg_office_left.png`
-  - `mon_cam1a.png`
+  - `mon_1a.png`（监控画面，编号照官方 CAM：`mon_1a` ~ `mon_7`）
   - `char_nailong_idle.png`
   - `ui_btn_door_close.png`
 - 音频：`sfx_door_close.ogg` / `amb_fan_loop.ogg` / `bgm_menu.ogg`

@@ -22,8 +22,9 @@ namespace NailongFNAF.Gameplay
         [SerializeField] private int _nightIndex;
 
         [Header("监控")]
-        [Tooltip("监控机位数量。默认 3：大厅 / 左走廊 / 右走廊。")]
-        [SerializeField] private int _cameraCount = 3;
+        [Tooltip("监控机位数量 —— 奶龙会在这几个机位之间换位偷电。"
+            + "必须与 PrototypeScene.CameraNames 的长度一致（照官方平面图是 11 个）。")]
+        [SerializeField] private int _cameraCount = 11;
 
         [Header("噜噜")]
         [Tooltip("门外宽限：活动度 0 时（秒）—— 最宽松。活动度越高，这个时间越短。")]

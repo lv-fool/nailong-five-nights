@@ -41,7 +41,9 @@ namespace NailongFNAF.EditorTools
                 "bg_office_front", "bg_office_left_01", "bg_office_right_01",
                 "ui_door_left_open", "ui_door_left_closed",
                 "ui_door_right_open", "ui_door_right_closed",
-                "mon_cam1", "mon_cam2", "mon_cam3",
+                "mon_1a", "mon_1b", "mon_1c",
+                "mon_2a", "mon_2b", "mon_3",
+                "mon_4a", "mon_4b", "mon_5", "mon_6", "mon_7",
                 "char_nailong_idle", "char_nailong_stare", "char_nailong_jumpscare",
                 "char_nailong_blackout",
                 "char_niulai_idle", "char_niulai_stare", "char_niulai_jumpscare",
@@ -97,14 +99,25 @@ namespace NailongFNAF.EditorTools
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
 
-            Debug.Log("[奶龙] 素材已接入：背景 3 张、门片 4 张、监控画面 3 张、"
+            Debug.Log("[奶龙] 素材已接入：背景 3 张、门片 4 张、监控画面 11 张、"
                 + "角色立绘 " + characters.Length + " 套、音频 10 条。按 Play 看效果。");
         }
 
-        /// <summary>按机位顺序读监控画面；缺哪张哪张留空，运行时退回色块。</summary>
+        /// <summary>
+        /// 按机位顺序读监控画面 —— 文件名照官方 CAM 编号，
+        /// **顺序必须与 PrototypeScene.CameraNames 一致**。
+        /// 缺哪张哪张留空，运行时退回色块。
+        /// </summary>
         private static Sprite[] LoadMonitorFrames()
         {
-            string[] names = { "mon_cam1", "mon_cam2", "mon_cam3" };
+            string[] names =
+            {
+                "mon_1a", "mon_1b", "mon_1c",
+                "mon_2a", "mon_2b", "mon_3",
+                "mon_4a", "mon_4b",
+                "mon_5", "mon_6", "mon_7"
+            };
+
             var frames = new Sprite[names.Length];
 
             for (int i = 0; i < names.Length; i++)

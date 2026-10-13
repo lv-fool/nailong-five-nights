@@ -16,10 +16,10 @@ namespace NailongFNAF.UI
     ///   · 鼠标移到屏幕左 / 右 1/3 → 平滑转头
     ///   · 鼠标移到屏幕底部边缘 → 升起 / 放下监控（hover 触发，不是点击）
     ///   · 点击两侧墙上的 DOOR / LIGHT → 开关门与灯（门在上、灯在下）
-    ///   · 监控升起后，点右侧小地图的 CAM 框 → 切机位
+    ///   · 监控升起后，点右下角小地图上的 CAM 框 → 切机位（11 个机位都能点）
     ///
     /// 调试快捷键（官方没有，留着方便调参）：
-    ///   · 1 / 2 / 3 切机位　· R 重开一夜　· [ / ] 换夜　· F1 显示 / 隐藏调试面板
+    ///   · 1~9 / 0 / - 直接跳机位　· R 重开一夜　· [ / ] 换夜　· F1 显示 / 隐藏调试面板
     /// </summary>
     public class PrototypeScene : MonoBehaviour
     {
@@ -113,12 +113,6 @@ namespace NailongFNAF.UI
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
 
-        /// <summary>左走廊的机位索引（0 = 大厅，1 = 左走廊，2 = 右走廊）。</summary>
-        private const int LeftHallCameraIndex = 1;
-
-        /// <summary>右走廊的机位索引。</summary>
-        private const int RightHallCameraIndex = 2;
-
         /// <summary>断电时奶龙立绘的高度。</summary>
         private const float BlackoutCharacterHeight = 880f;
 
@@ -153,15 +147,29 @@ namespace NailongFNAF.UI
         private const float MonitorZone = 0.10f;
 
         /// <summary>
-        /// 三个机位的显示名。编号与房间名照 FNAF 1 官方 ——
-        /// 大厅就是官方那张图上的餐厅（CAM 1B），左右走廊对应西 / 东走廊（CAM 2A / 4A）。
+        /// 监控机位表 —— 编号、房间名、前后顺序全照 FNAF 1 官方那张平面图。
+        /// **数组下标就是机位号**；加机位只往这里加一行，别处不用动。
         /// </summary>
         private static readonly string[] CameraNames =
         {
-            "CAM 1B    DINING AREA",
-            "CAM 2A    WEST HALL",
-            "CAM 4A    EAST HALL"
+            "CAM 1A    SHOW STAGE",       // 0  舞台
+            "CAM 1B    DINING AREA",      // 1  餐厅（大厅）
+            "CAM 1C    PIRATE COVE",      // 2  海盗湾
+            "CAM 2A    WEST HALL",        // 3  西走廊（左走廊）
+            "CAM 2B    W HALL CORNER",    // 4  西走廊转角
+            "CAM 3     SUPPLY CLOSET",    // 5  储藏室
+            "CAM 4A    EAST HALL",        // 6  东走廊（右走廊）
+            "CAM 4B    E HALL CORNER",    // 7  东走廊转角
+            "CAM 5     BACKSTAGE",        // 8  后台
+            "CAM 6     KITCHEN",          // 9  厨房
+            "CAM 7     RESTROOMS"         // 10 厕所
         };
+
+        /// <summary>左走廊（西走廊）的机位号 —— 噜噜从这边来时看它。</summary>
+        private const int LeftHallCameraIndex = 3;
+
+        /// <summary>右走廊（东走廊）的机位号。</summary>
+        private const int RightHallCameraIndex = 6;
 
         // ---------------------------------------------------------------
         // 小地图：整张 FNAF 1 官方平面图 —— 舞台 / 餐厅 / 海盗湾 / 西走廊 /
@@ -269,21 +277,21 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 官方原图上那 11 个 CAM 标号框 —— 位置、大小都照原图量下来的。
-        /// 只有我们有的三个（1B 餐厅 / 2A 西走廊 / 4A 东走廊）可点，其余照原样摆着但不能点。
+        /// 每一个都对应 <see cref="CameraNames"/> 里的机位，点一下切过去。
         /// </summary>
         private static readonly MapRectSpec[] MapCamButtons =
         {
-            MapRoom(316f, 25f, 441f, 105f, "CAM\n1A", -1),
-            MapRoom(272f, 144f, 397f, 228f, "CAM\n1B", 0),
-            MapRoom(40f, 205f, 164f, 287f, "CAM\n5", -1),
-            MapRoom(782f, 208f, 908f, 290f, "CAM\n7", -1),
-            MapRoom(201f, 318f, 327f, 400f, "CAM\n1C", -1),
-            MapRoom(132f, 533f, 257f, 614f, "CAM\n3", -1),
-            MapRoom(313f, 572f, 441f, 655f, "CAM\n2A", 1),
-            MapRoom(313f, 661f, 441f, 743f, "CAM\n2B", -1),
-            MapRoom(549f, 575f, 675f, 657f, "CAM\n4A", 2),
-            MapRoom(549f, 663f, 675f, 745f, "CAM\n4B", -1),
-            MapRoom(762f, 497f, 888f, 578f, "CAM\n6", -1)
+            MapRoom(316f, 25f, 441f, 105f, "CAM\n1A", 0),
+            MapRoom(272f, 144f, 397f, 228f, "CAM\n1B", 1),
+            MapRoom(40f, 205f, 164f, 287f, "CAM\n5", 8),
+            MapRoom(782f, 208f, 908f, 290f, "CAM\n7", 10),
+            MapRoom(201f, 318f, 327f, 400f, "CAM\n1C", 2),
+            MapRoom(132f, 533f, 257f, 614f, "CAM\n3", 5),
+            MapRoom(313f, 572f, 441f, 655f, "CAM\n2A", 3),
+            MapRoom(313f, 661f, 441f, 743f, "CAM\n2B", 4),
+            MapRoom(549f, 575f, 675f, 657f, "CAM\n4A", 6),
+            MapRoom(549f, 663f, 675f, 745f, "CAM\n4B", 7),
+            MapRoom(762f, 497f, 888f, 578f, "CAM\n6", 9)
         };
 
         // 没有素材时的兜底色
@@ -584,19 +592,24 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.Alpha1))
+            // 调试用：数字键 1~9 跳机位 0~8，0 跳第 10 个，- 跳第 11 个
+            int digitCount = CameraNames.Length < 9 ? CameraNames.Length : 9;
+            for (int i = 0; i < digitCount; i++)
             {
-                SelectCamera(gm, 0);
+                if (Input.GetKeyDown(KeyCode.Alpha1 + i))
+                {
+                    SelectCamera(gm, i);
+                }
             }
 
-            if (Input.GetKeyDown(KeyCode.Alpha2))
+            if (CameraNames.Length > 9 && Input.GetKeyDown(KeyCode.Alpha0))
             {
-                SelectCamera(gm, 1);
+                SelectCamera(gm, 9);
             }
 
-            if (Input.GetKeyDown(KeyCode.Alpha3))
+            if (CameraNames.Length > 10 && Input.GetKeyDown(KeyCode.Minus))
             {
-                SelectCamera(gm, 2);
+                SelectCamera(gm, 10);
             }
         }
 
