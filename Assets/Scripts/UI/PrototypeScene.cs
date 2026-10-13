@@ -107,14 +107,47 @@ namespace NailongFNAF.UI
         /// <summary>鼠标进入屏幕左右各这个比例就转头（左右各三分之一）。</summary>
         private const float TurnZone = 1f / 3f;
 
-        /// <summary>门口立绘的高度（UI 参考分辨率下的像素）。</summary>
-        private const float SideCharacterHeight = 940f;
+        /// <summary>
+        /// 门口立绘占画布高度的比例。
+        /// **别改回写死的像素** —— CanvasScaler 按宽高折中缩放，宽屏下画布的逻辑高度
+        /// 会被压到 1080 以下（当前 GameView 只有 925），写死 940 会把头顶切出屏幕。
+        /// 按比例算，任何宽高比都放得下。
+        /// </summary>
+        private const float SideCharacterHeightRatio = 0.86f;
 
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
 
-        /// <summary>正前方那个立绘（噜噜）的高度 —— 比两侧的大一圈，它是正对着你的。</summary>
-        private const float FrontCharacterHeight = 880f;
+        /// <summary>正前方那个立绘（噜噜）占画布高度的比例 —— 比两侧大一圈，它是正对着你的。</summary>
+        private const float FrontCharacterHeightRatio = 0.80f;
+
+        /// <summary>
+        /// 画布的逻辑高度。**不能当成 1080 用** —— 立绘尺寸都按它折算，
+        /// 宽屏下才不会切到头顶。
+        /// </summary>
+        private float CanvasHeight
+        {
+            get
+            {
+                if (_canvas == null)
+                {
+                    return 1080f;
+                }
+
+                float height = _canvas.GetComponent<RectTransform>().rect.height;
+                return height > 1f ? height : 1080f;
+            }
+        }
+
+        private float SideCharacterHeight
+        {
+            get { return CanvasHeight * SideCharacterHeightRatio; }
+        }
+
+        private float FrontCharacterHeight
+        {
+            get { return CanvasHeight * FrontCharacterHeightRatio; }
+        }
 
         /// <summary>正前方立绘贴屏幕底边多高。要高于监控热区（0.10 × 1080 = 108）。</summary>
         private const float FrontCharacterBottom = 40f;
@@ -1233,7 +1266,10 @@ namespace NailongFNAF.UI
             _jumpscareOverlay.color = Color.black;
 
             var art = FindCharacter(id);
-            Sprite scare = art != null ? art.Jumpscare : null;
+
+            // 走兜底链：没有专属跳杀图就退到 Stare（正面那张）——
+            // 比全屏红 + 大字强，也免得绿子给的正脸图白放着用不上
+            Sprite scare = art != null ? art.Get(CharacterPose.Jumpscare) : null;
 
             if (scare != null)
             {
@@ -1241,7 +1277,7 @@ namespace NailongFNAF.UI
                 _jumpscareImage.sprite = scare;
                 _jumpscareImage.color = Color.white;
                 _jumpscareImage.rectTransform.sizeDelta =
-                    ContainSize(scare, JumpscareWidth, 1080f);
+                    ContainSize(scare, JumpscareWidth, CanvasHeight);
                 _jumpscareImage.rectTransform.anchoredPosition = Vector2.zero;
                 _jumpscareImage.rectTransform.localScale = Vector3.one;
 
@@ -1926,7 +1962,7 @@ namespace NailongFNAF.UI
             imageRect.anchorMax = new Vector2(0.5f, 0.5f);
             imageRect.pivot = new Vector2(0.5f, 0.5f);
             imageRect.anchoredPosition = Vector2.zero;
-            imageRect.sizeDelta = new Vector2(JumpscareWidth, 1080f);
+            imageRect.sizeDelta = new Vector2(JumpscareWidth, CanvasHeight);
 
             _jumpscareImage = imageGo.GetComponent<Image>();
             _jumpscareImage.sprite = _solidSprite;

@@ -32,6 +32,11 @@ JOBS = [
     # 噜噜的表情 —— 以 stare 那张为参考图生成（受惊 / 怒视）
     (r"D:/QQmm/lulu_startled.png", "char_lulu_startled"),
     (r"D:/QQmm/lulu_angry.png", "char_lulu_angry"),
+
+    # 袋鼠（2026-10-13 绿子提供）—— 目前两张：
+    # 四足站姿那张当 idle（出现在监控 / 门口），正面坐姿那张当 stare（直视镜头）
+    (r"D:/QQmm/retouch_2026101320041711.png", "char_daishu_idle"),
+    (r"D:/QQmm/retouch_2026101320035719.png", "char_daishu_stare"),
 ]
 
 
