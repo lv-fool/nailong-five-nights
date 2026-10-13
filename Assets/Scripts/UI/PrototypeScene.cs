@@ -112,8 +112,26 @@ namespace NailongFNAF.UI
         /// **别改回写死的像素** —— CanvasScaler 按宽高折中缩放，宽屏下画布的逻辑高度
         /// 会被压到 1080 以下（当前 GameView 只有 925），写死 940 会把头顶切出屏幕。
         /// 按比例算，任何宽高比都放得下。
+        ///
+        /// 这个数是照背景图反推的：左右两张背景的门洞顶边落在画布高度 16.6% 处，
+        /// 立绘底边再沉下去一点（见 <see cref="SideCharacterSinkRatio"/>），
+        /// 头顶就正好顶在门框下沿 —— 照原版那种「站在门里、下半身被裁掉」。
         /// </summary>
-        private const float SideCharacterHeightRatio = 0.86f;
+        private const float SideCharacterHeightRatio = 0.88f;
+
+        /// <summary>门口立绘默认沉到屏幕下方多少（占画布高度）。脚被裁掉，人才像站在门里。</summary>
+        private const float SideCharacterSinkRatio = 0.05f;
+
+        /// <summary>
+        /// 门口立绘的横向锚点 —— 门洞在屏幕上的中心位置（占画布宽度）。
+        /// 和 <c>tools/gen_placeholder_art.py</c> 里算出来的门洞投影一致：
+        /// 左门 x ∈ [-0.1%, 30.0%]、右门 x ∈ [70.0%, 100.1%]，中心分别是 14.9% / 85.1%。
+        ///
+        /// **立绘按门心对齐，不是按屏幕边对齐** —— 换个宽高比不同的角色（牛来又高又窄、
+        /// 袋鼠又矮又宽），贴着屏幕边摆就会各自偏到一边去。
+        /// </summary>
+        private const float SideCharacterAnchorLeft = 0.149f;
+        private const float SideCharacterAnchorRight = 0.851f;
 
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
@@ -885,17 +903,45 @@ namespace NailongFNAF.UI
             }
 
             // 门口站着的都是门类敌人（噜噜改走正门了），用站姿
-            ShowCharacter(image, id, CharacterPose.Idle, SideCharacterHeight, alpha);
+            float heightRatio, sinkRatio;
+            SideCharacterFit(id, out heightRatio, out sinkRatio);
+
+            ShowCharacter(image, id, CharacterPose.Idle, CanvasHeight * heightRatio, alpha);
 
             // 门口的敌人一律面朝玩家。素材都是朝左画的 ——
             // 右门原样就对着玩家，左门要镜像过来。
-            // 镜像以 pivot（左下角）为轴，所以得把宽度补回来，
-            // 否则立绘会整个跑到屏幕外面去。
+            // pivot 在立绘底边正中，镜像以 pivot 为轴，所以横向位置不会跑。
             var rect = image.rectTransform;
             bool mirrored = side == Side.Left;
 
             rect.localScale = new Vector3(mirrored ? -1f : 1f, 1f, 1f);
-            rect.anchoredPosition = new Vector2(mirrored ? rect.rect.width : 0f, 0f);
+            rect.anchoredPosition = new Vector2(0f, -CanvasHeight * sinkRatio);
+        }
+
+        /// <summary>
+        /// 门口立绘的尺寸 —— 素材构图不一样，按同一个高度对齐会不协调：
+        /// 牛来是全身拟人照（含长腿），身体只占整图的上半截；袋鼠是四足站姿，本来就矮胖。
+        /// 所以每个角色给一组系数，都乘在画布高度上。
+        ///
+        /// <c>sinkRatio</c> = 立绘底边沉到屏幕下方多少 ——
+        /// 照原版那种「它站在门里、下半身被画面裁掉」，露出来的身体才够大。
+        /// </summary>
+        private static void SideCharacterFit(EnemyId id, out float heightRatio,
+            out float sinkRatio)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai:
+                    // 全身照含腿，同一个「高度」下身体显得小一圈，所以放大一点、沉得更深
+                    heightRatio = 1.00f;
+                    sinkRatio = 0.16f;
+                    break;
+
+                default:
+                    heightRatio = SideCharacterHeightRatio;
+                    sinkRatio = SideCharacterSinkRatio;
+                    break;
+            }
         }
 
         /// <summary>
@@ -1651,9 +1697,9 @@ namespace NailongFNAF.UI
         private void BuildSideCharacters()
         {
             _sideLeftCharacter = MakeSideCharacter("SideCharacterLeft",
-                new Vector2(0f, 0f), new Vector2(0f, 0f));
+                new Vector2(SideCharacterAnchorLeft, 0f), new Vector2(0.5f, 0f));
             _sideRightCharacter = MakeSideCharacter("SideCharacterRight",
-                new Vector2(1f, 0f), new Vector2(1f, 0f));
+                new Vector2(SideCharacterAnchorRight, 0f), new Vector2(0.5f, 0f));
         }
 
         /// <summary>
@@ -1746,20 +1792,24 @@ namespace NailongFNAF.UI
             _doorRight.gameObject.SetActive(false);
         }
 
-        /// <summary>两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。</summary>
+        /// <summary>
+        /// 两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。
+        /// 位置贴在**门框靠里那一侧**的墙上 —— 摆太靠屏幕边就会被门口立绘整个盖住。
+        /// （门洞在屏幕上的中心是 14.9% / 85.1%，宽度约 30%。）
+        /// </summary>
         private void BuildWallButtons()
         {
             _leftWallGroup = MakeGroup("WallLeft");
             _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR",
-                new Vector2(0.13f, 0.66f), OnDoorLeft);
+                new Vector2(0.36f, 0.66f), OnDoorLeft);
             _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT",
-                new Vector2(0.13f, 0.34f), OnLightLeft);
+                new Vector2(0.36f, 0.34f), OnLightLeft);
 
             _rightWallGroup = MakeGroup("WallRight");
             _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR",
-                new Vector2(0.87f, 0.66f), OnDoorRight);
+                new Vector2(0.64f, 0.66f), OnDoorRight);
             _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT",
-                new Vector2(0.87f, 0.34f), OnLightRight);
+                new Vector2(0.64f, 0.34f), OnLightRight);
         }
 
         private void BuildMonitorLayer()

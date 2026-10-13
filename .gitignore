@@ -61,3 +61,7 @@ desktop.ini
 # 因本机 git 无法直连 GitHub，改用本地嵌入方式安装。
 # 换机器时的恢复步骤见 docs/02-开发工具.md
 Packages/MCPForUnity/
+
+# Python 脚本跑完留下的字节码缓存
+__pycache__/
+*.pyc
