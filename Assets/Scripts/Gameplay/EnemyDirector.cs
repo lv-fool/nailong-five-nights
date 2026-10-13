@@ -161,8 +161,10 @@ namespace NailongFNAF.Gameplay
                 musicSeconds, _blackoutDarkSeconds,
                 BlackoutSequence.DefaultBeatSeconds);
 
-            _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Left, 0, _rng);
-            _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Right, 0, _rng);
+            // 边的分配照 FNAF 1：邦尼走左门、奇卡走右门、弗莱迪也从右门来。
+            // 对应到我们这四个 —— 袋鼠 = 邦尼（左）、牛来 = 奇卡（右）、奶龙 = 弗莱迪（右）。
+            _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Left, 0, _rng);
+            _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 0, _rng);
 
             var lulu = new LuluBrain(EnemyId.Lulu, 0, _rng);
             lulu.SetGraceRange(_luluGraceAtZeroActivity, _luluGraceAtMaxActivity);

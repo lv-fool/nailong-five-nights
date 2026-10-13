@@ -492,9 +492,9 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
 
-            // 袋鼠已经站在右门口
+            // 牛来已经站在右门口（它和奶龙共用右门）
             var taken = new EnemyContext(false, false, false, false, false,
-                ViewSide.Front, 0, EnemyId.Daishu);
+                ViewSide.Front, 0, EnemyId.Niulai);
 
             brain.Tick(brain.StealIntervalSeconds, taken);
             Assert.AreEqual(1, brain.Stage);
