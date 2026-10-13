@@ -164,22 +164,34 @@ namespace NailongFNAF.UI
         };
 
         // ---------------------------------------------------------------
-        // 小地图：照 FNAF 1 官方那张平面图画，只留我们用得到的房间 ——
-        // 餐厅（大厅）/ 西走廊（左走廊）/ 东走廊（右走廊）+ 办公室。
-        // 舞台、后台、海盗湾、储藏室、厨房、厕所、走廊转角这些用不到的一律不画。
+        // 小地图：整张 FNAF 1 官方平面图 —— 舞台 / 餐厅 / 海盗湾 / 西走廊 /
+        // 储藏室 / 东走廊 / 后台 / 厨房 / 厕所 / 办公室，位置照官方那张图。
+        // 我们只有 3 个机位（1B 餐厅 / 2A 西走廊 / 4A 东走廊），这三间可点，
+        // 其余房间照原样画出来，但暗一档、不可点。
         //
-        // 坐标是地图面板的本地坐标：原点在面板正中，x 向右、y 向上。
+        // 房间坐标直接按官方图的原始像素写（967×791），画的时候统一缩放到面板 ——
+        // 以后照图微调只改数字，不用自己换算。
         // ---------------------------------------------------------------
 
-        /// <summary>地图面板的尺寸。</summary>
-        private const float MapPanelWidth = 370f;
-        private const float MapPanelHeight = 460f;
+        /// <summary>只取官方图上有用的那块（四周留白与 CAM 按钮框不算）。</summary>
+        private const float MapViewX0 = 90f;
+        private const float MapViewY0 = 55f;
+        private const float MapViewX1 = 930f;
+        private const float MapViewY1 = 792f;
+
+        /// <summary>地图面板的宽度；高度按官方图比例算。</summary>
+        private const float MapPanelWidth = 460f;
+        private const float MapPanelHeight =
+            MapPanelWidth * (MapViewY1 - MapViewY0) / (MapViewX1 - MapViewX0);
 
         /// <summary>面板离屏幕右下角留出的边距。</summary>
         private const float MapPanelMargin = 26f;
 
         /// <summary>房间外圈描边的厚度。</summary>
-        private const float MapBorderThickness = 3f;
+        private const float MapBorderThickness = 2f;
+
+        /// <summary>房间名 / 机位号的字号。</summary>
+        private const int MapLabelFontSize = 15;
 
         /// <summary>平面图上的一块矩形（房间或走廊）。</summary>
         private struct MapRectSpec
@@ -187,46 +199,57 @@ namespace NailongFNAF.UI
             public string Label;
             public Vector2 Center;
             public Vector2 Size;
+
+            /// <summary>对应的机位索引；-1 表示这不是机位，只画不点。</summary>
+            public int CameraIndex;
         }
 
-        /// <summary>三个机位房间，顺序必须与机位索引一致。</summary>
-        private static readonly MapRectSpec[] MapCameraRooms =
+        /// <summary>
+        /// 把官方图上的一个像素矩形换算成面板本地坐标。
+        /// 官方图 y 向下、面板 y 向上，所以纵向翻一下。
+        /// </summary>
+        private static MapRectSpec MapRoom(float x0, float y0, float x1, float y1,
+            string label, int cameraIndex)
         {
-            new MapRectSpec
-            {
-                Label = "CAM 1B\nDINING",
-                Center = new Vector2(0f, 155f),
-                Size = new Vector2(320f, 150f)
-            },
-            new MapRectSpec
-            {
-                Label = "CAM 2A\nW HALL",
-                Center = new Vector2(-66f, -6f),
-                Size = new Vector2(72f, 120f)
-            },
-            new MapRectSpec
-            {
-                Label = "CAM 4A\nE HALL",
-                Center = new Vector2(66f, -6f),
-                Size = new Vector2(72f, 120f)
-            }
-        };
+            float cx = (MapViewX0 + MapViewX1) * 0.5f;
+            float cy = (MapViewY0 + MapViewY1) * 0.5f;
+            float scale = MapPanelWidth / (MapViewX1 - MapViewX0);
 
-        /// <summary>办公室 —— 玩家坐的地方，不是机位，只显示不点。</summary>
-        private static readonly MapRectSpec MapOfficeRoom = new MapRectSpec
+            return new MapRectSpec
+            {
+                Label = label,
+                Center = new Vector2((x0 + x1) * 0.5f - cx, -((y0 + y1) * 0.5f - cy)) * scale,
+                Size = new Vector2(x1 - x0, y1 - y0) * scale,
+                CameraIndex = cameraIndex
+            };
+        }
+
+        /// <summary>
+        /// 全部房间，坐标照官方平面图。三间可点的在 CameraIndex 里标了机位号，
+        /// 顺序与 CameraNames 一致（0 = 1B 餐厅 / 1 = 2A 西走廊 / 2 = 4A 东走廊）。
+        /// </summary>
+        private static readonly MapRectSpec[] MapRooms =
         {
-            Label = "OFFICE",
-            Center = new Vector2(0f, -150f),
-            Size = new Vector2(140f, 62f)
+            MapRoom(437f, 71f, 588f, 145f, "1A", -1),                 // 舞台
+            MapRoom(210f, 145f, 735f, 452f, "CAM 1B\nDINING", 0),     // 餐厅（大厅）
+            MapRoom(132f, 330f, 210f, 440f, "1C", -1),                // 海盗湾
+            MapRoom(313f, 452f, 441f, 748f, "CAM 2A\nW HALL", 1),     // 西走廊（左走廊）
+            MapRoom(205f, 519f, 284f, 668f, "3", -1),                 // 储藏室
+            MapRoom(549f, 452f, 675f, 748f, "CAM 4A\nE HALL", 2),     // 东走廊（右走廊）
+            MapRoom(100f, 145f, 185f, 300f, "5", -1),                 // 后台
+            MapRoom(666f, 480f, 845f, 628f, "6", -1),                 // 厨房
+            MapRoom(764f, 193f, 917f, 448f, "7", -1),                 // 厕所
+            MapRoom(437f, 652f, 517f, 780f, "YOU", -1)                // 办公室
         };
 
         /// <summary>把各房间连起来的走廊（细条），画在房间下面。</summary>
         private static readonly MapRectSpec[] MapCorridors =
         {
-            new MapRectSpec { Center = new Vector2(-66f, 68f), Size = new Vector2(30f, 30f) },
-            new MapRectSpec { Center = new Vector2(66f, 68f), Size = new Vector2(30f, 30f) },
-            new MapRectSpec { Center = new Vector2(-52f, -92f), Size = new Vector2(30f, 50f) },
-            new MapRectSpec { Center = new Vector2(52f, -92f), Size = new Vector2(30f, 50f) }
+            MapRoom(185f, 205f, 212f, 255f, null, -1),   // 后台 ↔ 餐厅
+            MapRoom(733f, 230f, 766f, 280f, null, -1),   // 餐厅 ↔ 厕所
+            MapRoom(282f, 565f, 315f, 612f, null, -1),   // 储藏室 ↔ 西走廊
+            MapRoom(515f, 690f, 551f, 732f, null, -1),   // 办公室 ↔ 东走廊
+            MapRoom(798f, 446f, 832f, 482f, null, -1)    // 厨房 ↔ 厕所
         };
 
         // 没有素材时的兜底色
@@ -247,13 +270,15 @@ namespace NailongFNAF.UI
         private static readonly Color UsageRed = new Color(0.90f, 0.26f, 0.22f);
         private static readonly Color UsageOff = new Color(0.20f, 0.20f, 0.22f);
 
-        // 小地图：房间描边 / 房间底色 / 走廊 / 文字
+        // 小地图：可点机位的选中 / 未选中，以及不可点房间的暗色
         private static readonly Color CamBoxOn = new Color(0.22f, 0.60f, 0.34f, 0.98f);
         private static readonly Color CamBoxOff = new Color(0.14f, 0.16f, 0.18f, 0.95f);
         private static readonly Color MapBorderColor = new Color(0.50f, 0.60f, 0.52f, 0.95f);
         private static readonly Color MapCorridorColor = new Color(0.20f, 0.22f, 0.24f, 0.95f);
-        private static readonly Color MapOfficeFill = new Color(0.26f, 0.28f, 0.32f, 0.95f);
+        private static readonly Color MapInactiveFill = new Color(0.11f, 0.12f, 0.14f, 0.95f);
+        private static readonly Color MapInactiveBorder = new Color(0.28f, 0.32f, 0.28f, 0.85f);
         private static readonly Color MapLabelColor = new Color(0.80f, 0.88f, 0.80f, 1f);
+        private static readonly Color MapLabelDim = new Color(0.50f, 0.55f, 0.50f, 1f);
 
         [Header("素材（留空则用色块占位）")]
         [SerializeField] private Sprite _bgFront;
@@ -1490,7 +1515,7 @@ namespace NailongFNAF.UI
             _monitorCharacter.color = Color.white;
             charGo.SetActive(false);
 
-            // 小地图 —— 照 FNAF 1 官方那张平面图画，只留我们用得到的房间
+            // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
             map.transform.SetParent(_monitorOverlay.transform, false);
 
@@ -1510,22 +1535,37 @@ namespace NailongFNAF.UI
             for (int i = 0; i < MapCorridors.Length; i++)
             {
                 MakeMapBox(map.transform, "Corridor" + i, MapCorridors[i],
-                    MapCorridorColor, MapCorridorColor, null, null);
+                    MapCorridorColor, MapCorridorColor, null,
+                    MapLabelFontSize, MapLabelColor, null);
             }
 
-            // 三个机位房间（可点）
-            _camBoxes = new Image[MapCameraRooms.Length];
-            for (int i = 0; i < MapCameraRooms.Length; i++)
+            // 所有房间；只有机位那三间可点，其余照原样画但暗一档
+            _camBoxes = new Image[CameraNames.Length];
+            for (int i = 0; i < MapRooms.Length; i++)
             {
-                int index = i;
-                _camBoxes[i] = MakeMapBox(map.transform, "CamRoom" + i, MapCameraRooms[i],
-                    CamBoxOff, MapBorderColor, MapCameraRooms[i].Label,
-                    delegate { OnCameraBox(index); });
-            }
+                MapRectSpec spec = MapRooms[i];
+                int camIndex = spec.CameraIndex;
+                bool isCamera = camIndex >= 0;
 
-            // 办公室：玩家坐的地方，不是机位，只显示不点
-            MakeMapBox(map.transform, "OfficeRoom", MapOfficeRoom,
-                MapOfficeFill, MapBorderColor, MapOfficeRoom.Label, null);
+                UnityEngine.Events.UnityAction onClick = null;
+                if (isCamera)
+                {
+                    int index = camIndex;
+                    onClick = delegate { OnCameraBox(index); };
+                }
+
+                Image box = MakeMapBox(map.transform, "MapRoom" + i, spec,
+                    isCamera ? CamBoxOff : MapInactiveFill,
+                    isCamera ? MapBorderColor : MapInactiveBorder,
+                    spec.Label, MapLabelFontSize,
+                    isCamera ? MapLabelColor : MapLabelDim,
+                    onClick);
+
+                if (isCamera)
+                {
+                    _camBoxes[camIndex] = box;
+                }
+            }
 
             _monitorMapGroup.alpha = 0f;
             _monitorMapGroup.blocksRaycasts = false;
@@ -1803,7 +1843,7 @@ namespace NailongFNAF.UI
         /// 返回里面那张 —— 高亮时改它的颜色。
         /// </summary>
         private Image MakeMapBox(Transform parent, string name, MapRectSpec spec,
-            Color fill, Color border, string label,
+            Color fill, Color border, string label, int fontSize, Color labelColor,
             UnityEngine.Events.UnityAction onClick)
         {
             var outer = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -1832,7 +1872,7 @@ namespace NailongFNAF.UI
             if (!string.IsNullOrEmpty(label))
             {
                 var text = MakeText(innerGo.transform, "Label", label,
-                    TextAnchor.MiddleCenter, 18, MapLabelColor);
+                    TextAnchor.MiddleCenter, fontSize, labelColor);
                 StretchToParent(text.rectTransform);
             }
 
