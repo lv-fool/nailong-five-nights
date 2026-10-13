@@ -37,6 +37,11 @@ JOBS = [
     # 四足站姿那张当 idle（出现在监控 / 门口），正面坐姿那张当 stare（直视镜头）
     (r"D:/QQmm/retouch_2026101320041711.png", "char_daishu_idle"),
     (r"D:/QQmm/retouch_2026101320035719.png", "char_daishu_stare"),
+
+    # 牛来（2026-10-13 绿子提供）—— 目前两张：
+    # 全身站立那张当 idle（门口显示），牛头特写那张当 stare（直视镜头 / 跳杀兜底）
+    (r"D:/QQmm/retouch_2026101320082315.png", "char_niulai_idle"),
+    (r"D:/QQmm/retouch_2026101320141297_edit_409844947479749.png", "char_niulai_stare"),
 ]
 
 

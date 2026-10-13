@@ -886,6 +886,16 @@ namespace NailongFNAF.UI
 
             // 门口站着的都是门类敌人（噜噜改走正门了），用站姿
             ShowCharacter(image, id, CharacterPose.Idle, SideCharacterHeight, alpha);
+
+            // 门口的敌人一律面朝玩家。素材都是朝左画的 ——
+            // 右门原样就对着玩家，左门要镜像过来。
+            // 镜像以 pivot（左下角）为轴，所以得把宽度补回来，
+            // 否则立绘会整个跑到屏幕外面去。
+            var rect = image.rectTransform;
+            bool mirrored = side == Side.Left;
+
+            rect.localScale = new Vector3(mirrored ? -1f : 1f, 1f, 1f);
+            rect.anchoredPosition = new Vector2(mirrored ? rect.rect.width : 0f, 0f);
         }
 
         /// <summary>

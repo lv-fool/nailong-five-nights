@@ -489,6 +489,14 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   _characters:
+  - Id: 0
+    Idle: {fileID: 21300000, guid: f0a9188eee41a1844a1eb3b68d566345, type: 3}
+    Stare: {fileID: 21300000, guid: 49a0c5fde682ac34d99c68fe2d57199b, type: 3}
+    Peek: {fileID: 0}
+    Startled: {fileID: 0}
+    Angry: {fileID: 0}
+    Jumpscare: {fileID: 0}
+    Blackout: {fileID: 0}
   - Id: 1
     Idle: {fileID: 21300000, guid: 98f5dc0c20495ca44971075ce5ab3e2d, type: 3}
     Stare: {fileID: 21300000, guid: faf84b3c5bca93041b22af75748b881b, type: 3}
