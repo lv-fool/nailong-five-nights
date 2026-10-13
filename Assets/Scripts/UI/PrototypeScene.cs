@@ -113,6 +113,18 @@ namespace NailongFNAF.UI
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
 
+        /// <summary>正前方那个立绘（噜噜）的高度 —— 比两侧的大一圈，它是正对着你的。</summary>
+        private const float FrontCharacterHeight = 880f;
+
+        /// <summary>正前方立绘贴屏幕底边多高。要高于监控热区（0.10 × 1080 = 108）。</summary>
+        private const float FrontCharacterBottom = 40f;
+
+        /// <summary>
+        /// 手电筒按钮中心离屏幕底边多高。按钮半高 30，所以底边在 172 - 30 = 142，
+        /// 高过监控热区（0.10 × 1080 = 108）—— 免得点它的时候顺手把监控收了。
+        /// </summary>
+        private const float FlashlightButtonBottom = 172f;
+
         /// <summary>断电时奶龙立绘的高度。</summary>
         private const float BlackoutCharacterHeight = 880f;
 
@@ -164,12 +176,6 @@ namespace NailongFNAF.UI
             "CAM 6     KITCHEN",          // 9  厨房
             "CAM 7     RESTROOMS"         // 10 厕所
         };
-
-        /// <summary>左走廊（西走廊）的机位号 —— 噜噜从这边来时看它。</summary>
-        private const int LeftHallCameraIndex = 3;
-
-        /// <summary>右走廊（东走廊）的机位号。</summary>
-        private const int RightHallCameraIndex = 6;
 
         /// <summary>
         /// 厨房（CAM 6）的机位号 —— 官方这个机位**只有声音、没有画面**，
@@ -312,6 +318,17 @@ namespace NailongFNAF.UI
         private static readonly Color LightOn = new Color(0.32f, 0.72f, 0.30f);
         private static readonly Color LightOff = new Color(0.13f, 0.32f, 0.14f);
 
+        // 手电筒按钮：亮着是暖黄，松开是灰
+        private static readonly Color FlashlightOn = new Color(0.92f, 0.80f, 0.36f);
+        private static readonly Color FlashlightOff = new Color(0.24f, 0.23f, 0.20f);
+
+        /// <summary>手电筒照在正前方时，画面整体提亮的强度。</summary>
+        private const float FlashlightGlowAlpha = 0.35f;
+
+        // 按钮底图：填色 + 一圈接近纯白的描边。Image.color 一乘，描边就比底色亮一档
+        private static readonly Color ButtonFace = new Color(0.76f, 0.76f, 0.79f);
+        private static readonly Color ButtonEdge = new Color(1f, 1f, 1f);
+
         // 使用等级五格条：1~2 绿、3 黄、4~5 红
         private static readonly Color UsageGreen = new Color(0.35f, 0.78f, 0.32f);
         private static readonly Color UsageAmber = new Color(0.92f, 0.72f, 0.20f);
@@ -352,6 +369,10 @@ namespace NailongFNAF.UI
         private Image _bgRightImage;
         private Image _sideLeftCharacter;
         private Image _sideRightCharacter;
+
+        /// <summary>正前方那个立绘 —— 噜噜从正门来，站在这儿。</summary>
+        private Image _frontCharacter;
+
         private Image _doorLeft;
         private Image _doorRight;
         private CanvasGroup _leftWallGroup;
@@ -360,6 +381,11 @@ namespace NailongFNAF.UI
         private Image _doorRightButton;
         private Image _lightLeftButton;
         private Image _lightRightButton;
+        private CanvasGroup _flashlightGroup;
+        private Image _flashlightButton;
+        private HoldButton _flashlightHold;
+        private Image _flashlightGlow;
+        private float _flashlightGlowAlpha;
         private Image _monitorOverlay;
         private Image _monitorCharacter;
         private CanvasGroup _monitorMapGroup;
@@ -381,6 +407,7 @@ namespace NailongFNAF.UI
         private Image _blackoutCharacter;
         private Font _font;
         private Sprite _solidSprite;
+        private Sprite _buttonSprite;
 
         private EnemyDirector _enemyDirector;
         private AudioManager _audio;
@@ -678,6 +705,7 @@ namespace NailongFNAF.UI
                 SetBlackout();
                 HideDoors();
                 HideSideCharacters();
+                HideFrontCharacter();
 
                 // 断电 → 奶龙来收电费：黑暗里一闪一闪
                 if (_hasJumpscare)
@@ -698,11 +726,13 @@ namespace NailongFNAF.UI
                 {
                     HideDoors();
                     HideSideCharacters();
+                    HideFrontCharacter();
                 }
                 else
                 {
                     ApplyDoors(gm);
                     ApplySideCharacters(gm);
+                    ApplyFrontCharacter(gm);
                 }
             }
 
@@ -725,6 +755,8 @@ namespace NailongFNAF.UI
             _rightWallGroup.alpha = rightAlpha;
             _leftWallGroup.blocksRaycasts = leftAlpha > 0.5f;
             _rightWallGroup.blocksRaycasts = rightAlpha > 0.5f;
+
+            ApplyFlashlight(gm, monitorUp, locked);
 
             UpdateWallButtonColors(gm);
 
@@ -819,27 +851,14 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 噜噜在门外：平时是探出头偷看；被盯久了换成受惊那张。
-            // 门类敌人站在门口，用站姿。
-            CharacterPose pose = CharacterPose.Idle;
-
-            if (id == EnemyId.Lulu)
-            {
-                var lulu = _enemyDirector != null
-                    ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
-                    : null;
-
-                // 盯了半程之后它才慌起来 —— 前半程留给你看清它探头的样子
-                bool startled = lulu != null
-                    && lulu.StareProgress >= lulu.StareSeconds * 0.5f;
-
-                pose = startled ? CharacterPose.Startled : CharacterPose.Peek;
-            }
-
-            ShowCharacter(image, id, pose, SideCharacterHeight, alpha);
+            // 门口站着的都是门类敌人（噜噜改走正门了），用站姿
+            ShowCharacter(image, id, CharacterPose.Idle, SideCharacterHeight, alpha);
         }
 
-        /// <summary>门口 / 门外站着谁。门类敌人要门没关；噜噜要那一侧的灯亮着。</summary>
+        /// <summary>
+        /// 门口站着谁。门类敌人要**门没关 + 那一侧的灯亮着** ——
+        /// 照 FNAF 1：不闪灯就看不见门外有没有人。
+        /// </summary>
         private bool TryGetEnemyAtSide(GameManager gm, Side side, out EnemyId id)
         {
             id = EnemyId.Niulai;
@@ -852,10 +871,15 @@ namespace NailongFNAF.UI
             bool closed = side == Side.Left ? gm.LeftDoorClosed : gm.RightDoorClosed;
             bool lightOn = side == Side.Left ? gm.LeftLightOn : gm.RightLightOn;
 
+            if (closed || !lightOn)
+            {
+                return false;
+            }
+
             foreach (var brain in _enemyDirector.Brains)
             {
                 var door = brain as DoorEnemyBrain;
-                if (door == null || door.Side != side || door.IsAttacking || closed)
+                if (door == null || door.Side != side || door.IsAttacking)
                 {
                     continue;
                 }
@@ -868,15 +892,101 @@ namespace NailongFNAF.UI
                 }
             }
 
-            var lulu = _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain;
-            if (lulu != null && !lulu.IsAttacking && lulu.Stage >= 2
-                && lulu.Side == side && lightOn)
+            return false;
+        }
+
+        /// <summary>
+        /// 正前方那个立绘 —— 噜噜从正门摸进来。
+        /// 逼近时是站姿，堵到门口换成正对镜头；被手电筒照着就换成受惊那张。
+        /// </summary>
+        private void ApplyFrontCharacter(GameManager gm)
+        {
+            var lulu = _enemyDirector != null
+                ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
+                : null;
+
+            // 只有正前方才看得见 —— 转头看两边时它不在画面里
+            float look = Mathf.Clamp01(1f - Mathf.Abs(_pan) * 1.6f);
+
+            if (lulu == null || lulu.IsAttacking || lulu.Stage < 1 || look <= 0.01f)
             {
-                id = EnemyId.Lulu;
-                return true;
+                HideFrontCharacter();
+                return;
             }
 
-            return false;
+            CharacterPose pose;
+
+            if (lulu.FlashProgress > 0f || lulu.FlashCount > 0)
+            {
+                // 正被手电筒照着 → 慌
+                pose = CharacterPose.Startled;
+            }
+            else if (lulu.Stage >= lulu.MaxStage)
+            {
+                // 堵到正门口 → 正对镜头
+                pose = CharacterPose.Stare;
+            }
+            else
+            {
+                // 还在逼近 → 站姿
+                pose = CharacterPose.Idle;
+            }
+
+            ShowCharacter(_frontCharacter, EnemyId.Lulu, pose, FrontCharacterHeight, look);
+        }
+
+        private void HideFrontCharacter()
+        {
+            if (_frontCharacter != null)
+            {
+                _frontCharacter.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// 手电筒：按钮跟着监控收起来；光只在「亮着 + 朝正前方」时打出来。
+        /// 顺带兜底松手 —— 抬起事件被系统吞掉时（切窗口等）按钮会粘住。
+        /// </summary>
+        private void ApplyFlashlight(GameManager gm, bool monitorUp, bool locked)
+        {
+            bool usable = !monitorUp && !locked;
+
+            _flashlightGroup.alpha = usable ? 1f : 0f;
+            _flashlightGroup.blocksRaycasts = usable;
+
+            if (_flashlightHold != null && _flashlightHold.IsHeld && !Input.GetMouseButton(0))
+            {
+                _flashlightHold.Release();
+            }
+
+            bool shiningFront = gm.FlashlightOn && usable && gm.CurrentView == ViewSide.Front;
+            float target = shiningFront ? FlashlightGlowAlpha : 0f;
+
+            _flashlightGlowAlpha = Mathf.MoveTowards(_flashlightGlowAlpha, target,
+                Time.deltaTime * 5f);
+
+            Color glow = _flashlightGlow.color;
+            glow.a = _flashlightGlowAlpha;
+            _flashlightGlow.color = glow;
+            _flashlightGlow.enabled = _flashlightGlowAlpha > 0.001f;
+
+            _flashlightButton.color = gm.FlashlightOn ? FlashlightOn : FlashlightOff;
+        }
+
+        private void OnFlashlightHold(bool held)
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            gm.SetFlashlight(held);
+
+            if (_audio != null && gm.FlashlightOn == held)
+            {
+                _audio.PlayLight(held);
+            }
         }
 
         private void HideSideCharacters()
@@ -1087,29 +1197,8 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            var lulu = _enemyDirector != null
-                ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
-                : null;
-
-            if (lulu != null && !lulu.IsAttacking && lulu.Stage >= 1
-                && CameraIndexForSide(lulu.Side) == gm.CurrentCameraIndex)
-            {
-                // 走廊里站着用站姿；摸到门外就换成瞪着镜头那张
-                CharacterPose pose = lulu.Stage >= lulu.MaxStage
-                    ? CharacterPose.Angry
-                    : CharacterPose.Idle;
-
-                ShowCharacter(_monitorCharacter, EnemyId.Lulu, pose, MonitorCharacterHeight);
-                return;
-            }
-
+            // 噜噜改走正门了，不再出现在任何机位里
             _monitorCharacter.gameObject.SetActive(false);
-        }
-
-        /// <summary>某条走廊对应哪个机位。</summary>
-        private static int CameraIndexForSide(Side side)
-        {
-            return side == Side.Left ? LeftHallCameraIndex : RightHallCameraIndex;
         }
 
         private static string CameraName(int index)
@@ -1430,9 +1519,9 @@ namespace NailongFNAF.UI
                     case 0:
                         return "AWAY";
                     case 1:
-                        return "CORRIDOR";
+                        return "APPROACHING";
                     default:
-                        return "OUTSIDE " + lulu.Side.ToString().ToUpperInvariant();
+                        return "AT FRONT " + lulu.FlashCount + "/" + lulu.FlashesToRetreat;
                 }
             }
 
@@ -1465,8 +1554,11 @@ namespace NailongFNAF.UI
 
             BuildBackgroundLayers();
             BuildSideCharacters();
+            BuildFrontCharacter();
             BuildDoorLayers();
+            BuildFlashlightGlow();
             BuildWallButtons();
+            BuildFlashlightButton();
             BuildMonitorLayer();
             BuildMonitorHandle();
             BuildBlackoutLayer();
@@ -1516,6 +1608,65 @@ namespace NailongFNAF.UI
                 new Vector2(0f, 0f), new Vector2(0f, 0f));
             _sideRightCharacter = MakeSideCharacter("SideCharacterRight",
                 new Vector2(1f, 0f), new Vector2(1f, 0f));
+        }
+
+        /// <summary>
+        /// 正前方那个立绘 —— 噜噜从正门来就站在这儿。
+        /// 锚在屏幕下边中央，比两侧的门口立绘大一圈。
+        /// </summary>
+        private void BuildFrontCharacter()
+        {
+            var go = new GameObject("FrontCharacter", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            PlaceRect(rect, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, FrontCharacterBottom),
+                new Vector2(FrontCharacterHeight * 0.7f, FrontCharacterHeight));
+
+            var image = go.GetComponent<Image>();
+            image.sprite = _solidSprite;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            image.color = new Color(1f, 1f, 1f, 0.9f);
+
+            go.SetActive(false);
+            _frontCharacter = image;
+        }
+
+        /// <summary>
+        /// 手电筒的光 —— 盖在画面之上的一层提亮，中心亮、往外渐隐，
+        /// 像一束光打在正前方。只在「亮着 + 朝正前方」时淡入。
+        /// </summary>
+        private void BuildFlashlightGlow()
+        {
+            _flashlightGlow = MakeFullScreenImage("FlashlightGlow",
+                new Color(1f, 0.97f, 0.86f, 0f));
+
+            // 纯色铺满只会整体发灰，换成径向光斑
+            _flashlightGlow.sprite = MakeRadialSprite();
+
+            _flashlightGlow.enabled = false;
+            _flashlightGlowAlpha = 0f;
+        }
+
+        /// <summary>手电筒按钮：按住才亮，松手就灭。</summary>
+        private void BuildFlashlightButton()
+        {
+            _flashlightGroup = MakeGroup("FlashlightGroup");
+
+            var button = MakeButton(_flashlightGroup.transform, "FlashlightButton", "FLASHLIGHT",
+                new Vector2(0.5f, 0f), new Vector2(0f, FlashlightButtonBottom),
+                new Vector2(240f, 64f), null);
+
+            _flashlightButton = button.GetComponent<Image>();
+            _flashlightButton.color = FlashlightOff;
+
+            _flashlightHold = button.gameObject.AddComponent<HoldButton>();
+            _flashlightHold.HoldChanged = OnFlashlightHold;
+
+            _flashlightGroup.alpha = 1f;
+            _flashlightGroup.blocksRaycasts = true;
         }
 
         private Image MakeSideCharacter(string name, Vector2 anchor, Vector2 pivot)
@@ -1903,11 +2054,13 @@ namespace NailongFNAF.UI
             PlaceRect(go.GetComponent<RectTransform>(), anchor, new Vector2(0.5f, 0.5f), offset, size);
 
             var image = go.GetComponent<Image>();
-            image.sprite = MakeSolidSprite();
-            image.color = new Color(0.28f, 0.28f, 0.34f, 0.95f);
+            image.sprite = GetButtonSprite();
+            image.type = Image.Type.Sliced;
+            image.color = ButtonFace;
 
             var button = go.GetComponent<Button>();
             button.targetGraphic = image;
+            button.colors = MakeButtonColors();
 
             if (onClick != null)
             {
@@ -1919,6 +2072,78 @@ namespace NailongFNAF.UI
             StretchToParent(text.rectTransform);
 
             return button;
+        }
+
+        /// <summary>按钮被鼠标划过 / 按下时的明暗反馈（和状态色相乘，不打架）。</summary>
+        private static ColorBlock MakeButtonColors()
+        {
+            var colors = ColorBlock.defaultColorBlock;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1.22f, 1.22f, 1.22f, 1f);
+            colors.pressedColor = new Color(0.78f, 0.78f, 0.78f, 1f);
+            colors.selectedColor = Color.white;
+            colors.disabledColor = new Color(0.55f, 0.55f, 0.55f, 0.6f);
+            colors.fadeDuration = 0.06f;
+            return colors;
+        }
+
+        /// <summary>
+        /// 按钮底图：圆角矩形 + 一圈略亮的描边（九宫格拉伸，任意尺寸都不糊）。
+        /// 生成一次就缓存住，所有按钮共用。
+        /// </summary>
+        private Sprite GetButtonSprite()
+        {
+            if (_buttonSprite == null)
+            {
+                _buttonSprite = MakeRoundedSprite(48, 12, 2, 15);
+            }
+
+            return _buttonSprite;
+        }
+
+        /// <summary>
+        /// 画一张圆角矩形贴图：内部填 <c>ButtonFace</c>、边上一圈接近纯白。
+        /// Image.color 一乘，描边就比底色亮一档 —— 按钮因此有「厚度」。
+        /// <paramref name="sliceBorder"/> 是九宫格切边的像素数（别小于 radius + border）。
+        /// </summary>
+        private static Sprite MakeRoundedSprite(int size, int radius, int border, int sliceBorder)
+        {
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.name = "prototype_button";
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+
+            float half = size * 0.5f;
+            float inner = half - radius;
+            var pixels = new Color32[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    // 到圆角矩形的有符号距离：< 0 在里面、> 0 在外面
+                    float dx = Mathf.Abs(x + 0.5f - half) - inner;
+                    float dy = Mathf.Abs(y + 0.5f - half) - inner;
+                    float outside = Mathf.Sqrt(
+                        Mathf.Max(dx, 0f) * Mathf.Max(dx, 0f)
+                        + Mathf.Max(dy, 0f) * Mathf.Max(dy, 0f));
+                    float distance = outside + Mathf.Min(Mathf.Max(dx, dy), 0f) - radius;
+
+                    // 边缘 1 像素做抗锯齿
+                    float coverage = Mathf.Clamp01(0.5f - distance);
+                    Color color = distance >= -border ? ButtonEdge : ButtonFace;
+
+                    pixels[y * size + x] = new Color(color.r, color.g, color.b,
+                        color.a * coverage);
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+
+            var spriteBorder = new Vector4(sliceBorder, sliceBorder, sliceBorder, sliceBorder);
+            return Sprite.Create(texture, new Rect(0f, 0f, size, size),
+                new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, spriteBorder);
         }
 
         /// <summary>
@@ -2011,6 +2236,45 @@ namespace NailongFNAF.UI
             texture.Apply();
 
             return Sprite.Create(texture, new Rect(0f, 0f, 4f, 4f), new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        /// <summary>
+        /// 手电筒的光斑：中心不透明、往外平方衰减到全透明。
+        /// 拉伸铺满屏幕，看起来就是一束打在正前方的光。
+        /// </summary>
+        private static Sprite MakeRadialSprite()
+        {
+            const int size = 256;
+
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.name = "prototype_radial";
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+
+            var pixels = new Color32[size * size];
+            float half = (size - 1) * 0.5f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x - half) / half;
+                    float dy = (y - half) / half;
+                    float distance = Mathf.Sqrt(dx * dx + dy * dy);
+
+                    // 平方一下，边缘收得更快，光心更聚
+                    float falloff = Mathf.Clamp01(1f - distance);
+                    float alpha = falloff * falloff;
+
+                    pixels[y * size + x] = new Color32(255, 247, 219, (byte)(alpha * 255f));
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+
+            return Sprite.Create(texture, new Rect(0f, 0f, size, size),
+                new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
         }
 
         private static void StretchToParent(RectTransform rect)

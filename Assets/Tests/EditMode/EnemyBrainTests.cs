@@ -64,25 +64,11 @@ namespace NailongFNAF.Tests
             }
         }
 
-        /// <summary>
-        /// 只对「选边」这次调用做区分：掷骰（范围大于 2）永远成功，
-        /// 选边（范围正好是 2）第一次给左边、第二次给右边。
-        /// 用来验证「边只在走廊阶段掷一次」—— 要是到门外又重掷，第二次会翻到右边。
-        /// </summary>
-        private sealed class SidePickRandom : IRandomSource
+        /// <summary>朝正前方按着手电筒的状态（噜噜的解法）。</summary>
+        private static EnemyContext Shining()
         {
-            public int SidePicks;
-
-            public int Range(int minInclusive, int maxExclusive)
-            {
-                if (maxExclusive - minInclusive > 2)
-                {
-                    return minInclusive;
-                }
-
-                SidePicks++;
-                return SidePicks == 1 ? minInclusive : minInclusive + 1;
-            }
+            return new EnemyContext(false, false, false, false, false,
+                ViewSide.Front, 0, null, true);
         }
 
         private static void AdvanceToStage(EnemyBrain brain, EnemyContext ctx, int targetStage)
@@ -202,124 +188,131 @@ namespace NailongFNAF.Tests
         }
 
         // ---------------------------------------------------------------
-        // 噜噜：开灯 + 盯着门外那侧 2 秒
+        // 噜噜：从正门来，朝正前方按手电筒闪够几次（照 FNAF 2 的狐狸）
         // ---------------------------------------------------------------
 
         [Test]
-        public void 噜噜_开灯并盯着那一侧两秒就会退走()
+        public void 噜噜_闪够次数就退走()
         {
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
-            // FixedRandom(1) 选边结果：Range(0,2) = 1 → 右侧
-            var watching = new EnemyContext(false, false, false, true, false, ViewSide.Right, 0);
+            var shining = Shining();
 
-            AdvanceToStage(brain, watching, 2);
-            Assert.AreEqual(Side.Right, brain.Side);
+            AdvanceToStage(brain, shining, 2);
 
-            brain.Tick(1f, watching);
-            Assert.IsFalse(brain.IsAttacking);
-            Assert.AreEqual(1f, brain.StareProgress, Tolerance);
+            // 每一次都得照满 FlashSeconds 才算数
+            for (int i = 0; i < LuluBrain.DefaultFlashesToRetreat; i++)
+            {
+                Assert.IsFalse(brain.RetreatedThisTick);
+                brain.Tick(LuluBrain.DefaultFlashSeconds, shining);
+            }
 
-            brain.Tick(1f, watching);
             Assert.AreEqual(0, brain.Stage);
             Assert.IsTrue(brain.RetreatedThisTick);
-        }
-
-        [Test]
-        public void 噜噜_只开灯不盯着_到时间会动手()
-        {
-            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
-            // 右侧灯亮着，但玩家看着正前方
-            var ctx = new EnemyContext(false, false, false, true, false, ViewSide.Front, 0);
-
-            AdvanceToStage(brain, ctx, 2);
-
-            brain.Tick(brain.OutsideGraceSeconds, ctx);
-
-            Assert.IsTrue(brain.IsAttacking);
-        }
-
-        [Test]
-        public void 噜噜_盯着但没开灯_到时间会动手()
-        {
-            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
-            // 看着右侧，但灯没开
-            var ctx = new EnemyContext(false, false, false, false, false, ViewSide.Right, 0);
-
-            AdvanceToStage(brain, ctx, 2);
-
-            brain.Tick(brain.OutsideGraceSeconds, ctx);
-
-            Assert.IsTrue(brain.IsAttacking);
-        }
-
-        [Test]
-        public void 噜噜_视线中断则重新计时()
-        {
-            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
-            var watching = new EnemyContext(false, false, false, true, false, ViewSide.Right, 0);
-            var lookingAway = new EnemyContext(false, false, false, true, false, ViewSide.Front, 0);
-
-            AdvanceToStage(brain, watching, 2);
-
-            brain.Tick(1.5f, watching);
-            Assert.AreEqual(1.5f, brain.StareProgress, Tolerance);
-
-            // 转开视线 → 计时归零
-            brain.Tick(0.5f, lookingAway);
-            Assert.AreEqual(0f, brain.StareProgress, Tolerance);
-
-            // 转回来，重新数
-            brain.Tick(1f, watching);
-            Assert.AreEqual(1f, brain.StareProgress, Tolerance);
             Assert.IsFalse(brain.IsAttacking);
         }
 
         [Test]
-        public void 噜噜_开着监控不算盯着()
+        public void 噜噜_每次照不满一次闪光就不算数()
         {
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
-            var ctx = new EnemyContext(false, false, false, true, true, ViewSide.Right, 0);
+            var shining = Shining();
+            var off = EnemyContext.Idle();
+            float half = LuluBrain.DefaultFlashSeconds * 0.5f;
+
+            AdvanceToStage(brain, shining, 2);
+
+            // 每次只照一半就松手 —— 照再久也闪不成一次
+            for (int i = 0; i < 10; i++)
+            {
+                brain.Tick(half, shining);
+                brain.Tick(half, off);
+            }
+
+            Assert.AreEqual(0, brain.FlashCount);
+            Assert.AreEqual(2, brain.Stage);
+            Assert.IsFalse(brain.IsAttacking);
+        }
+
+        [Test]
+        public void 噜噜_不照它_到时间就动手()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var ctx = EnemyContext.Idle();
+
+            AdvanceToStage(brain, ctx, 2);
+
+            brain.Tick(brain.OutsideGraceSeconds, ctx);
+
+            Assert.IsTrue(brain.IsAttacking);
+        }
+
+        [Test]
+        public void 噜噜_每次闪光都把推进计时清零()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var shining = Shining();
+            var off = EnemyContext.Idle();
+
+            AdvanceToStage(brain, shining, 2);
+
+            // 先干等到快没时间
+            float almost = brain.OutsideGraceSeconds - 0.1f;
+            brain.Tick(almost, off);
+            Assert.IsFalse(brain.IsAttacking);
+
+            // 照一下 → 计时归零，又能拖一会儿
+            brain.Tick(LuluBrain.DefaultFlashSeconds, shining);
+            Assert.AreEqual(1, brain.FlashCount);
+            Assert.AreEqual(0f, brain.SinceFlashTimer, Tolerance);
+
+            brain.Tick(almost, off);
+            Assert.IsFalse(brain.IsAttacking);
+        }
+
+        [Test]
+        public void 噜噜_转头看两边不算照它()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var ctx = new EnemyContext(false, false, false, false, false,
+                ViewSide.Left, 0, null, true);
 
             AdvanceToStage(brain, ctx, 2);
             brain.Tick(3f, ctx);
 
-            Assert.AreEqual(0f, brain.StareProgress, Tolerance);
+            Assert.AreEqual(0f, brain.FlashProgress, Tolerance);
+            Assert.AreEqual(0, brain.FlashCount);
         }
 
-        // --- 走廊阶段就定边（这样监控里能提前看到它从哪边来）---
-
         [Test]
-        public void 噜噜_走到走廊就定下走哪边()
+        public void 噜噜_开着监控不算照它()
         {
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
-            var ctx = EnemyContext.Idle();
+            var ctx = new EnemyContext(false, false, false, false, true,
+                ViewSide.Front, 0, null, true);
 
-            AdvanceToStage(brain, ctx, 1);
+            AdvanceToStage(brain, ctx, 2);
+            brain.Tick(3f, ctx);
 
-            Assert.AreEqual(1, brain.Stage);
-            // FixedRandom(1) 选边结果：Range(0,2) = 1 → 右侧
-            Assert.AreEqual(Side.Right, brain.Side);
+            Assert.AreEqual(0f, brain.FlashProgress, Tolerance);
+            Assert.AreEqual(0, brain.FlashCount);
         }
 
         [Test]
-        public void 噜噜_边只在走廊阶段掷一次()
+        public void 噜噜_还没到正门口时照它没用()
         {
-            var rng = new SidePickRandom();
-            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, rng);
-            var ctx = EnemyContext.Idle();
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var shining = Shining();
 
-            AdvanceToStage(brain, ctx, 1);
-            Assert.AreEqual(Side.Left, brain.Side);
+            AdvanceToStage(brain, shining, 1);
+            Assert.AreEqual(1, brain.Stage);
 
-            AdvanceToStage(brain, ctx, 2);
+            brain.Tick(LuluBrain.DefaultFlashSeconds * 3f, shining);
 
-            // 到门外不再重掷 —— 重掷的话这里会变成右侧
-            Assert.AreEqual(2, brain.Stage);
-            Assert.AreEqual(Side.Left, brain.Side);
-            Assert.AreEqual(1, rng.SidePicks);
+            Assert.AreEqual(0, brain.FlashCount);
+            Assert.IsFalse(brain.IsAttacking);
         }
 
-        // --- 门外宽限跟活动度走 ---
+        // --- 闪光间隔的宽限跟活动度走 ---
 
         [Test]
         public void 噜噜_活动度越高门外宽限越短()
@@ -370,7 +363,9 @@ namespace NailongFNAF.Tests
         [Test]
         public void 噜噜_显式传的宽限不受活动度影响()
         {
-            var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1), 5f, 2f, 3f);
+            var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds,
+                LuluBrain.DefaultFlashSeconds, LuluBrain.DefaultFlashesToRetreat, 3f);
 
             brain.SetActivityLevel(EnemyBrain.MaxActivityLevel);
 
@@ -392,15 +387,18 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 噜噜_低活动度给的时间足够转头开灯再盯满两秒()
+        public void 噜噜_低活动度给的时间足够把手电筒按起来闪完()
         {
-            // 第 1 夜：活动度 1 → 15.6 秒，扣掉盯视的 2 秒还剩 13 秒多留给玩家反应
+            // 第 1 夜：活动度 1 → 15.6 秒。闪完 4 次一共按 2 秒，剩下十几秒都留给玩家反应
             var brain = new LuluBrain(EnemyId.Lulu, 1, new FixedRandom(1));
-            var watching = new EnemyContext(false, false, false, true, false, ViewSide.Right, 0);
+            var shining = Shining();
 
-            AdvanceToStage(brain, watching, 2);
+            AdvanceToStage(brain, shining, 2);
 
-            brain.Tick(LuluBrain.DefaultStareSeconds, watching);
+            for (int i = 0; i < LuluBrain.DefaultFlashesToRetreat; i++)
+            {
+                brain.Tick(LuluBrain.DefaultFlashSeconds, shining);
+            }
 
             Assert.AreEqual(0, brain.Stage);
             Assert.IsFalse(brain.IsAttacking);

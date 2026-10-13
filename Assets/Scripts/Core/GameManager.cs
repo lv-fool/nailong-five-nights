@@ -33,6 +33,12 @@ namespace NailongFNAF.Core
         public bool RightLightOn { get; private set; }
         public bool MonitorUp { get; private set; }
 
+        /// <summary>
+        /// 手电筒是否正亮着 —— **按住才亮，松手就灭**（不是点击切换）。
+        /// 用来照正门外的噜噜，见 <see cref="SetFlashlight"/>。
+        /// </summary>
+        public bool FlashlightOn { get; private set; }
+
         /// <summary>玩家当前看向哪边，由视角控制脚本每帧写入。</summary>
         public ViewSide CurrentView { get; private set; }
 
@@ -82,6 +88,14 @@ namespace NailongFNAF.Core
 
         private void Update()
         {
+            // 编辑器里 Play 期间脚本一重编译就会 domain reload：静态字段和这些
+            // 没序列化的属性全被清空，可对象还挂在场景里、Update 照跑。
+            // 这时候 Clock 是空的 —— 直接跳过，别刷一屏空引用盖住真问题。
+            if (Clock == null || Power == null)
+            {
+                return;
+            }
+
             if (Clock.IsNightComplete || HasBeenCaught)
             {
                 return;
@@ -90,6 +104,12 @@ namespace NailongFNAF.Core
             float dt = Time.deltaTime;
 
             Clock.Tick(dt);
+
+            // 断电、天亮、被抓到之后手电筒也要灭（按住状态可能来不及松手）
+            if (!CanOperate())
+            {
+                FlashlightOn = false;
+            }
 
             // 断电的一瞬间所有设备一起熄火 —— 门弹开、灯灭、监控掉线。
             // 玩家也再打不开（CanOperate 会挡住），只剩黑暗和奶龙的闪脸。
@@ -110,6 +130,7 @@ namespace NailongFNAF.Core
             LeftLightOn = false;
             RightLightOn = false;
             MonitorUp = false;
+            FlashlightOn = false;
         }
 
         /// <summary>重开一夜。</summary>
@@ -123,6 +144,7 @@ namespace NailongFNAF.Core
             LeftLightOn = false;
             RightLightOn = false;
             MonitorUp = false;
+            FlashlightOn = false;
 
             CurrentView = ViewSide.Front;
             CurrentCameraIndex = 0;
@@ -203,6 +225,15 @@ namespace NailongFNAF.Core
             }
         }
 
+        /// <summary>
+        /// 手电筒按住 / 松开 —— 由 UI 的按下与抬起事件直接调，不做切换。
+        /// 松手（<paramref name="on"/> = false）永远生效，免得断电时卡在亮着。
+        /// </summary>
+        public void SetFlashlight(bool on)
+        {
+            FlashlightOn = on && CanOperate();
+        }
+
         /// <summary>断电、天亮或被抓到之后，玩家不能再操作设备。</summary>
         private bool CanOperate()
         {
@@ -211,7 +242,8 @@ namespace NailongFNAF.Core
 
         /// <summary>
         /// 使用等级 = 1（基础） + 每一项正在耗电的设备。
-        /// 最多 5 级：左门、右门、左灯、右灯、监控。
+        /// 设备有六样（左门、右门、左灯、右灯、监控、手电筒），
+        /// 但表只有 <see cref="PowerSystem.MaxUsageLevel"/> 格，全开时会顶格。
         /// </summary>
         private int CountUsageLevel()
         {
@@ -238,6 +270,11 @@ namespace NailongFNAF.Core
             }
 
             if (MonitorUp)
+            {
+                usage++;
+            }
+
+            if (FlashlightOn)
             {
                 usage++;
             }

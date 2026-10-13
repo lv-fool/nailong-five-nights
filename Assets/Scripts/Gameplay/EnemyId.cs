@@ -8,13 +8,13 @@ namespace NailongFNAF.Gameplay
     /// </summary>
     public enum EnemyId
     {
-        /// <summary>牛来 —— 摸左门，关门挡回去。</summary>
+        /// <summary>牛来 —— 对应奇卡，摸右门，关门挡回去。</summary>
         Niulai = 0,
 
-        /// <summary>袋鼠 —— 摸右门，关门挡回去。</summary>
+        /// <summary>袋鼠 —— 对应邦尼，摸左门，关门挡回去。</summary>
         Daishu = 1,
 
-        /// <summary>噜噜 —— 怕光，开灯 + 盯着门外那侧连续 2 秒。</summary>
+        /// <summary>噜噜 —— 怕光，从正门来；朝正前方按手电筒闪够几次就退走。</summary>
         Lulu = 2,
 
         /// <summary>奶龙 —— 不管就偷电，切监控看它一眼即止。</summary>

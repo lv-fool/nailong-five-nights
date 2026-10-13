@@ -30,11 +30,17 @@ namespace NailongFNAF.Gameplay
             + "奶龙不走那里。留空表示 11 个机位它都去。")]
         [SerializeField] private int[] _nailongSkipCameras = { 9 };
 
-        [Header("噜噜")]
-        [Tooltip("门外宽限：活动度 0 时（秒）—— 最宽松。活动度越高，这个时间越短。")]
+        [Header("噜噜（照 FNAF 2 的狐狸：不停地闪它）")]
+        [Tooltip("一次有效闪光要照住多久（秒）—— 太短的乱点不算数。")]
+        [SerializeField] private float _luluFlashSeconds = LuluBrain.DefaultFlashSeconds;
+
+        [Tooltip("闪够几次它就退走。")]
+        [SerializeField] private int _luluFlashesToRetreat = LuluBrain.DefaultFlashesToRetreat;
+
+        [Tooltip("两次闪光之间最多能隔多久：活动度 0 时（秒）—— 最宽松。活动度越高，这个时间越短。")]
         [SerializeField] private float _luluGraceAtZeroActivity = LuluBrain.GraceAtZeroActivity;
 
-        [Tooltip("门外宽限：活动度满级时（秒）—— 最紧。")]
+        [Tooltip("两次闪光之间最多能隔多久：活动度满级时（秒）—— 最紧。")]
         [SerializeField] private float _luluGraceAtMaxActivity = LuluBrain.GraceAtMaxActivity;
 
         [Header("奶龙")]
@@ -166,7 +172,9 @@ namespace NailongFNAF.Gameplay
             _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Left, 0, _rng);
             _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 0, _rng);
 
-            var lulu = new LuluBrain(EnemyId.Lulu, 0, _rng);
+            var lulu = new LuluBrain(EnemyId.Lulu, 0, _rng,
+                EnemyBrain.DefaultMoveIntervalSeconds,
+                _luluFlashSeconds, _luluFlashesToRetreat, 0f);
             lulu.SetGraceRange(_luluGraceAtZeroActivity, _luluGraceAtMaxActivity);
             _brains[EnemyId.Lulu] = lulu;
 
@@ -310,12 +318,12 @@ namespace NailongFNAF.Gameplay
             foreach (var pair in _brains)
             {
                 // 每个敌人动手前重算一次门口占用 —— 同一帧里先到的先占住，
-                // 后到的看到门口站着人就留在走廊等（右门是奶龙与袋鼠的共用通道）
+                // 后到的看到门口站着人就留在走廊等（右门是奶龙与牛来的共用通道）
                 var ctx = new EnemyContext(
                     game.LeftDoorClosed, game.RightDoorClosed,
                     game.LeftLightOn, game.RightLightOn,
                     game.MonitorUp, game.CurrentView, game.CurrentCameraIndex,
-                    FindRightDoorHolder());
+                    FindRightDoorHolder(), game.FlashlightOn);
 
                 pair.Value.Tick(dt, ctx);
             }

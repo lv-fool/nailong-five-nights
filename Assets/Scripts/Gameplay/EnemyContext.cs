@@ -16,6 +16,9 @@ namespace NailongFNAF.Gameplay
         /// <summary>监控是否正开着。</summary>
         public bool MonitorUp;
 
+        /// <summary>手电筒是否正亮着（按住才亮）。用来照正门外的噜噜。</summary>
+        public bool FlashlightOn;
+
         /// <summary>玩家此刻看向哪边。</summary>
         public ViewSide View;
 
@@ -25,7 +28,7 @@ namespace NailongFNAF.Gameplay
         /// <summary>
         /// 右门口现在被谁占着（没人就是 null）。
         ///
-        /// 右门是奶龙与袋鼠**共用的通道** —— 同一条路上不能同时挤两个威胁，
+        /// 右门是奶龙与牛来**共用的通道** —— 同一条路上不能同时挤两个威胁，
         /// 先到的站门口，后到的在走廊等着。
         /// </summary>
         public EnemyId? RightDoorHolder;
@@ -40,7 +43,8 @@ namespace NailongFNAF.Gameplay
 
         public EnemyContext(bool leftDoorClosed, bool rightDoorClosed,
             bool leftLightOn, bool rightLightOn, bool monitorUp,
-            ViewSide view, int cameraIndex, EnemyId? rightDoorHolder)
+            ViewSide view, int cameraIndex, EnemyId? rightDoorHolder,
+            bool flashlightOn = false)
         {
             LeftDoorClosed = leftDoorClosed;
             RightDoorClosed = rightDoorClosed;
@@ -50,6 +54,7 @@ namespace NailongFNAF.Gameplay
             View = view;
             CameraIndex = cameraIndex;
             RightDoorHolder = rightDoorHolder;
+            FlashlightOn = flashlightOn;
         }
 
         public bool IsDoorClosed(Side side)
@@ -85,6 +90,15 @@ namespace NailongFNAF.Gameplay
             }
 
             return side == Side.Left ? View == ViewSide.Left : View == ViewSide.Right;
+        }
+
+        /// <summary>
+        /// 手电筒是否正照着**正前方** —— 噜噜从正门来，就靠这个把它逼退。
+        /// 转头看两边、或开着监控时都不算。
+        /// </summary>
+        public bool IsShiningAtFront()
+        {
+            return FlashlightOn && !MonitorUp && View == ViewSide.Front;
         }
 
         /// <summary>构造一份「什么都没开、看向正前方」的安静状态，测试与调试用。</summary>

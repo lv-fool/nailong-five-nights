@@ -1,11 +1,15 @@
 namespace NailongFNAF.Gameplay
 {
     /// <summary>
-    /// 噜噜：怕光。
+    /// 噜噜：从**正门**摸进来，怕手电筒的光。
     ///
-    /// 路线：远处(0) → 走廊(1) → 门外(2，随机挑一侧)。
-    /// 到了门外，必须「那一侧的灯亮着」且「视角正看着那一侧」连续盯够 StareSeconds，
-    /// 它才退走；盯不满、或断断续续，撑过 OutsideGraceSeconds 就动手。
+    /// 路线：远处(0) → 逼近正门(1) → 停在正门口(2)。
+    /// 到了门口，玩家得**朝正前方按住手电筒照它**。
+    ///
+    /// 照法照 FNAF 2 的狐狸（Withered Foxy）：**照住一小段算一次有效闪光，
+    /// 闪一下就把它逼退一步**（推进计时清零），**闪够 <see cref="FlashesToRetreat"/> 次才退走**。
+    /// 光断了、或者一直不照，推进计时走满 <see cref="OutsideGraceSeconds"/> 它就动手。
+    /// 所以是「不停地闪它」而不是「一口气盯够」—— 中间断太久照样会被它扑上来。
     ///
     /// 门外宽限不是定值 —— 它按活动度折算：活动度越高，留给玩家的时间越短。
     /// 详见 <see cref="GraceForActivity"/>。
@@ -14,8 +18,11 @@ namespace NailongFNAF.Gameplay
     /// </summary>
     public sealed class LuluBrain : EnemyBrain
     {
-        /// <summary>需要连续盯着它多久（秒）。</summary>
-        public const float DefaultStareSeconds = 2f;
+        /// <summary>一次有效闪光要照住多久（秒）。太短的乱点不算数。</summary>
+        public const float DefaultFlashSeconds = 0.5f;
+
+        /// <summary>闪够几次它就退走。</summary>
+        public const int DefaultFlashesToRetreat = 4;
 
         /// <summary>活动度 0（整夜不动）时的门外宽限（秒）—— 最宽松。默认值，可被覆盖。</summary>
         public const float GraceAtZeroActivity = 16f;
@@ -23,22 +30,26 @@ namespace NailongFNAF.Gameplay
         /// <summary>活动度满级时的门外宽限（秒）—— 最紧。默认值，可被覆盖。</summary>
         public const float GraceAtMaxActivity = 7.5f;
 
-        /// <summary>它现在蹲在哪一侧的门外。</summary>
-        public Side Side { get; private set; }
+        /// <summary>一次有效闪光要照住多久（秒）。</summary>
+        public float FlashSeconds { get; private set; }
 
-        public float StareSeconds { get; private set; }
+        /// <summary>闪够几次它就退走。</summary>
+        public int FlashesToRetreat { get; private set; }
 
         /// <summary>
-        /// 到了门外之后，总共给它多久就会动手（秒）。
+        /// 到了门口之后，两次闪光之间最多能隔多久（秒）。
         /// 默认由活动度折算；构造时显式传了正数就固定用那个值（测试与调试用）。
         /// </summary>
         public float OutsideGraceSeconds { get; private set; }
 
-        /// <summary>当前已经连续盯了多久（秒），供 UI 显示进度。</summary>
-        public float StareProgress { get; private set; }
+        /// <summary>这一轮闪光已经照了多久（秒），照满 <see cref="FlashSeconds"/> 算一次。</summary>
+        public float FlashProgress { get; private set; }
 
-        /// <summary>已经蹲在门外多久（秒）。</summary>
-        public float OutsideTimer { get; private set; }
+        /// <summary>这一轮已经被有效闪光逼退了几步。</summary>
+        public int FlashCount { get; private set; }
+
+        /// <summary>距离上一次闪光已经过了多久（秒）。</summary>
+        public float SinceFlashTimer { get; private set; }
 
         /// <summary>宽限是否跟着活动度自动走（false = 构造时写死了）。</summary>
         private readonly bool _graceFollowsActivity;
@@ -48,7 +59,7 @@ namespace NailongFNAF.Gameplay
 
         public LuluBrain(EnemyId id, int activityLevel, IRandomSource rng)
             : this(id, activityLevel, rng, DefaultMoveIntervalSeconds,
-                DefaultStareSeconds, 0f)
+                DefaultFlashSeconds, DefaultFlashesToRetreat, 0f)
         {
         }
 
@@ -57,11 +68,12 @@ namespace NailongFNAF.Gameplay
         /// 传正数 = 写死这个秒数（测试与调试用）。
         /// </summary>
         public LuluBrain(EnemyId id, int activityLevel, IRandomSource rng,
-            float moveIntervalSeconds, float stareSeconds, float outsideGraceSeconds)
+            float moveIntervalSeconds, float flashSeconds, int flashesToRetreat,
+            float outsideGraceSeconds)
             : base(id, activityLevel, rng, moveIntervalSeconds)
         {
-            Side = Side.Left;
-            StareSeconds = stareSeconds > 0f ? stareSeconds : DefaultStareSeconds;
+            FlashSeconds = flashSeconds > 0f ? flashSeconds : DefaultFlashSeconds;
+            FlashesToRetreat = flashesToRetreat > 0 ? flashesToRetreat : DefaultFlashesToRetreat;
 
             _graceFollowsActivity = outsideGraceSeconds <= 0f;
             OutsideGraceSeconds = _graceFollowsActivity
@@ -70,7 +82,8 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
-        /// 活动度 → 门外宽限（秒）。线性：活动度 0 给最宽松的一端，满级给最紧的一端。
+        /// 活动度 → 两次闪光之间最多能隔多久（秒）。
+        /// 线性：活动度 0 给最宽松的一端，满级给最紧的一端。
         ///
         /// 套默认难度曲线大致是：第 1 夜 15.6 秒、第 3 夜 14.3 秒、第 5 夜 11.8 秒、
         /// 隐藏夜 9.2 秒。
@@ -119,17 +132,16 @@ namespace NailongFNAF.Gameplay
         {
             if (Stage == 0)
             {
-                // 一离开起点就把路线定下来 —— 这样它在走廊阶段就能被监控看到，
-                // 玩家能提前知道它从哪边来（不然走到门口才现形，等于突然出现）
+                // 离开起点：开始逼近正门（这时它就在正前方，玩家能看见它过来）
                 Stage = 1;
-                Side = Rng.Range(0, 2) == 0 ? Side.Left : Side.Right;
                 return;
             }
 
-            // 走到门外。边在走廊阶段已经定好，这里不再重掷
+            // 走到正门口。没有左右之分 —— 它从正前方来
             Stage = 2;
-            OutsideTimer = 0f;
-            StareProgress = 0f;
+            SinceFlashTimer = 0f;
+            FlashProgress = 0f;
+            FlashCount = 0;
         }
 
         protected override void OnTick(float dt, EnemyContext ctx)
@@ -139,27 +151,36 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
-            bool lightOn = ctx.IsLightOn(Side);
-            bool looking = ctx.IsLookingAt(Side);
+            // 手电筒正照着它 → 累计「照住」的时长
+            bool flashed = false;
 
-            if (lightOn && looking)
+            if (ctx.IsShiningAtFront())
             {
-                StareProgress += dt;
+                FlashProgress += dt;
 
-                if (StareProgress >= StareSeconds)
+                if (FlashProgress >= FlashSeconds)
                 {
-                    Retreat();
-                    return;
+                    FlashProgress = 0f;
+                    FlashCount++;
+                    flashed = true;
+
+                    if (FlashCount >= FlashesToRetreat)
+                    {
+                        Retreat();
+                        return;
+                    }
                 }
             }
             else
             {
-                // 条件断了，重新数
-                StareProgress = 0f;
+                // 光断了，这一轮的照住时长作废，得重新数
+                FlashProgress = 0f;
             }
 
-            OutsideTimer += dt;
-            if (OutsideTimer >= OutsideGraceSeconds)
+            // 闪一下就把它逼退一步：推进计时清零（照 FNAF 2 狐狸的 D 值）
+            SinceFlashTimer = flashed ? 0f : SinceFlashTimer + dt;
+
+            if (SinceFlashTimer >= OutsideGraceSeconds)
             {
                 IsAttacking = true;
             }
@@ -168,8 +189,9 @@ namespace NailongFNAF.Gameplay
         public override void Retreat()
         {
             base.Retreat();
-            OutsideTimer = 0f;
-            StareProgress = 0f;
+            SinceFlashTimer = 0f;
+            FlashProgress = 0f;
+            FlashCount = 0;
         }
     }
 }
