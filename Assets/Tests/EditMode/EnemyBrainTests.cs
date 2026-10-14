@@ -71,6 +71,16 @@ namespace NailongFNAF.Tests
                 ViewSide.Front, 0, null, true);
         }
 
+        /// <summary>
+        /// 按一下手电筒再松手 —— **按次数计**，一次完整的按下算一次闪光。
+        /// 按住不放只算一次，所以测试里必须走「按下 → 松开」这个来回。
+        /// </summary>
+        private static void PressFlashlight(LuluBrain brain)
+        {
+            brain.Tick(0.05f, Shining());
+            brain.Tick(0.05f, EnemyContext.Idle());
+        }
+
         private static void AdvanceToStage(EnemyBrain brain, EnemyContext ctx, int targetStage)
         {
             for (int i = 0; i < 50 && brain.Stage < targetStage; i++)
@@ -189,6 +199,7 @@ namespace NailongFNAF.Tests
 
         // ---------------------------------------------------------------
         // 噜噜：从正门来，朝正前方按手电筒闪够几次（照 FNAF 2 的狐狸）
+        // **按次数计** —— 一次完整的按下算一次闪光，按住不放只算一次
         // ---------------------------------------------------------------
 
         [Test]
@@ -197,14 +208,17 @@ namespace NailongFNAF.Tests
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var shining = Shining();
 
-            AdvanceToStage(brain, shining, 2);
+            // 路上不能一直按着灯 —— 不然到门口那一下没有「上升沿」，白闪
+            AdvanceToStage(brain, EnemyContext.Idle(), 2);
 
-            // 每一次都得照满 FlashSeconds 才算数
-            for (int i = 0; i < LuluBrain.DefaultFlashesToRetreat; i++)
+            for (int i = 0; i < LuluBrain.DefaultFlashesToRetreat - 1; i++)
             {
-                Assert.IsFalse(brain.RetreatedThisTick);
-                brain.Tick(LuluBrain.DefaultFlashSeconds, shining);
+                PressFlashlight(brain);
+                Assert.AreEqual(i + 1, brain.FlashCount);
+                Assert.AreEqual(2, brain.Stage);
             }
+
+            brain.Tick(0.05f, shining);     // 最后一次按下
 
             Assert.AreEqual(0, brain.Stage);
             Assert.IsTrue(brain.RetreatedThisTick);
@@ -212,25 +226,37 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 噜噜_每次照不满一次闪光就不算数()
+        public void 噜噜_按住不放只算一次闪光()
         {
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var shining = Shining();
-            var off = EnemyContext.Idle();
-            float half = LuluBrain.DefaultFlashSeconds * 0.5f;
 
-            AdvanceToStage(brain, shining, 2);
+            AdvanceToStage(brain, EnemyContext.Idle(), 2);
 
-            // 每次只照一半就松手 —— 照再久也闪不成一次
-            for (int i = 0; i < 10; i++)
-            {
-                brain.Tick(half, shining);
-                brain.Tick(half, off);
-            }
+            // 一口气按着不放 —— 只有「按下」那一下算数，想再闪一次得松手重按
+            brain.Tick(5f, shining);
 
-            Assert.AreEqual(0, brain.FlashCount);
+            Assert.AreEqual(1, brain.FlashCount);
             Assert.AreEqual(2, brain.Stage);
             Assert.IsFalse(brain.IsAttacking);
+        }
+
+        [Test]
+        public void 噜噜_松手再按才算下一次闪光()
+        {
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var shining = Shining();
+
+            AdvanceToStage(brain, EnemyContext.Idle(), 2);
+
+            brain.Tick(0.5f, shining);
+            Assert.AreEqual(1, brain.FlashCount);
+
+            brain.Tick(0.5f, EnemyContext.Idle());   // 松手
+            Assert.AreEqual(1, brain.FlashCount);
+
+            brain.Tick(0.5f, shining);               // 再按下
+            Assert.AreEqual(2, brain.FlashCount);
         }
 
         [Test]
@@ -253,15 +279,15 @@ namespace NailongFNAF.Tests
             var shining = Shining();
             var off = EnemyContext.Idle();
 
-            AdvanceToStage(brain, shining, 2);
+            AdvanceToStage(brain, EnemyContext.Idle(), 2);
 
             // 先干等到快没时间
             float almost = brain.OutsideGraceSeconds - 0.1f;
             brain.Tick(almost, off);
             Assert.IsFalse(brain.IsAttacking);
 
-            // 照一下 → 计时归零，又能拖一会儿
-            brain.Tick(LuluBrain.DefaultFlashSeconds, shining);
+            // 按一下 → 计数 +1、计时归零，又能拖一会儿
+            brain.Tick(0.05f, shining);
             Assert.AreEqual(1, brain.FlashCount);
             Assert.AreEqual(0f, brain.SinceFlashTimer, Tolerance);
 
@@ -279,7 +305,6 @@ namespace NailongFNAF.Tests
             AdvanceToStage(brain, ctx, 2);
             brain.Tick(3f, ctx);
 
-            Assert.AreEqual(0f, brain.FlashProgress, Tolerance);
             Assert.AreEqual(0, brain.FlashCount);
         }
 
@@ -293,7 +318,6 @@ namespace NailongFNAF.Tests
             AdvanceToStage(brain, ctx, 2);
             brain.Tick(3f, ctx);
 
-            Assert.AreEqual(0f, brain.FlashProgress, Tolerance);
             Assert.AreEqual(0, brain.FlashCount);
         }
 
@@ -303,10 +327,11 @@ namespace NailongFNAF.Tests
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var shining = Shining();
 
-            AdvanceToStage(brain, shining, 1);
+            AdvanceToStage(brain, EnemyContext.Idle(), 1);
             Assert.AreEqual(1, brain.Stage);
 
-            brain.Tick(LuluBrain.DefaultFlashSeconds * 3f, shining);
+            brain.Tick(0.05f, shining);
+            brain.Tick(0.05f, EnemyContext.Idle());
 
             Assert.AreEqual(0, brain.FlashCount);
             Assert.IsFalse(brain.IsAttacking);
@@ -365,7 +390,7 @@ namespace NailongFNAF.Tests
         {
             var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1),
                 EnemyBrain.DefaultMoveIntervalSeconds,
-                LuluBrain.DefaultFlashSeconds, LuluBrain.DefaultFlashesToRetreat, 3f);
+                LuluBrain.DefaultFlashesToRetreat, 3f);
 
             brain.SetActivityLevel(EnemyBrain.MaxActivityLevel);
 
@@ -389,15 +414,15 @@ namespace NailongFNAF.Tests
         [Test]
         public void 噜噜_低活动度给的时间足够把手电筒按起来闪完()
         {
-            // 第 1 夜：活动度 1 → 15.6 秒。闪完 4 次一共按 2 秒，剩下十几秒都留给玩家反应
+            // 第 1 夜：活动度 1 → 15.6 秒。按 4 次手电筒不到 1 秒，
+            // 剩下的时间全留给玩家反应
             var brain = new LuluBrain(EnemyId.Lulu, 1, new FixedRandom(1));
-            var shining = Shining();
 
-            AdvanceToStage(brain, shining, 2);
+            AdvanceToStage(brain, EnemyContext.Idle(), 2);
 
             for (int i = 0; i < LuluBrain.DefaultFlashesToRetreat; i++)
             {
-                brain.Tick(LuluBrain.DefaultFlashSeconds, shining);
+                PressFlashlight(brain);
             }
 
             Assert.AreEqual(0, brain.Stage);

@@ -4,12 +4,12 @@ namespace NailongFNAF.Gameplay
     /// 噜噜：从**正门**摸进来，怕手电筒的光。
     ///
     /// 路线：远处(0) → 逼近正门(1) → 停在正门口(2)。
-    /// 到了门口，玩家得**朝正前方按住手电筒照它**。
+    /// 到了门口，玩家得**朝正前方反复按手电筒闪它**。
     ///
-    /// 照法照 FNAF 2 的狐狸（Withered Foxy）：**照住一小段算一次有效闪光，
-    /// 闪一下就把它逼退一步**（推进计时清零），**闪够 <see cref="FlashesToRetreat"/> 次才退走**。
-    /// 光断了、或者一直不照，推进计时走满 <see cref="OutsideGraceSeconds"/> 它就动手。
-    /// 所以是「不停地闪它」而不是「一口气盯够」—— 中间断太久照样会被它扑上来。
+    /// 闪法照 FNAF 2 的狐狸（Withered Foxy）：**按一次算一次闪光**，
+    /// 每按一次把推进计时清零，**按够 <see cref="FlashesToRetreat"/> 次**它就退走。
+    /// 所以是「**不停地闪它**」—— 按住不放只算一次，得松手再按。
+    /// 一直不按、或者中间隔太久，推进计时走满 <see cref="OutsideGraceSeconds"/> 它就动手。
     ///
     /// 门外宽限不是定值 —— 它按活动度折算：活动度越高，留给玩家的时间越短。
     /// 详见 <see cref="GraceForActivity"/>。
@@ -18,9 +18,6 @@ namespace NailongFNAF.Gameplay
     /// </summary>
     public sealed class LuluBrain : EnemyBrain
     {
-        /// <summary>一次有效闪光要照住多久（秒）。太短的乱点不算数。</summary>
-        public const float DefaultFlashSeconds = 0.5f;
-
         /// <summary>闪够几次它就退走。</summary>
         public const int DefaultFlashesToRetreat = 4;
 
@@ -29,9 +26,6 @@ namespace NailongFNAF.Gameplay
 
         /// <summary>活动度满级时的门外宽限（秒）—— 最紧。默认值，可被覆盖。</summary>
         public const float GraceAtMaxActivity = 7.5f;
-
-        /// <summary>一次有效闪光要照住多久（秒）。</summary>
-        public float FlashSeconds { get; private set; }
 
         /// <summary>闪够几次它就退走。</summary>
         public int FlashesToRetreat { get; private set; }
@@ -42,10 +36,7 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         public float OutsideGraceSeconds { get; private set; }
 
-        /// <summary>这一轮闪光已经照了多久（秒），照满 <see cref="FlashSeconds"/> 算一次。</summary>
-        public float FlashProgress { get; private set; }
-
-        /// <summary>这一轮已经被有效闪光逼退了几步。</summary>
+        /// <summary>这一轮已经被有效闪光逼退了几步（按了几次）。</summary>
         public int FlashCount { get; private set; }
 
         /// <summary>距离上一次闪光已经过了多久（秒）。</summary>
@@ -54,12 +45,18 @@ namespace NailongFNAF.Gameplay
         /// <summary>宽限是否跟着活动度自动走（false = 构造时写死了）。</summary>
         private readonly bool _graceFollowsActivity;
 
+        /// <summary>
+        /// 上一帧手电筒是不是正照在它身上。
+        /// 抓「按下」那一下的**上升沿** —— 一次按住只算一次闪光，得松手再按才算下一次。
+        /// </summary>
+        private bool _wasShining;
+
         private float _graceAtZero = GraceAtZeroActivity;
         private float _graceAtMax = GraceAtMaxActivity;
 
         public LuluBrain(EnemyId id, int activityLevel, IRandomSource rng)
             : this(id, activityLevel, rng, DefaultMoveIntervalSeconds,
-                DefaultFlashSeconds, DefaultFlashesToRetreat, 0f)
+                DefaultFlashesToRetreat, 0f)
         {
         }
 
@@ -68,11 +65,9 @@ namespace NailongFNAF.Gameplay
         /// 传正数 = 写死这个秒数（测试与调试用）。
         /// </summary>
         public LuluBrain(EnemyId id, int activityLevel, IRandomSource rng,
-            float moveIntervalSeconds, float flashSeconds, int flashesToRetreat,
-            float outsideGraceSeconds)
+            float moveIntervalSeconds, int flashesToRetreat, float outsideGraceSeconds)
             : base(id, activityLevel, rng, moveIntervalSeconds)
         {
-            FlashSeconds = flashSeconds > 0f ? flashSeconds : DefaultFlashSeconds;
             FlashesToRetreat = flashesToRetreat > 0 ? flashesToRetreat : DefaultFlashesToRetreat;
 
             _graceFollowsActivity = outsideGraceSeconds <= 0f;
@@ -140,45 +135,39 @@ namespace NailongFNAF.Gameplay
             // 走到正门口。没有左右之分 —— 它从正前方来
             Stage = 2;
             SinceFlashTimer = 0f;
-            FlashProgress = 0f;
             FlashCount = 0;
         }
 
         protected override void OnTick(float dt, EnemyContext ctx)
         {
+            // 「按下」= 照住状态的上升沿。按住不放只有这一下算数，
+            // 想再闪一次必须松手重按 —— 这就是「不停地闪它」。
+            bool shining = ctx.IsShiningAtFront();
+            bool pressed = shining && !_wasShining;
+            _wasShining = shining;
+
+            // 还没堵到门口时照它没用，但上升沿要一直跟，
+            // 否则「到门口那一刻玩家正按着」会被当成按过了、白闪一下
             if (Stage < MaxStage)
             {
                 return;
             }
 
-            // 手电筒正照着它 → 累计「照住」的时长
-            bool flashed = false;
-
-            if (ctx.IsShiningAtFront())
+            if (pressed)
             {
-                FlashProgress += dt;
+                FlashCount++;
+                SinceFlashTimer = 0f;
 
-                if (FlashProgress >= FlashSeconds)
+                if (FlashCount >= FlashesToRetreat)
                 {
-                    FlashProgress = 0f;
-                    FlashCount++;
-                    flashed = true;
-
-                    if (FlashCount >= FlashesToRetreat)
-                    {
-                        Retreat();
-                        return;
-                    }
+                    Retreat();
+                    return;
                 }
             }
             else
             {
-                // 光断了，这一轮的照住时长作废，得重新数
-                FlashProgress = 0f;
+                SinceFlashTimer += dt;
             }
-
-            // 闪一下就把它逼退一步：推进计时清零（照 FNAF 2 狐狸的 D 值）
-            SinceFlashTimer = flashed ? 0f : SinceFlashTimer + dt;
 
             if (SinceFlashTimer >= OutsideGraceSeconds)
             {
@@ -190,7 +179,6 @@ namespace NailongFNAF.Gameplay
         {
             base.Retreat();
             SinceFlashTimer = 0f;
-            FlashProgress = 0f;
             FlashCount = 0;
         }
     }

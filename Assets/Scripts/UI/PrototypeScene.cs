@@ -117,10 +117,10 @@ namespace NailongFNAF.UI
         /// 立绘底边再沉下去一点（见 <see cref="SideCharacterSinkRatio"/>），
         /// 头顶就正好顶在门框下沿 —— 照原版那种「站在门里、下半身被裁掉」。
         /// </summary>
-        private const float SideCharacterHeightRatio = 0.83f;
+        private const float SideCharacterHeightRatio = 0.86f;
 
         /// <summary>门口立绘默认沉到屏幕下方多少（占画布高度）。脚被裁掉，人才像站在门里。</summary>
-        private const float SideCharacterSinkRatio = 0.05f;
+        private const float SideCharacterSinkRatio = 0.08f;
 
         /// <summary>
         /// 门口立绘的横向锚点 —— 门洞在屏幕上的中心位置（占画布宽度）。
@@ -1099,9 +1099,13 @@ namespace NailongFNAF.UI
 
             CharacterPose pose;
 
-            if (lulu.FlashProgress > 0f || lulu.FlashCount > 0)
+            // 正被手电筒照着 → 慌。判定跟 LuluBrain 那边保持一致：
+            // 手电筒亮着 + 视角在正前方 + 没在看监控。
+            bool shiningAtIt = gm.FlashlightOn && !gm.MonitorUp
+                && gm.CurrentView == ViewSide.Front;
+
+            if (shiningAtIt)
             {
-                // 正被手电筒照着 → 慌
                 pose = CharacterPose.Startled;
             }
             else if (lulu.Stage >= lulu.MaxStage)

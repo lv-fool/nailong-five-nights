@@ -30,11 +30,8 @@ namespace NailongFNAF.Gameplay
             + "奶龙不走那里。留空表示 11 个机位它都去。")]
         [SerializeField] private int[] _nailongSkipCameras = { 9 };
 
-        [Header("噜噜（照 FNAF 2 的狐狸：不停地闪它）")]
-        [Tooltip("一次有效闪光要照住多久（秒）—— 太短的乱点不算数。")]
-        [SerializeField] private float _luluFlashSeconds = LuluBrain.DefaultFlashSeconds;
-
-        [Tooltip("闪够几次它就退走。")]
+        [Header("噜噜（照 FNAF 2 的狐狸：不停地按手电筒闪它）")]
+        [Tooltip("闪够几次它就退走。**按次数算** —— 按住不放只算一次，得松手再按。")]
         [SerializeField] private int _luluFlashesToRetreat = LuluBrain.DefaultFlashesToRetreat;
 
         [Tooltip("两次闪光之间最多能隔多久：活动度 0 时（秒）—— 最宽松。活动度越高，这个时间越短。")]
@@ -174,7 +171,7 @@ namespace NailongFNAF.Gameplay
 
             var lulu = new LuluBrain(EnemyId.Lulu, 0, _rng,
                 EnemyBrain.DefaultMoveIntervalSeconds,
-                _luluFlashSeconds, _luluFlashesToRetreat, 0f);
+                _luluFlashesToRetreat, 0f);
             lulu.SetGraceRange(_luluGraceAtZeroActivity, _luluGraceAtMaxActivity);
             _brains[EnemyId.Lulu] = lulu;
 

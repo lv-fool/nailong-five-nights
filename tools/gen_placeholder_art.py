@@ -29,8 +29,13 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 W, H = 1920, 1080
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEX_DIR = os.path.join(ROOT, "tools", "cc0")
+CHAR_DIR = os.path.join(ROOT, "Assets", "Art", "Characters")
 OUT = os.path.join(ROOT, "Assets", "Art", "Backgrounds")
 DOOR_OUT = os.path.join(ROOT, "Assets", "Art", "UI")
+
+# 墙上那张「CELEBRATE!」海报和儿童画里站的是谁 —— 用绿子画好的立绘，
+# 不另找素材：现成的就是最准的，还不用担心版权。
+CAST = ("niulai", "nailong", "lulu", "daishu")
 
 # ---------------------------------------------------------------- 相机 / 房间
 # 单位是米，y 朝上。玩家朝 **+z** 看（yaw = 0 就是正前方）；面朝 +z 时右手边
@@ -57,7 +62,7 @@ RIGHT_CORR = ((2.60, 0.0, -3.60), (7.00, 2.20, -1.60))
 #
 # 两扇门放在**玩家侧后方**（门的 z 比相机 z 小）：转头 -90° 时屏幕右边对应 +z，
 # 门在身后才会落在画面左边。原版的门也在你侧后方 —— 得扭头才看得见。
-FRONT_HOLE = dict(axis=2, side=True, plane=3.00, u0=-1.10, u1=1.10,
+FRONT_HOLE = dict(axis=2, side=True, plane=3.00, u0=-0.88, u1=0.88,
                   v0=0.00, v1=2.10, corr=FRONT_CORR)
 LEFT_HOLE = dict(axis=0, side=False, plane=-2.60, u0=-3.20, u1=-2.00,
                  v0=0.00, v1=2.05, corr=LEFT_CORR)
@@ -84,10 +89,10 @@ DESK_TINT = np.array([0.24, 0.25, 0.29], np.float32)
 DESK_TOP_TINT = np.array([0.34, 0.34, 0.38], np.float32)  # 桌面是浅色麻点台面
 FRAME_TINT = np.array([1.70, 1.76, 1.92], np.float32)
 CABINET_TINT = np.array([0.46, 0.47, 0.52], np.float32)   # 桌下的机柜 / 音箱
-MONITOR_TINT = np.array([0.30, 0.31, 0.36], np.float32)
+MONITOR_TINT = np.array([0.44, 0.45, 0.52], np.float32)
 AMBIENT = 0.18
 CORR_GAIN = 0.70               # 走廊整体再压一档 —— 办公室的灯不该照亮走廊
-POSTER_GAIN = 0.46             # 墙上的画别比墙还亮
+POSTER_GAIN = 0.80             # 墙上的画别比墙还亮
 
 TEX_FILES = {
     "floor": "floor_tiles.jpg",
@@ -271,43 +276,127 @@ def paper_grain(paper, size, amount):
     return 1.0 + (lum - lum.mean()) * amount
 
 
-def make_celebrate_poster(paper):
-    """后墙上的「CELEBRATE!」海报 —— 原版最显眼的那件东西。
+def load_character(code, pose="idle"):
+    """读一张角色立绘（带 alpha）。缺了就返回 None —— 调用方退回旧的色块画法。"""
+    path = os.path.join(CHAR_DIR, "char_%s_%s.png" % (code, pose))
 
-    占位版：砖底 + 三个圆滚滚的剪影 + 顶上一行大字。绿子画真的时覆盖同名文件即可。
+    if not os.path.exists(path):
+        print("  ! 缺立绘 char_%s_%s.png —— 海报里用色块代替" % (code, pose))
+        return None
+
+    return Image.open(path).convert("RGBA")
+
+
+def tint_sprite(sprite, gain, tint):
+    """给立绘整体压暗 + 染一点环境色，免得像直接贴上去的。"""
+    arr = np.asarray(sprite).astype(np.float32) / 255.0
+    arr[:, :, :3] = np.clip(arr[:, :, :3] * gain * np.asarray(tint, np.float32), 0, 1)
+    return Image.fromarray((arr * 255).astype(np.uint8), "RGBA")
+
+
+def make_celebrate_poster(paper, cast):
+    """后墙上的「CELEBRATE!」海报 —— 用我们自己的吉祥物拼。
+
+    占位版：砖底 + 一排等高、底对齐的角色 + 顶上一行大字。
+    绿子画真的时覆盖同名文件即可。
     """
     im = Image.new("RGB", (512, 640), (74, 44, 40))
     d = ImageDraw.Draw(im)
 
+    # 砖墙底
     for row in range(0, 640, 34):
         d.line([(0, row), (512, row)], fill=(52, 30, 28), width=3)
         for col in range((row // 34) % 2 * 46, 512, 92):
             d.line([(col, row), (col, row + 34)], fill=(52, 30, 28), width=3)
 
+    # 顶上那行 CELEBRATE!
     t = big_text(300, "CELEBRATE!")
     band = Image.new("RGB", (512, 110), (60, 34, 30))
     band.paste(Image.new("RGB", t.size, (246, 214, 96)),
                ((512 - t.size[0]) // 2, max(0, (110 - t.size[1]) // 2)), t)
     im.paste(band, (0, 20))
 
-    stage = 520
+    # 舞台
+    stage = 540
     d.rectangle([0, stage, 512, 640], fill=(46, 28, 26))
-    for cx, body in ((120, (108, 74, 58)), (256, (96, 66, 118)), (392, (186, 166, 96))):
-        d.ellipse([cx - 54, stage - 200, cx + 54, stage - 92], fill=body)
-        d.ellipse([cx - 60, stage - 110, cx + 60, stage - 4], fill=body)
-        d.ellipse([cx - 34, stage - 178, cx - 12, stage - 156], fill=(240, 240, 232))
-        d.ellipse([cx + 12, stage - 178, cx + 34, stage - 156], fill=(240, 240, 232))
-        d.ellipse([cx - 27, stage - 172, cx - 19, stage - 164], fill=(20, 18, 20))
-        d.ellipse([cx + 19, stage - 172, cx + 27, stage - 164], fill=(20, 18, 20))
+    d.line([(0, stage), (512, stage)], fill=(92, 58, 50), width=4)
 
-    d.polygon([(228, stage - 190), (238, stage - 290), (258, stage - 190)], fill=(96, 66, 118))
-    d.polygon([(266, stage - 190), (286, stage - 290), (296, stage - 190)], fill=(96, 66, 118))
+    # 角色：**按高度对齐**，不是按原始像素 —— 它们本来大小差很多，
+    # 直接贴会有的顶天有的只剩一条。统一缩到同一个身高、底边对齐，
+    # 看上去才像「并排站在台上」。
+    usable = [s for s in cast if s is not None]
+    if usable:
+        body_h = 340
+        slot = 512 // len(usable)
+
+        for i, spr in enumerate(usable):
+            scale = body_h / float(spr.height)
+            w = max(1, int(spr.width * scale))
+            s = tint_sprite(spr.resize((w, body_h), Image.LANCZOS), 0.88,
+                            (1.0, 0.94, 0.86))
+            cx = int(slot * (i + 0.5))
+            im.paste(s, (cx - w // 2, stage - body_h + 26), s)
+    else:
+        # 没立绘就退回三个色块
+        for cx, body in ((120, (108, 74, 58)), (256, (96, 66, 118)), (392, (186, 166, 96))):
+            d.ellipse([cx - 54, stage - 200, cx + 54, stage - 92], fill=body)
+            d.ellipse([cx - 60, stage - 110, cx + 60, stage - 4], fill=body)
 
     arr = np.asarray(im).astype(np.float32) / 255.0
     return np.clip(arr * paper_grain(paper, (512, 640), 1.2), 0, 1).astype(np.float32)
 
 
-def make_drawing(paper, seed):
+def crayon_sprite(sprite, size):
+    """把一张立绘压成「小孩拿蜡笔画着照着画的」——
+
+    降到几十像素、压成几档颜色、再用 NEAREST 放大，边缘就带上方块笔触；
+    最后描一圈抖动的深色轮廓。小孩画的吉祥物差不多就是这个意思。
+
+    ⚠️ **按「身高」统一，不是按外框塞满** —— 四个角色原始宽高比差很多
+    （袋鼠又矮又宽、牛来又高又窄），按外框塞满的话每张画里的大小都不一样，
+    一排贴出来像四个人画的。统一身高才像同一个小孩画的同一套。
+    """
+    box_w, box_h = size
+    small = 46
+
+    scale = small / float(max(sprite.width, sprite.height))
+    s = sprite.resize((max(1, int(sprite.width * scale)),
+                       max(1, int(sprite.height * scale))), Image.LANCZOS)
+
+    # 先合到纸色上，再降色阶
+    flat = Image.new("RGB", s.size, (198, 192, 176))
+    flat.paste(s, (0, 0), s)
+    flat = flat.quantize(colors=5, method=Image.MEDIANCUT).convert("RGB")
+
+    # 轮廓：alpha 的边缘
+    alpha = np.asarray(s.split()[3]).astype(np.int16)
+    edge = np.zeros_like(alpha, dtype=bool)
+    edge[1:, :] |= np.abs(alpha[1:, :] - alpha[:-1, :]) > 40
+    edge[:, 1:] |= np.abs(alpha[:, 1:] - alpha[:, :-1]) > 40
+
+    arr = np.asarray(flat).astype(np.float32)
+    arr[edge] = np.array([58, 44, 40], np.float32)
+
+    # 统一身高；宽得放不下时再按宽度缩回来
+    scale = box_h / float(arr.shape[0])
+    w = max(1, int(arr.shape[1] * scale))
+    if w > box_w:
+        scale = box_w / float(arr.shape[1])
+        w = box_w
+    h = max(1, int(arr.shape[0] * scale))
+
+    big = Image.fromarray(arr.astype(np.uint8), "RGB").resize((w, h), Image.NEAREST)
+
+    # 抖一圈手绘感的轮廓
+    out = big.copy()
+    dd = ImageDraw.Draw(out)
+    pts = [(0, int(h * 0.72)), (int(w * 0.30), int(h * 0.94)),
+           (int(w * 0.68), int(h * 0.90)), (w - 1, int(h * 0.74))]
+    dd.line(pts, fill=(150, 96, 78), width=max(2, w // 90))
+    return out
+
+
+def make_drawing(paper, seed, sprite=None):
     """儿童画 —— 原版墙上贴了一整墙，每张顶上写着 MY FUN DAY!"""
     rng = np.random.default_rng(seed)
     im = Image.new("RGB", (512, 512), (198, 192, 176))
@@ -321,17 +410,19 @@ def make_drawing(paper, seed):
     im.paste(Image.new("RGB", t.size, (196, 78, 62)),
              ((512 - t.size[0]) // 2, 12), t)
 
-    d.ellipse([150, 150, 362, 362], outline=ink, width=15)
-    d.ellipse([204, 218, 236, 250], fill=ink)
-    d.ellipse([276, 218, 308, 250], fill=ink)
-    d.arc([212, 262, 300, 324], 20, 160, fill=ink, width=13)
+    if sprite is not None:
+        # 画的就是我们的吉祥物 —— 压成蜡笔版本，贴在纸中间
+        art = crayon_sprite(sprite, (360, 360))
+        im.paste(art, (76, 128))
+    else:
+        d.ellipse([150, 150, 362, 362], outline=ink, width=15)
+        d.ellipse([204, 218, 236, 250], fill=ink)
+        d.ellipse([276, 218, 308, 250], fill=ink)
+        d.arc([212, 262, 300, 324], 20, 160, fill=ink, width=13)
 
-    d.line([(256, 362), (256, 470)], fill=blue, width=15)
-    d.line([(256, 396), (176, 448)], fill=blue, width=13)
-    d.line([(256, 396), (336, 448)], fill=blue, width=13)
-
-    for col in (gold, green, gold, green):
-        pts = [(int(rng.integers(24, 488)), int(rng.integers(384, 496))) for _ in range(4)]
+    # 底下几笔随手的涂鸦
+    for col in (gold, green, blue):
+        pts = [(int(rng.integers(24, 488)), int(rng.integers(440, 496))) for _ in range(4)]
         d.line(pts, fill=col, width=9, joint="curve")
 
     arr = np.asarray(im).astype(np.float32) / 255.0
@@ -540,6 +631,18 @@ def render(cam, yaw, tex, seed, dark=0.64, exposure=1.0):
         if not m.any():
             continue
         sel = m & (u > u0) & (u < u1) & (v > v0) & (v < v1)
+        if not sel.any():
+            continue
+
+        # 保险：**画一律不许压到门洞上**（含门框那一圈）。
+        # 位置我已经排开了，这条是防止以后调坐标时又糊上去。
+        for hole in HOLES:
+            if hole["axis"] != axis or hole["side"] != side_max:
+                continue
+            blocked = (u > hole["u0"] - FRAME_W) & (u < hole["u1"] + FRAME_W) \
+                      & (v > hole["v0"] - FRAME_W) & (v < hole["v1"] + FRAME_W)
+            sel = sel & (~blocked)
+
         if not sel.any():
             continue
 
@@ -773,29 +876,46 @@ _TEX = {}
 
 
 def build_decals(tex):
-    """墙上的海报与儿童画 —— 位置照原版：海报偏左，儿童画挤在它右边。"""
+    """墙上的海报与儿童画 —— 位置照原版：海报偏左，儿童画挤在它右边。
+
+    ⚠️ **后墙中间是正门（前墙门洞 u ∈ [-1.1, 1.1]、v ∈ [0, 2.1]），画一律不许压上去。**
+    原版后墙是整面实墙、想怎么贴怎么贴；我们这里正中间开了门给噜噜走，
+    再照原版那样把画铺满中间，画就糊在门洞上了（门洞那块已经被走廊覆盖）。
+    所以后墙的画只挂门洞**左边、右边和门楣上方**。
+    """
     global DECALS
     paper = tex["paper"]
-    celebrate = make_celebrate_poster(paper)
-    draws = [make_drawing(paper, s) for s in (3, 5, 7, 11, 13, 17)]
+
+    sprites = [load_character(code) for code in CAST]
+    celebrate = make_celebrate_poster(paper, sprites)
+
+    have = [s for s in sprites if s is not None]
+    draws = []
+    for i, s in enumerate((3, 5, 7, 11, 13, 17, 19, 23)):
+        draws.append(make_drawing(paper, s, have[i % len(have)] if have else None))
 
     DECALS = [
-        # 后墙（u = x, v = y）：CELEBRATE 海报偏左，儿童画挤在它右边
-        # —— 大小高矮故意不齐，原版就是随手贴上去的一墙
-        (2, True, -2.14, 1.24, -0.72, 2.44, celebrate),
-        (2, True, -0.56, 1.62, -0.10, 2.26, draws[0]),
-        (2, True, 0.02, 1.72, 0.34, 2.20, draws[1]),
-        (2, True, 0.40, 1.54, 0.86, 2.32, draws[2]),
-        (2, True, 0.92, 1.76, 1.22, 2.14, draws[3]),
-        (2, True, 1.30, 1.42, 1.86, 2.08, draws[4]),
-        (2, True, -0.18, 1.02, 0.44, 1.48, draws[5]),
-        (2, True, 0.62, 1.06, 1.02, 1.42, draws[0]),
-        # 左墙（u = z, v = y）
-        (0, False, -1.12, 1.26, -0.44, 2.02, draws[0]),
-        (0, False, -0.32, 1.50, 0.16, 1.92, draws[2]),
+        # 后墙（u = x, v = y）：门洞左边挂海报，右边挂一墙儿童画，门楣上一个
+        #
+        # ⚠️ **儿童画的框一律是正方形**（宽高相等）。
+        # 画的内容是 512×512 的方图，框不是方的话会被拉变形，
+        # 同一张画里的角色就一会儿胖一会儿瘦 —— 一排贴出来比例全乱。
+        # 海报是 512×640，框按 0.8 的宽高比来。
+        (2, True, -2.54, 1.02, -1.37, 2.48, celebrate),
+        (2, True, -2.54, 0.62, -2.08, 1.08, draws[0]),
+        (2, True, -2.00, 0.66, -1.54, 1.12, draws[1]),
+        (2, True, -0.32, 2.24, 0.04, 2.60, draws[2]),
+        (2, True, 1.12, 1.70, 1.62, 2.20, draws[3]),
+        (2, True, 1.68, 1.58, 2.18, 2.08, draws[4]),
+        (2, True, 1.14, 1.14, 1.64, 1.64, draws[5]),
+        (2, True, 1.70, 1.06, 2.20, 1.56, draws[6]),
+        (2, True, 2.24, 1.46, 2.58, 1.80, draws[7]),
+        # 左墙（u = z, v = y）—— 左门在 u ∈ [-3.2, -2.0]，画挂在它前面那截墙上
+        (0, False, -1.12, 1.30, -0.56, 1.86, draws[0]),
+        (0, False, -0.48, 1.46, -0.02, 1.92, draws[2]),
         # 右墙
-        (0, True, -1.12, 1.26, -0.44, 2.02, draws[1]),
-        (0, True, -0.32, 1.50, 0.16, 1.92, draws[3]),
+        (0, True, -1.12, 1.30, -0.56, 1.86, draws[1]),
+        (0, True, -0.48, 1.46, -0.02, 1.92, draws[3]),
     ]
 
 
