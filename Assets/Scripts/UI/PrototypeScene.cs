@@ -380,10 +380,7 @@ namespace NailongFNAF.UI
             MapRoom(762f, 497f, 888f, 578f, "CAM\n6", 9)
         };
 
-        // 没有素材时的兜底色
-        private static readonly Color FrontFallback = new Color(0.20f, 0.20f, 0.23f);
-        private static readonly Color LeftFallback = new Color(0.18f, 0.30f, 0.58f);
-        private static readonly Color RightFallback = new Color(0.18f, 0.48f, 0.28f);
+        // 没有素材时的兜底色（监控画面缺帧时退回黑）
         private static readonly Color MonitorFallback = new Color(0.05f, 0.06f, 0.07f);
 
         // 按钮配色沿用官方：关门是红按钮，开灯是绿按钮
@@ -425,15 +422,6 @@ namespace NailongFNAF.UI
         private static readonly Color CamBoxText = new Color(0.86f, 0.93f, 0.86f, 1f);
 
         [Header("素材（留空则用色块占位）")]
-        /// <summary>
-        /// 转头用的整段镜头序列 —— **[0] 是正前方，[1..N] 是逐渐转过去的过程帧**。
-        /// 渲染脚本按固定角度步长渲一整套（见 <c>tools/gen_placeholder_art.py</c>），
-        /// 代码在相邻两帧之间交叉淡化，转起来才是「镜头缓缓扫过去」，
-        /// 而不是从正面硬切到侧面。
-        /// </summary>
-        [SerializeField] private Sprite[] _bgLeftFrames;
-        [SerializeField] private Sprite[] _bgRightFrames;
-
         /// <summary>门片也是逐帧的 —— 门关着时，门在画面上的位置随镜头一起动。</summary>
         [SerializeField] private Sprite[] _doorLeftClosedFrames;
         [SerializeField] private Sprite[] _doorRightClosedFrames;
@@ -445,9 +433,13 @@ namespace NailongFNAF.UI
 
         private Canvas _canvas;
 
-        /// <summary>背景两层：base 是当前帧，blend 是下一帧按比例压在上面做交叉淡化。</summary>
+        /// <summary>3D 办公室（全景条 + 旋转相机）。背景是它，不是背景帧序列。</summary>
+        private OfficeRoom _room;
+
+        /// <summary>
+        /// 断电时盖全屏的黑幕。平时整层透明，露出后面的 3D 房间（见 OfficeRoom）。
+        /// </summary>
         private Image _bgBase;
-        private Image _bgBlend;
 
         private Image _sideLeftCharacter;
         private Image _sideRightCharacter;
@@ -519,6 +511,7 @@ namespace NailongFNAF.UI
             EnsureEventSystem();
             EnsureEnemyDirector();
             EnsureAudioManager();
+            EnsureRoom();
 
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_font == null)
@@ -623,6 +616,18 @@ namespace NailongFNAF.UI
                 var go = new GameObject("AudioManager");
                 _audio = go.AddComponent<AudioManager>();
             }
+        }
+
+        /// <summary>
+        /// 3D 办公室：全景条 + 绕中轴旋转的相机。背景从此由相机真的转出来，
+        /// 不再靠背景帧在两帧之间交叉淡化（那看着是转场，不是转头）。
+        /// </summary>
+        private void EnsureRoom()
+        {
+            var existing = FindObjectOfType<OfficeRoom>();
+            _room = existing != null
+                ? existing
+                : new GameObject("OfficeRoom").AddComponent<OfficeRoom>();
         }
 
         // ---------------------------------------------------------------
@@ -808,7 +813,7 @@ namespace NailongFNAF.UI
             else
             {
                 _blackoutCharacter.gameObject.SetActive(false);
-                ApplyBackgroundLayers();
+                ApplyRoomView();
 
                 if (_hasJumpscare)
                 {
@@ -855,56 +860,19 @@ namespace NailongFNAF.UI
         private void SetBlackout()
         {
             SetLayer(_bgBase, null, Color.black, 1f);
-            SetLayer(_bgBlend, null, Color.black, 0f);
         }
 
         /// <summary>
-        /// 把 _pan（-1 全左 … 0 正前 … +1 全右）换算成「第几帧 + 帧间比例」。
-        ///
-        /// 帧序列的 [0] 就是正前方，所以 -1 和 +1 两端各自映射到左右两套序列的末帧，
-        /// 0 映射到两套序列的第 0 帧 —— 中间经过的每一帧都是一个真实的镜头角度，
-        /// 于是转起来是镜头在扫，而不是两张图在互相淡出。
+        /// 正常视角：把 _pan 交给 3D 房间转相机。黑幕那层这时要全透明，别盖住房。
         /// </summary>
-        private void PanToFrame(out Sprite[] frames, out int i0, out int i1, out float frac)
+        private void ApplyRoomView()
         {
-            float p = Mathf.Clamp(_pan, -1f, 1f);
+            SetLayer(_bgBase, null, Color.black, 0f);
 
-            frames = p < 0f ? _bgLeftFrames : _bgRightFrames;
-            if (frames == null || frames.Length == 0)
+            if (_room != null)
             {
-                i0 = i1 = 0;
-                frac = 0f;
-                return;
+                _room.SetPan(_pan);
             }
-
-            float t = Mathf.Abs(p) * (frames.Length - 1);
-            i0 = Mathf.Clamp(Mathf.FloorToInt(t), 0, frames.Length - 1);
-            i1 = Mathf.Min(i0 + 1, frames.Length - 1);
-            frac = Mathf.Clamp01(t - i0);
-        }
-
-        /// <summary>背景两层：当前帧铺底，下一帧按帧间比例压在上面。</summary>
-        private void ApplyBackgroundLayers()
-        {
-            Sprite[] frames;
-            int i0, i1;
-            float frac;
-            PanToFrame(out frames, out i0, out i1, out frac);
-
-            if (frames == null || frames.Length == 0)
-            {
-                // 没素材 —— 退回原来的色块
-                float p = Mathf.Clamp(_pan, -1f, 1f);
-                float left = Mathf.Clamp01(-p);
-                float right = Mathf.Clamp01(p);
-                SetLayer(_bgBase, null, Color.Lerp(FrontFallback,
-                    p < 0f ? LeftFallback : RightFallback, Mathf.Max(left, right)), 1f);
-                SetLayer(_bgBlend, null, Color.clear, 0f);
-                return;
-            }
-
-            SetLayer(_bgBase, frames[i0], Color.black, 1f);
-            SetLayer(_bgBlend, i1 != i0 ? frames[i1] : null, Color.black, frac);
         }
 
         private void SetLayer(Image image, Sprite sprite, Color fallback, float alpha)
@@ -924,24 +892,26 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 门片跟着镜头一起走 —— 用的是跟背景同一套帧序号，
-        /// 所以门在画面上的位置永远跟门框对齐。
+        /// 门片跟着镜头一起走 —— 帧序号直接由 _pan 按自己的帧数算，
+        /// 满转（|_pan| = 1）正好落在序列末帧，那一帧是正侧面对准相机的那一张。
+        /// 原来是从背景序列借帧号（背景改用 3D 相机后就没了），现在自己算。
         /// </summary>
         private void ApplyDoors(GameManager gm)
         {
-            Sprite[] bgFrames;
-            int i0, i1;
-            float frac;
-            PanToFrame(out bgFrames, out i0, out i1, out frac);
-
             Sprite[] frames = _pan < 0f ? _doorLeftClosedFrames : _doorRightClosedFrames;
             bool closed = _pan < 0f ? gm.LeftDoorClosed : gm.RightDoorClosed;
 
-            if (!closed || frames == null || frames.Length == 0)
+            if (!closed || frames == null || frames.Length <= 1)
             {
                 HideDoors();
                 return;
             }
+
+            // 第 0 帧留空（正前方看不到门），所以有效帧是 1..n-1
+            float t = Mathf.Abs(Mathf.Clamp(_pan, -1f, 1f)) * (frames.Length - 1);
+            int i0 = Mathf.Clamp(Mathf.FloorToInt(t), 0, frames.Length - 1);
+            int i1 = Mathf.Min(i0 + 1, frames.Length - 1);
+            float frac = Mathf.Clamp01(t - i0);
 
             SetDoorLayer(_doorBase, At(frames, i0), 1f);
             SetDoorLayer(_doorBlend, i1 != i0 ? At(frames, i1) : null, frac);
@@ -1594,12 +1564,10 @@ namespace NailongFNAF.UI
         /// 监控画面与角色立绘。
         /// 背景与门片都是**整段镜头序列**：[0] 正前方，[1..N] 逐帧转过去。
         /// </summary>
-        public void SetArtwork(Sprite[] bgLeftFrames, Sprite[] bgRightFrames,
+        public void SetArtwork(
             Sprite[] doorLeftClosedFrames, Sprite[] doorRightClosedFrames,
             Sprite[] monitorFrames, CharacterArt[] characters)
         {
-            _bgLeftFrames = bgLeftFrames;
-            _bgRightFrames = bgRightFrames;
             _doorLeftClosedFrames = doorLeftClosedFrames;
             _doorRightClosedFrames = doorRightClosedFrames;
             _monitorFrames = monitorFrames;
@@ -1805,13 +1773,13 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 背景两层：下面那层铺当前帧，上面那层放下一帧做交叉淡化。
-        /// 只用两层是因为镜头在任一时刻最多跨两帧 —— 层数不必等于帧数。
+        /// 断电黑幕：一整铺满屏幕的黑层，压在 3D 房间之上。平时透明（见
+        /// <see cref="ApplyRoomView"/>），断电 / 被抓时整屏盖黑（<see cref="SetBlackout"/>）。
+        /// 背景本体是 OfficeRoom 渲的 3D 房间，不在这层。
         /// </summary>
         private void BuildBackgroundLayers()
         {
-            _bgBase = MakeFullScreenImage("BgBase", FrontFallback);
-            _bgBlend = MakeFullScreenImage("BgBlend", Color.clear);
+            _bgBase = MakeFullScreenImage("BlackoutCurtain", Color.black);
         }
 
         /// <summary>

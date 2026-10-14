@@ -77,7 +77,7 @@
 - 命名空间：`NailongFNAF.<模块>`，例如 `NailongFNAF.Gameplay`
 - 场景：`Assets/Scenes/` 下，PascalCase，如 `Main.unity`
 - 美术素材：`snake_case` + 类型前缀
-  - `bg_office_front.png` / `bg_office_left.png`
+  - `office_pano.png`（背景，一条圆柱全景：`Assets/Resources/`，运行时 `Resources.Load`）
   - `mon_1a.png`（监控画面，编号照官方 CAM：`mon_1a` ~ `mon_7`）
   - `char_nailong_idle.png`
   - `ui_btn_door_close.png`

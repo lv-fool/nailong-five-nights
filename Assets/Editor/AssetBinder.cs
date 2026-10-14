@@ -38,13 +38,10 @@ namespace NailongFNAF.EditorTools
                 return;
             }
 
-            // 背景整段是**不透明**的，而且一转就是二十来张全屏图 —— 必须压缩导入，
-            // 不压缩的话光背景就要吃掉一百多 MB 显存。
-            // 带 alpha 的（门片、立绘、监控）反过来，压缩会让透明边缘出色块。
-            foreach (var name in BackgroundNames())
-            {
-                EnsureSpriteImport(FindImage(name), false);
-            }
+            // 办公室已经改成 3D 全景 + 旋转相机（OfficeRoom），不再需要
+            // 「左/右各十张背景帧」—— 背景是 Assets/Resources/office_pano.png。
+            // 带 alpha 的（门片、立绘、监控）必须不压缩导入，压缩会让透明边缘出色块。
+            EnsurePanoImport();
 
             foreach (var name in AlphaSpriteNames())
             {
@@ -56,8 +53,6 @@ namespace NailongFNAF.EditorTools
             var characters = LoadCharacters();
 
             prototype.SetArtwork(
-                LoadFrameSequence("bg_office_front", "bg_office_left_{0:00}"),
-                LoadFrameSequence("bg_office_front", "bg_office_right_{0:00}"),
                 LoadDoorSequence("ui_door_left_closed_{0:00}"),
                 LoadDoorSequence("ui_door_right_closed_{0:00}"),
                 LoadMonitorFrames(),
@@ -92,16 +87,6 @@ namespace NailongFNAF.EditorTools
             Debug.Log("[奶龙] 素材已接入：背景镜头序列 " + (TurnFrames * 2 + 1) + " 帧、"
                 + "门片序列 " + (TurnFrames * 2) + " 帧、监控画面 11 张、"
                 + "角色立绘 " + characters.Length + " 套、音频 10 条。按 Play 看效果。");
-        }
-
-        private static IEnumerable<string> BackgroundNames()
-        {
-            yield return "bg_office_front";
-            for (int i = 1; i <= TurnFrames; i++)
-            {
-                yield return string.Format("bg_office_left_{0:00}", i);
-                yield return string.Format("bg_office_right_{0:00}", i);
-            }
         }
 
         private static IEnumerable<string> AlphaSpriteNames()
@@ -141,23 +126,6 @@ namespace NailongFNAF.EditorTools
                     yield return "char_" + code + "_" + pose;
                 }
             }
-        }
-
-        /// <summary>
-        /// 读一整套镜头帧。[0] 用正面那张，[1..N] 按格式名逐帧读 ——
-        /// 缺哪帧留空，运行时那一帧会退回黑场，不会崩。
-        /// </summary>
-        private static Sprite[] LoadFrameSequence(string frontName, string frameFormat)
-        {
-            var frames = new Sprite[TurnFrames + 1];
-            frames[0] = LoadSprite(frontName);
-
-            for (int i = 1; i <= TurnFrames; i++)
-            {
-                frames[i] = LoadSprite(string.Format(frameFormat, i));
-            }
-
-            return frames;
         }
 
         /// <summary>门片序列。第 0 帧是正前方 —— 那个角度看不到门，留空。</summary>
@@ -327,6 +295,55 @@ namespace NailongFNAF.EditorTools
             if (importer.filterMode != FilterMode.Bilinear)
             {
                 importer.filterMode = FilterMode.Bilinear;
+                dirty = true;
+            }
+
+            if (!dirty)
+            {
+                return;
+            }
+
+            importer.SaveAndReimport();
+        }
+
+        /// <summary>
+        /// 全景条（3D 办公室用）的导入设置。它是 5120 宽的一条图，Unity 默认的
+        /// <c>maxTextureSize</c> 会把它压回 2048 —— 那正好是视野里看得见的宽度，
+        /// 一压就糊。所以这里必须显式放到 8192。
+        ///
+        /// 它不进场景的 SerializeField，是 <c>OfficeRoom</c> 用
+        /// <c>Resources.Load</c> 在运行时自己抓的，所以只要导入设置对就行。
+        /// </summary>
+        private static void EnsurePanoImport()
+        {
+            const string Path = "Assets/Resources/office_pano.png";
+
+            var importer = AssetImporter.GetAtPath(Path) as TextureImporter;
+            if (importer == null)
+            {
+                Debug.LogWarning("[奶龙] 缺 " + Path +
+                                 " —— 先跑 tools/render_pano.py 生成全景条。");
+                return;
+            }
+
+            bool dirty = false;
+
+            if (importer.textureType != TextureImporterType.Default)
+            {
+                importer.textureType = TextureImporterType.Default;
+                dirty = true;
+            }
+
+            if (importer.maxTextureSize < 8192)
+            {
+                importer.maxTextureSize = 8192;
+                dirty = true;
+            }
+
+            if (!importer.mipmapEnabled)
+            {
+                // 相机一转远近缩放就变，没 mip 会闪
+                importer.mipmapEnabled = true;
                 dirty = true;
             }
 

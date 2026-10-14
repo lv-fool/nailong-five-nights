@@ -508,18 +508,31 @@ def surface(tex, key, tint, u, v, tile, gain, grime=0.0, grime_tile=3.0):
 # ================================================================ 渲染
 
 def render(cam, yaw, tex, seed, dark=0.64, exposure=1.0):
-    """渲一张视角图。
+    """渲一张针孔视角图（W×H）。"""
+    return render_dirs(look_rays(cam, yaw), tex, seed, dark, exposure,
+                       W, H, lambda pt: project(pt, cam, yaw))
+
+
+def render_dirs(dirs, tex, seed, dark, exposure, w, h, proj, vig=True):
+    """按**调用方给的方向数组**渲染。
+
+    这是原来 `render()` 的身体，只是把「针孔射线 + 透视投影」换成了参数。
+    方向由调用方造（`look_rays` 针孔 / `cyl_rays` 圆柱全景），于是同一套
+    场景、同一套光照和贴图，既能出视角图也能出全景条 —— 两者天然对齐，
+    不存在「两批图风格不一样」的问题。
+
+    `vig` 同时控制噪点、暗角和扁平贴图的角部蛛网（这些是**单幅画面**才有的
+    效果，全景条的边缘不是画面边缘，不能照加）。
 
     ⚠️ **所有着色都只对命中的像素做**（`p[m]` 这种花式索引），不要整屏算 ——
-    整屏算的话每个面都要在 200 万像素上跑一遍贴图采样，慢十倍不止。
+    整屏算的话每个面都要在上百万像素上跑一遍贴图采样，慢十倍不止。
     """
-    dirs = look_rays(cam, yaw)
-    o = np.array(cam, np.float32)
+    o = np.array(CAM, np.float32)
 
     # ---- 所有盒子一起求交，取最近的
-    t = np.full((H, W), np.inf, np.float32)
-    ax = np.zeros((H, W), np.int32)
-    which = np.zeros((H, W), np.int32)
+    t = np.full((h, w), np.inf, np.float32)
+    ax = np.zeros((h, w), np.int32)
+    which = np.zeros((h, w), np.int32)
 
     for bi, box in enumerate(BOXES):
         tn, axn, tf, axf = box_t(o, dirs, box["bmin"], box["bmax"])
@@ -545,7 +558,7 @@ def render(cam, yaw, tex, seed, dark=0.64, exposure=1.0):
     hi = np.take_along_axis(bmax_all[which], ax[..., None], axis=-1)[..., 0]
     on_max = np.abs(pv - hi) < np.abs(pv - lo)
 
-    color = np.zeros((H, W, 3), np.float32)
+    color = np.zeros((h, w, 3), np.float32)
 
     # ---- 逐盒子、逐面着色
     for bi, box in enumerate(BOXES):
@@ -594,7 +607,7 @@ def render(cam, yaw, tex, seed, dark=0.64, exposure=1.0):
         hit = np.isfinite(t2)
         p2 = o2 + dirs * np.where(hit, t2, 0.0)[..., None]
 
-        n2 = np.zeros((H, W, 3), np.float32)
+        n2 = np.zeros((h, w, 3), np.float32)
         for a in range(3):
             mm = (ax2 == a)
             if not mm.any():
@@ -657,34 +670,36 @@ def render(cam, yaw, tex, seed, dark=0.64, exposure=1.0):
         color[sel] = np.where(edge, col * 0.42, col)
 
     # ---- 桌面上的零碎 + 吊灯 + 蛛网（投影成 2D 画上去）
-    prop_img = Image.new("RGB", (W, H), (0, 0, 0))
-    prop_mask = Image.new("L", (W, H), 0)
-    draw_props(prop_img, prop_mask, cam, yaw)
+    prop_img = Image.new("RGB", (w, h), (0, 0, 0))
+    prop_mask = Image.new("L", (w, h), 0)
+    draw_props(prop_img, prop_mask, CAM, 0.0, proj=proj, draw_flat=vig)
     pm = (np.asarray(prop_mask).astype(np.float32) / 255.0)[..., None]
     pc = np.asarray(prop_img).astype(np.float32) / 255.0
     color = color * (1.0 - pm) + pc * pm
 
-    color = post(color, seed, dark, exposure)
+    color = post(color, seed, dark, exposure, w, h, vig=vig)
     return Image.fromarray((color * 255).astype(np.uint8), "RGB") \
         .filter(ImageFilter.GaussianBlur(0.6))
 
 
-def post(color, seed, dark, exposure):
+def post(color, seed, dark, exposure, w, h, vig=True):
     """统一的收尾：曝光 → 色调映射 → 噪点 → 暗角 → 暗部偏冷。
 
     背景和门片都得走这一套 —— 不然门贴上去会像另一张图。
+    `vig=False` 时只保留噪点/偏冷，不加暗角 —— 全景条的边缘不是画面边缘。
     """
     color = color * (dark * exposure)
     color = color / (1.0 + color) * 1.9
 
     rng = np.random.default_rng(seed)
-    color = color + rng.normal(0.0, 0.016, (H, W, 1)).astype(np.float32)
+    color = color + rng.normal(0.0, 0.016, (h, w, 1)).astype(np.float32)
 
-    ys = (np.arange(H, dtype=np.float32) + 0.5) / H * 2.0 - 1.0
-    xs = (np.arange(W, dtype=np.float32) + 0.5) / W * 2.0 - 1.0
-    vx, vy = np.meshgrid(xs, ys)
-    d = np.sqrt(vx * vx + vy * vy) / 1.41421356
-    color = color * np.clip(1.0 - 0.62 * (d ** 2.1), 0.0, 1.0)[..., None]
+    if vig:
+        ys = (np.arange(h, dtype=np.float32) + 0.5) / h * 2.0 - 1.0
+        xs = (np.arange(w, dtype=np.float32) + 0.5) / w * 2.0 - 1.0
+        vx, vy = np.meshgrid(xs, ys)
+        d = np.sqrt(vx * vx + vy * vy) / 1.41421356
+        color = color * np.clip(1.0 - 0.62 * (d ** 2.1), 0.0, 1.0)[..., None]
 
     # 暗部偏冷 —— 冷房间 + 暖灯，是原版那股味
     lum = color.mean(axis=2, keepdims=True)
@@ -696,20 +711,26 @@ def post(color, seed, dark, exposure):
 
 # ================================================================ 2D 道具
 
-def draw_props(col_img, mask_img, cam, yaw):
+def draw_props(col_img, mask_img, cam, yaw, proj=None, draw_flat=True):
     """投影出屏幕位置再 2D 画的零碎：扇叶网罩、纸杯、纸团、抽屉、吊灯、蛛网。
 
     这些东西几何太碎，用光线投射不划算。光照按底座那点算，颜色才跟房间对得上。
+
+    `proj` 是投影函数（默认透视 `project`）。全景条把圆柱投影传进来，桌面零碎
+    才会跟着一起贴到条子上。`draw_flat` 关掉只在**单幅画面**里才成立的东西 ——
+    角部蛛网挂在画面角落，而全景条的边缘不是画面边缘。
     """
     d = ImageDraw.Draw(col_img)
     mk = ImageDraw.Draw(mask_img)
+    if proj is None:
+        proj = lambda pt: project(pt, cam, yaw)
 
     def visible(base):
         return depth_of(base, cam, yaw) > 0.05
 
     def scale_at(base, metres):
-        _, y0 = project(base, cam, yaw)
-        _, y1 = project((base[0], base[1] + metres, base[2]), cam, yaw)
+        _, y0 = proj(base)
+        _, y1 = proj((base[0], base[1] + metres, base[2]))
         return abs(y0 - y1)
 
     def shade(base, tint, up=True):
@@ -726,7 +747,7 @@ def draw_props(col_img, mask_img, cam, yaw):
     # ---- 风扇：网罩 + 扇叶（机身是盒子）
     fan = (0.46, 1.00, 2.12)
     if visible(fan):
-        fx, fy = project(fan, cam, yaw)
+        fx, fy = proj(fan)
         r = scale_at(fan, 0.28)
         edge = shade(fan, np.array([0.40, 0.43, 0.52], np.float32))
         dark = shade(fan, np.array([0.10, 0.11, 0.14], np.float32))
@@ -745,7 +766,7 @@ def draw_props(col_img, mask_img, cam, yaw):
     # ---- 纸杯（原版那个红白条纹的）
     cup = (-0.45, 0.80, 1.78)
     if visible(cup):
-        cx, cy = project(cup, cam, yaw)
+        cx, cy = proj(cup)
         hw = scale_at(cup, 0.055)
         body = shade(cup, np.array([0.52, 0.50, 0.48], np.float32))
         ink(lambda i, c: i.polygon(
@@ -756,7 +777,7 @@ def draw_props(col_img, mask_img, cam, yaw):
     for base, hw in (((-0.72, 0.80, 1.76), 0.055), ((0.86, 0.80, 1.84), 0.050)):
         if not visible(base):
             continue
-        px, py = project(base, cam, yaw)
+        px, py = proj(base)
         s = scale_at(base, hw)
         pale = shade(base, np.array([0.86, 0.86, 0.84], np.float32))
         ink(lambda i, c, px=px, py=py, s=s: i.polygon(
@@ -767,8 +788,8 @@ def draw_props(col_img, mask_img, cam, yaw):
     # ---- 桌子正面：两格抽屉 + 拉手
     front = (0.0, 0.42, 1.60)
     if visible(front):
-        ax0, ay0 = project((-1.35, 0.72, 1.60), cam, yaw)
-        ax1, ay1 = project((0.45, 0.10, 1.60), cam, yaw)
+        ax0, ay0 = proj((-1.35, 0.72, 1.60))
+        ax1, ay1 = proj((0.45, 0.10, 1.60))
         box = [min(ax0, ax1), min(ay0, ay1), max(ax0, ax1), max(ay0, ay1)]
         cab = shade(front, np.array([0.26, 0.27, 0.31], np.float32), up=False)
         ink(lambda i, c: i.rectangle(box, fill=c), cab)
@@ -786,9 +807,9 @@ def draw_props(col_img, mask_img, cam, yaw):
 
     # ---- 吊灯：一根吊杆 + 红罩 + 发亮的灯泡
     if visible(LAMP):
-        lx, ly = project(LAMP, cam, yaw)
+        lx, ly = proj(LAMP)
         r = scale_at(LAMP, 0.30)
-        top_y = project((LAMP[0], 2.60, LAMP[2]), cam, yaw)[1]
+        top_y = proj((LAMP[0], 2.60, LAMP[2]))[1]
         rod = shade(LAMP, np.array([0.34, 0.34, 0.38], np.float32), up=False)
         ink(lambda i, c: i.rectangle([lx - r * 0.06, top_y, lx + r * 0.06, ly - r * 0.2],
                                      fill=c), rod)
@@ -797,21 +818,22 @@ def draw_props(col_img, mask_img, cam, yaw):
         ink(lambda i, c: i.ellipse([lx - r * 0.34, ly - r * 0.30,
                                     lx + r * 0.34, ly + r * 0.34], fill=c), (252, 238, 198))
 
-    # ---- 天花板两个角的蛛网（原版画面里就有）
-    for sx, flip in ((0.0, 1.0), (1.0, -1.0)):
-        cxp, cyp = sx * W, 0.0
-        for i in range(1, 6):
-            rr = i * W * 0.038
-            bb = [min(cxp, cxp + flip * rr), cyp,
-                  max(cxp, cxp + flip * rr), cyp + rr]
-            mk.arc(bb, 0, 90 if flip > 0 else 180, fill=64)
-            d.arc(bb, 0, 90 if flip > 0 else 180, fill=(148, 150, 158))
-        for k in range(5):
-            a = math.radians(k * 22.5)
-            x1 = cxp + flip * math.cos(a) * W * 0.21
-            y1 = cyp + math.sin(a) * H * 0.38
-            mk.line([(cxp, cyp), (x1, y1)], fill=64, width=2)
-            d.line([(cxp, cyp), (x1, y1)], fill=(138, 140, 148), width=2)
+    # ---- 天花板两个角的蛛网（原版画面里就有；只有单幅画面才画）
+    if draw_flat:
+        for sx, flip in ((0.0, 1.0), (1.0, -1.0)):
+            cxp, cyp = sx * W, 0.0
+            for i in range(1, 6):
+                rr = i * W * 0.038
+                bb = [min(cxp, cxp + flip * rr), cyp,
+                      max(cxp, cxp + flip * rr), cyp + rr]
+                mk.arc(bb, 0, 90 if flip > 0 else 180, fill=64)
+                d.arc(bb, 0, 90 if flip > 0 else 180, fill=(148, 150, 158))
+            for k in range(5):
+                a = math.radians(k * 22.5)
+                x1 = cxp + flip * math.cos(a) * W * 0.21
+                y1 = cyp + math.sin(a) * H * 0.38
+                mk.line([(cxp, cyp), (x1, y1)], fill=64, width=2)
+                d.line([(cxp, cyp), (x1, y1)], fill=(138, 140, 148), width=2)
 
 
 # ================================================================ 门片
@@ -932,13 +954,8 @@ def main():
     DOOR_TEX = make_door_texture(tex["metal"])
     build_decals(tex)
 
-    print("渲背景（%d 张）…" % len(VIEWS))
-    for name, yaw, seed in VIEWS:
-        img = render(CAM, yaw, tex, seed=seed)
-        path = os.path.join(OUT, "bg_office_%s.png" % name)
-        img.save(path)
-        print("  wrote", os.path.relpath(path, ROOT))
-
+    # 背景不再一张张渲了 —— 背景改成「全景条 + 旋转相机」（tools/render_pano.py），
+    # 转头是相机真在转，不是若干张图交叉淡化。这里只留门片。
     print("渲门片（%d 张）…" % (TURN_FRAMES * 2))
     for i in range(1, TURN_FRAMES + 1):
         path = os.path.join(DOOR_OUT, "ui_door_left_closed_%02d.png" % i)
