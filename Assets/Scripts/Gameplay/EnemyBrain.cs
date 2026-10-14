@@ -55,12 +55,14 @@ namespace NailongFNAF.Gameplay
         /// <summary>推进一帧。dt 为真实秒数。</summary>
         public void Tick(float dt, EnemyContext ctx)
         {
+            // 这个标志每帧都得先清掉 —— 放在 dt 判断之后的话，
+            // dt 为 0 的那一帧会把上一帧的「刚被赶走」又报一次。
+            RetreatedThisTick = false;
+
             if (IsAttacking || dt <= 0f)
             {
                 return;
             }
-
-            RetreatedThisTick = false;
 
             OnTick(dt, ctx);
 

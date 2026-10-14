@@ -69,7 +69,8 @@ namespace NailongFNAF.Gameplay
 
         /// <summary>
         /// 这一侧的门口是不是已经站着别人了。
-        /// 左门目前是牛来的专属通道，不存在争抢，所以只看右门。
+        /// 左门只有袋鼠一条通道，不存在争抢；右门是牛来与奶龙**共用**的，
+        /// 所以这里只看右门。
         /// </summary>
         public bool IsDoorTakenByOther(Side side, EnemyId self)
         {

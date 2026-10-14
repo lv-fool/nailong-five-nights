@@ -21,8 +21,8 @@ namespace NailongFNAF.Gameplay
         /// <summary>到门口后，门开着能撑多久（秒）。</summary>
         public float DoorGraceSeconds { get; private set; }
 
-        /// <summary>已经站在门口多久（秒）。</summary>
-        public float DoorTimer { get; private set; }
+        /// <summary>已经站在门口多久（秒）。派生类（奶龙换机位时）要能清零，所以是 protected set。</summary>
+        public float DoorTimer { get; protected set; }
 
         public DoorEnemyBrain(EnemyId id, Side side, int activityLevel, IRandomSource rng)
             : this(id, side, activityLevel, rng, DefaultMoveIntervalSeconds, DefaultDoorGraceSeconds)

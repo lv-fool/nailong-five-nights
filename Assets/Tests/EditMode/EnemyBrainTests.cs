@@ -548,6 +548,48 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
+        public void 奶龙_到了门口就不再看监控换位了()
+        {
+            // 站到门口之后它就不再是「蹲机位偷电」的状态 —— 监控里看不到它，
+            // 换位也就无从谈起；这时的应对手段只剩关门。
+            // 不加这个限制的话，它会一边换机位一边还占着右门口，自相矛盾。
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            var idle = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            Assert.AreEqual(2, brain.Stage);
+
+            int original = brain.CameraIndex;
+            var watching = new EnemyContext(false, false, false, false, true, ViewSide.Front, original);
+
+            brain.Tick(NailongBrain.DefaultRevealSeconds * 2f, watching);
+
+            Assert.AreEqual(original, brain.CameraIndex);
+            Assert.AreEqual(0, brain.RelocateCount);
+            Assert.IsFalse(brain.IsBeingWatched);
+            Assert.AreEqual(2, brain.Stage);
+        }
+
+        [Test]
+        public void 奶龙_到门口后监控照不到它就不会被门口宽限动手()
+        {
+            // 反过来说：到门口之后宽限计时照常走，看监控拦不住它。
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            var idle = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            Assert.AreEqual(2, brain.Stage);
+
+            var watching = new EnemyContext(false, false, false, false, true, ViewSide.Front,
+                brain.CameraIndex);
+            brain.Tick(NailongBrain.DefaultDoorGraceSeconds + 0.1f, watching);
+
+            Assert.IsTrue(brain.IsAttacking);
+        }
+
+        [Test]
         public void 奶龙_被监控看到就换位并停手()
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);

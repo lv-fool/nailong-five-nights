@@ -152,8 +152,14 @@ namespace NailongFNAF.Gameplay
 
         protected override void OnTick(float dt, EnemyContext ctx)
         {
-            // 监控正停在他这一格 → 现形、停手（不偷电也不推进）
-            if (ctx.MonitorUp && ctx.CameraIndex == CameraIndex)
+            // 监控正停在它这一格 → 现形、停手（不偷电也不推进）
+            //
+            // ⚠️ 只有**还没站到门口**时才算数。到了门口它就是堵在门上的威胁，
+            // 不再是「蹲机位」的状态了 —— 这时监控里看不到它（见 PrototypeScene），
+            // 换位也就无从谈起；应对手段只剩关门。
+            // 不加这个判断的话，它会一边换机位一边还占着右门口，
+            // 「监控里在 3 号机位」和「右门口站着它」同时成立，自相矛盾。
+            if (Stage < MaxStage && ctx.MonitorUp && ctx.CameraIndex == CameraIndex)
             {
                 IsBeingWatched = true;
                 RevealTimer += dt;
@@ -276,6 +282,7 @@ namespace NailongFNAF.Gameplay
         private void Relocate()
         {
             _stealTimer = 0f;
+            DoorTimer = 0f;          // 换位等于这一轮「摸门」从头开始，别把门口计时留着
 
             if (CameraCount <= 1)
             {

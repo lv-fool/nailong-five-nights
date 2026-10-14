@@ -117,7 +117,7 @@ namespace NailongFNAF.UI
         /// 立绘底边再沉下去一点（见 <see cref="SideCharacterSinkRatio"/>），
         /// 头顶就正好顶在门框下沿 —— 照原版那种「站在门里、下半身被裁掉」。
         /// </summary>
-        private const float SideCharacterHeightRatio = 0.88f;
+        private const float SideCharacterHeightRatio = 0.83f;
 
         /// <summary>门口立绘默认沉到屏幕下方多少（占画布高度）。脚被裁掉，人才像站在门里。</summary>
         private const float SideCharacterSinkRatio = 0.05f;
@@ -125,13 +125,20 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 门口立绘的横向锚点 —— 门洞在屏幕上的中心位置（占画布宽度）。
         /// 和 <c>tools/gen_placeholder_art.py</c> 里算出来的门洞投影一致：
-        /// 左门 x ∈ [-0.1%, 30.0%]、右门 x ∈ [70.0%, 100.1%]，中心分别是 14.9% / 85.1%。
+        /// 左门 x ∈ [8.0%, 33.2%]、右门 x ∈ [66.8%, 92.0%]，中心分别是 20.6% / 79.4%。
         ///
         /// **立绘按门心对齐，不是按屏幕边对齐** —— 换个宽高比不同的角色（牛来又高又窄、
         /// 袋鼠又矮又宽），贴着屏幕边摆就会各自偏到一边去。
         /// </summary>
-        private const float SideCharacterAnchorLeft = 0.149f;
-        private const float SideCharacterAnchorRight = 0.851f;
+        private const float SideCharacterAnchorLeft = 0.206f;
+        private const float SideCharacterAnchorRight = 0.794f;
+
+        /// <summary>
+        /// 镜头刚转起来时立绘停在哪儿 —— 故意放在画面外一点，
+        /// 让它是**跟着门框从屏幕边缘滑进来**的，而不是凭空淡出来。
+        /// </summary>
+        private const float OffscreenAnchorLeft = -0.18f;
+        private const float OffscreenAnchorRight = 1.18f;
 
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
@@ -203,8 +210,14 @@ namespace NailongFNAF.UI
         /// <summary>跳杀立绘按这个宽度铺满屏幕（UI 参考分辨率）。</summary>
         private const float JumpscareWidth = 1920f;
 
-        /// <summary>转头平滑时间（秒）。越大越慢、越"重"。</summary>
-        private const float TurnSmoothTime = 0.12f;
+        /// <summary>
+        /// 转头平滑时间（秒）。越大越慢、越"重"。
+        ///
+        /// **别调回 0.12** —— 那时候转完只要零点几秒，看起来像从正面硬切到侧面。
+        /// 现在背景是一整套逐帧的镜头序列（10 帧走完 90°），得给它时间一帧帧扫过去，
+        /// 玩家才看得出「镜头在转」。0.3 秒左右走完，是个能看清又不拖沓的节奏。
+        /// </summary>
+        private const float TurnSmoothTime = 0.30f;
 
         /// <summary>鼠标进入屏幕底部这个比例就切换监控。</summary>
         private const float MonitorZone = 0.10f;
@@ -402,30 +415,39 @@ namespace NailongFNAF.UI
         private static readonly Color CamBoxText = new Color(0.86f, 0.93f, 0.86f, 1f);
 
         [Header("素材（留空则用色块占位）")]
-        [SerializeField] private Sprite _bgFront;
-        [SerializeField] private Sprite _bgLeft;
-        [SerializeField] private Sprite _bgRight;
-        [SerializeField] private Sprite _doorLeftOpen;
-        [SerializeField] private Sprite _doorLeftClosed;
-        [SerializeField] private Sprite _doorRightOpen;
-        [SerializeField] private Sprite _doorRightClosed;
+        /// <summary>
+        /// 转头用的整段镜头序列 —— **[0] 是正前方，[1..N] 是逐渐转过去的过程帧**。
+        /// 渲染脚本按固定角度步长渲一整套（见 <c>tools/gen_placeholder_art.py</c>），
+        /// 代码在相邻两帧之间交叉淡化，转起来才是「镜头缓缓扫过去」，
+        /// 而不是从正面硬切到侧面。
+        /// </summary>
+        [SerializeField] private Sprite[] _bgLeftFrames;
+        [SerializeField] private Sprite[] _bgRightFrames;
+
+        /// <summary>门片也是逐帧的 —— 门关着时，门在画面上的位置随镜头一起动。</summary>
+        [SerializeField] private Sprite[] _doorLeftClosedFrames;
+        [SerializeField] private Sprite[] _doorRightClosedFrames;
+
         [SerializeField] private Sprite[] _monitorFrames;
 
         [Header("角色立绘（缺哪张哪张退回色块）")]
         [SerializeField] private CharacterArt[] _characters;
 
         private Canvas _canvas;
-        private Image _bgFrontImage;
-        private Image _bgLeftImage;
-        private Image _bgRightImage;
+
+        /// <summary>背景两层：base 是当前帧，blend 是下一帧按比例压在上面做交叉淡化。</summary>
+        private Image _bgBase;
+        private Image _bgBlend;
+
         private Image _sideLeftCharacter;
         private Image _sideRightCharacter;
 
         /// <summary>正前方那个立绘 —— 噜噜从正门来，站在这儿。</summary>
         private Image _frontCharacter;
 
-        private Image _doorLeft;
-        private Image _doorRight;
+        /// <summary>门片两层，跟背景同样两层结构。</summary>
+        private Image _doorBase;
+        private Image _doorBlend;
         private CanvasGroup _leftWallGroup;
         private CanvasGroup _rightWallGroup;
         private Image _doorLeftButton;
@@ -817,22 +839,57 @@ namespace NailongFNAF.UI
 
         private void SetBlackout()
         {
-            SetLayer(_bgFrontImage, null, Color.black, 1f);
-            SetLayer(_bgLeftImage, null, Color.black, 0f);
-            SetLayer(_bgRightImage, null, Color.black, 0f);
+            SetLayer(_bgBase, null, Color.black, 1f);
+            SetLayer(_bgBlend, null, Color.black, 0f);
         }
 
-        /// <summary>三层背景交叉淡化 —— 中间是正面，靠边滑向左右视角。</summary>
-        private void ApplyBackgroundLayers()
+        /// <summary>
+        /// 把 _pan（-1 全左 … 0 正前 … +1 全右）换算成「第几帧 + 帧间比例」。
+        ///
+        /// 帧序列的 [0] 就是正前方，所以 -1 和 +1 两端各自映射到左右两套序列的末帧，
+        /// 0 映射到两套序列的第 0 帧 —— 中间经过的每一帧都是一个真实的镜头角度，
+        /// 于是转起来是镜头在扫，而不是两张图在互相淡出。
+        /// </summary>
+        private void PanToFrame(out Sprite[] frames, out int i0, out int i1, out float frac)
         {
             float p = Mathf.Clamp(_pan, -1f, 1f);
-            float leftAlpha = Mathf.Clamp01(-p);
-            float rightAlpha = Mathf.Clamp01(p);
-            float frontAlpha = 1f - Mathf.Max(leftAlpha, rightAlpha);
 
-            SetLayer(_bgFrontImage, _bgFront, FrontFallback, frontAlpha);
-            SetLayer(_bgLeftImage, _bgLeft, LeftFallback, leftAlpha);
-            SetLayer(_bgRightImage, _bgRight, RightFallback, rightAlpha);
+            frames = p < 0f ? _bgLeftFrames : _bgRightFrames;
+            if (frames == null || frames.Length == 0)
+            {
+                i0 = i1 = 0;
+                frac = 0f;
+                return;
+            }
+
+            float t = Mathf.Abs(p) * (frames.Length - 1);
+            i0 = Mathf.Clamp(Mathf.FloorToInt(t), 0, frames.Length - 1);
+            i1 = Mathf.Min(i0 + 1, frames.Length - 1);
+            frac = Mathf.Clamp01(t - i0);
+        }
+
+        /// <summary>背景两层：当前帧铺底，下一帧按帧间比例压在上面。</summary>
+        private void ApplyBackgroundLayers()
+        {
+            Sprite[] frames;
+            int i0, i1;
+            float frac;
+            PanToFrame(out frames, out i0, out i1, out frac);
+
+            if (frames == null || frames.Length == 0)
+            {
+                // 没素材 —— 退回原来的色块
+                float p = Mathf.Clamp(_pan, -1f, 1f);
+                float left = Mathf.Clamp01(-p);
+                float right = Mathf.Clamp01(p);
+                SetLayer(_bgBase, null, Color.Lerp(FrontFallback,
+                    p < 0f ? LeftFallback : RightFallback, Mathf.Max(left, right)), 1f);
+                SetLayer(_bgBlend, null, Color.clear, 0f);
+                return;
+            }
+
+            SetLayer(_bgBase, frames[i0], Color.black, 1f);
+            SetLayer(_bgBlend, i1 != i0 ? frames[i1] : null, Color.black, frac);
         }
 
         private void SetLayer(Image image, Sprite sprite, Color fallback, float alpha)
@@ -847,18 +904,37 @@ namespace NailongFNAF.UI
 
         private void HideDoors()
         {
-            _doorLeft.gameObject.SetActive(false);
-            _doorRight.gameObject.SetActive(false);
+            _doorBase.gameObject.SetActive(false);
+            _doorBlend.gameObject.SetActive(false);
         }
 
-        /// <summary>门片跟着视角一起淡入淡出；没有素材就整体隐藏。</summary>
+        /// <summary>
+        /// 门片跟着镜头一起走 —— 用的是跟背景同一套帧序号，
+        /// 所以门在画面上的位置永远跟门框对齐。
+        /// </summary>
         private void ApplyDoors(GameManager gm)
         {
-            float p = Mathf.Clamp(_pan, -1f, 1f);
-            SetDoorLayer(_doorLeft, gm.LeftDoorClosed ? _doorLeftClosed : _doorLeftOpen,
-                Mathf.Clamp01(-p));
-            SetDoorLayer(_doorRight, gm.RightDoorClosed ? _doorRightClosed : _doorRightOpen,
-                Mathf.Clamp01(p));
+            Sprite[] bgFrames;
+            int i0, i1;
+            float frac;
+            PanToFrame(out bgFrames, out i0, out i1, out frac);
+
+            Sprite[] frames = _pan < 0f ? _doorLeftClosedFrames : _doorRightClosedFrames;
+            bool closed = _pan < 0f ? gm.LeftDoorClosed : gm.RightDoorClosed;
+
+            if (!closed || frames == null || frames.Length == 0)
+            {
+                HideDoors();
+                return;
+            }
+
+            SetDoorLayer(_doorBase, At(frames, i0), 1f);
+            SetDoorLayer(_doorBlend, i1 != i0 ? At(frames, i1) : null, frac);
+        }
+
+        private static Sprite At(Sprite[] frames, int index)
+        {
+            return index >= 0 && index < frames.Length ? frames[index] : null;
         }
 
         private void SetDoorLayer(Image image, Sprite sprite, float alpha)
@@ -892,8 +968,15 @@ namespace NailongFNAF.UI
             EnemyId id;
             bool present = TryGetEnemyAtSide(gm, side, out id);
 
-            // 跟着转头淡入淡出 —— 正前方看不到两侧门外
-            float look = Mathf.Clamp01(side == Side.Left ? -_pan : _pan);
+            // 门口是**随镜头扫进画面**的：镜头转到 70° 上下，门框才从屏幕边缘露出来。
+            // 所以立绘不能按「转了多少」线性淡入 —— 那会在门还在画面外的时候就先冒出来。
+            // 这两条曲线都对着门洞进画面的角度来：
+            //   · 0.70 之前完全不显示（门还没进来）
+            //   · 0.74 → 1.0 之间从画面外滑到门心，同时淡入
+            //
+            // ⚠️ 取的是**带符号**的 _pan：往左转时右边门口的人不该跟着冒出来。
+            float turn = Mathf.Clamp01(side == Side.Left ? -_pan : _pan);
+            float look = Mathf.Clamp01((turn - 0.70f) / 0.24f);
             float alpha = present ? look : 0f;
 
             if (alpha <= 0.01f)
@@ -914,6 +997,16 @@ namespace NailongFNAF.UI
             var rect = image.rectTransform;
             bool mirrored = side == Side.Left;
 
+            // 门是随镜头扫进来的，立绘就得跟着门一起滑 —— 站位固定在门心，
+            // 但转的过程中门心自己就在往画面里移。不跟着走的话，人比门先出现。
+            float slide = Mathf.InverseLerp(0.74f, 1f, turn);
+            float anchorX = side == Side.Left
+                ? Mathf.Lerp(OffscreenAnchorLeft, SideCharacterAnchorLeft, slide)
+                : Mathf.Lerp(OffscreenAnchorRight, SideCharacterAnchorRight, slide);
+
+            rect.anchorMin = new Vector2(anchorX, 0f);
+            rect.anchorMax = new Vector2(anchorX, 0f);
+
             rect.localScale = new Vector3(mirrored ? -1f : 1f, 1f, 1f);
             rect.anchoredPosition = new Vector2(0f, -CanvasHeight * sinkRatio);
         }
@@ -932,8 +1025,9 @@ namespace NailongFNAF.UI
             switch (id)
             {
                 case EnemyId.Niulai:
-                    // 全身照含腿，同一个「高度」下身体显得小一圈，所以放大一点、沉得更深
-                    heightRatio = 1.00f;
+                    // 全身照含腿，同一个「高度」下身体显得小一圈，所以放大一点、沉得更深。
+                    // 头顶要落在门框下沿（画布高 22%）：头顶 = 1 - 高度 + 下沉
+                    heightRatio = 0.94f;
                     sinkRatio = 0.16f;
                     break;
 
@@ -1269,8 +1363,9 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 监控画面里叠谁。奶龙优先（它蹲在机位偷电，正对镜头所以用 stare）；
-        /// 其次噜噜 —— 它从某条走廊摸过来，玩家能在监控里提前看到它从哪边来。
+        /// 监控画面里叠谁。奶龙优先（它蹲在机位偷电，正对镜头所以用 stare）。
+        /// **它一离开机位就不在监控里了** —— 到了右门口它就不再是「蹲机位」的状态，
+        /// 这时它属于门口的威胁，玩家得转头看右门、而不是在监控里找它。
         /// </summary>
         private void ApplyMonitorCharacter(GameManager gm)
         {
@@ -1279,6 +1374,7 @@ namespace NailongFNAF.UI
                 : null;
 
             if (nailong != null && !nailong.IsAttacking
+                && nailong.Stage < nailong.MaxStage
                 && nailong.CameraIndex == gm.CurrentCameraIndex)
             {
                 ShowCharacter(_monitorCharacter, EnemyId.Nailong, CharacterPose.Stare,
@@ -1469,19 +1565,19 @@ namespace NailongFNAF.UI
             return false;
         }
 
-        /// <summary>由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景、门片、监控画面与角色立绘。</summary>
-        public void SetArtwork(Sprite bgFront, Sprite bgLeft, Sprite bgRight,
-            Sprite doorLeftOpen, Sprite doorLeftClosed,
-            Sprite doorRightOpen, Sprite doorRightClosed,
+        /// <summary>
+        /// 由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景帧序列、门片、
+        /// 监控画面与角色立绘。
+        /// 背景与门片都是**整段镜头序列**：[0] 正前方，[1..N] 逐帧转过去。
+        /// </summary>
+        public void SetArtwork(Sprite[] bgLeftFrames, Sprite[] bgRightFrames,
+            Sprite[] doorLeftClosedFrames, Sprite[] doorRightClosedFrames,
             Sprite[] monitorFrames, CharacterArt[] characters)
         {
-            _bgFront = bgFront;
-            _bgLeft = bgLeft;
-            _bgRight = bgRight;
-            _doorLeftOpen = doorLeftOpen;
-            _doorLeftClosed = doorLeftClosed;
-            _doorRightOpen = doorRightOpen;
-            _doorRightClosed = doorRightClosed;
+            _bgLeftFrames = bgLeftFrames;
+            _bgRightFrames = bgRightFrames;
+            _doorLeftClosedFrames = doorLeftClosedFrames;
+            _doorRightClosedFrames = doorRightClosedFrames;
             _monitorFrames = monitorFrames;
             _characters = characters;
         }
@@ -1636,7 +1732,8 @@ namespace NailongFNAF.UI
         // ---------------------------------------------------------------
         // 构建 UI（全部代码生成，不依赖任何素材文件）
         //
-        // 层级自下而上：背景三层 → 门片 → 墙上按钮 → 监控层 → 把手 → HUD → 调试 → 跳杀
+        // 层级自下而上：背景两层（当前帧 + 下一帧）→ 门口立绘 → 门片两层
+        //             → 墙上按钮 → 监控层 → 把手 → HUD → 调试 → 跳杀
         // ---------------------------------------------------------------
 
         private void BuildUi()
@@ -1683,11 +1780,14 @@ namespace NailongFNAF.UI
             return canvas;
         }
 
+        /// <summary>
+        /// 背景两层：下面那层铺当前帧，上面那层放下一帧做交叉淡化。
+        /// 只用两层是因为镜头在任一时刻最多跨两帧 —— 层数不必等于帧数。
+        /// </summary>
         private void BuildBackgroundLayers()
         {
-            _bgFrontImage = MakeFullScreenImage("BgFront", FrontFallback);
-            _bgLeftImage = MakeFullScreenImage("BgLeft", LeftFallback);
-            _bgRightImage = MakeFullScreenImage("BgRight", RightFallback);
+            _bgBase = MakeFullScreenImage("BgBase", FrontFallback);
+            _bgBlend = MakeFullScreenImage("BgBlend", Color.clear);
         }
 
         /// <summary>
@@ -1785,11 +1885,11 @@ namespace NailongFNAF.UI
 
         private void BuildDoorLayers()
         {
-            _doorLeft = MakeFullScreenImage("DoorLeft", Color.white);
-            _doorLeft.gameObject.SetActive(false);
+            _doorBase = MakeFullScreenImage("DoorBase", Color.white);
+            _doorBase.gameObject.SetActive(false);
 
-            _doorRight = MakeFullScreenImage("DoorRight", Color.white);
-            _doorRight.gameObject.SetActive(false);
+            _doorBlend = MakeFullScreenImage("DoorBlend", Color.white);
+            _doorBlend.gameObject.SetActive(false);
         }
 
         /// <summary>

@@ -21,6 +21,9 @@ namespace NailongFNAF.EditorTools
         private const string MonitoringDir = "Assets/Art/Monitoring/";
         private const string CharacterDir = "Assets/Art/Characters/";
 
+        /// <summary>每侧转头的帧数 —— 必须和 tools/gen_placeholder_art.py 的 TURN_FRAMES 一致。</summary>
+        private const int TurnFrames = 10;
+
         [MenuItem("奶龙/5. 接入素材", false, 14)]
         public static void Bind()
         {
@@ -35,27 +38,17 @@ namespace NailongFNAF.EditorTools
                 return;
             }
 
-            // 图片要按 Sprite 导入，UI 才能直接用
-            string[] images =
+            // 背景整段是**不透明**的，而且一转就是二十来张全屏图 —— 必须压缩导入，
+            // 不压缩的话光背景就要吃掉一百多 MB 显存。
+            // 带 alpha 的（门片、立绘、监控）反过来，压缩会让透明边缘出色块。
+            foreach (var name in BackgroundNames())
             {
-                "bg_office_front", "bg_office_left_01", "bg_office_right_01",
-                "ui_door_left_open", "ui_door_left_closed",
-                "ui_door_right_open", "ui_door_right_closed",
-                "mon_1a", "mon_1b", "mon_1c",
-                "mon_2a", "mon_2b", "mon_3",
-                "mon_4a", "mon_4b", "mon_5", "mon_6", "mon_7",
-                "char_nailong_idle", "char_nailong_stare", "char_nailong_jumpscare",
-                "char_nailong_blackout",
-                "char_niulai_idle", "char_niulai_stare", "char_niulai_jumpscare",
-                "char_daishu_idle", "char_daishu_stare", "char_daishu_jumpscare",
-                "char_lulu_idle", "char_lulu_stare", "char_lulu_peek",
-                "char_lulu_startled", "char_lulu_angry",
-                "char_lulu_jumpscare"
-            };
+                EnsureSpriteImport(FindImage(name), false);
+            }
 
-            foreach (var name in images)
+            foreach (var name in AlphaSpriteNames())
             {
-                EnsureSpriteImport(FindImage(name));
+                EnsureSpriteImport(FindImage(name), true);
             }
 
             AssetDatabase.Refresh();
@@ -63,13 +56,10 @@ namespace NailongFNAF.EditorTools
             var characters = LoadCharacters();
 
             prototype.SetArtwork(
-                LoadSprite("bg_office_front"),
-                LoadSprite("bg_office_left_01"),
-                LoadSprite("bg_office_right_01"),
-                LoadSprite("ui_door_left_open"),
-                LoadSprite("ui_door_left_closed"),
-                LoadSprite("ui_door_right_open"),
-                LoadSprite("ui_door_right_closed"),
+                LoadFrameSequence("bg_office_front", "bg_office_left_{0:00}"),
+                LoadFrameSequence("bg_office_front", "bg_office_right_{0:00}"),
+                LoadDoorSequence("ui_door_left_closed_{0:00}"),
+                LoadDoorSequence("ui_door_right_closed_{0:00}"),
                 LoadMonitorFrames(),
                 characters);
 
@@ -99,8 +89,88 @@ namespace NailongFNAF.EditorTools
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
 
-            Debug.Log("[奶龙] 素材已接入：背景 3 张、门片 4 张、监控画面 11 张、"
+            Debug.Log("[奶龙] 素材已接入：背景镜头序列 " + (TurnFrames * 2 + 1) + " 帧、"
+                + "门片序列 " + (TurnFrames * 2) + " 帧、监控画面 11 张、"
                 + "角色立绘 " + characters.Length + " 套、音频 10 条。按 Play 看效果。");
+        }
+
+        private static IEnumerable<string> BackgroundNames()
+        {
+            yield return "bg_office_front";
+            for (int i = 1; i <= TurnFrames; i++)
+            {
+                yield return string.Format("bg_office_left_{0:00}", i);
+                yield return string.Format("bg_office_right_{0:00}", i);
+            }
+        }
+
+        private static IEnumerable<string> AlphaSpriteNames()
+        {
+            yield return "ui_door_left_open";
+            yield return "ui_door_left_closed";
+            yield return "ui_door_right_open";
+            yield return "ui_door_right_closed";
+
+            for (int i = 1; i <= TurnFrames; i++)
+            {
+                yield return string.Format("ui_door_left_closed_{0:00}", i);
+                yield return string.Format("ui_door_right_closed_{0:00}", i);
+            }
+
+            yield return "mon_1a";
+            yield return "mon_1b";
+            yield return "mon_1c";
+            yield return "mon_2a";
+            yield return "mon_2b";
+            yield return "mon_3";
+            yield return "mon_4a";
+            yield return "mon_4b";
+            yield return "mon_5";
+            yield return "mon_6";
+            yield return "mon_7";
+
+            foreach (var id in EnemyIds.All)
+            {
+                string code = id.Code();
+                foreach (var pose in new[]
+                         {
+                             "idle", "stare", "peek", "startled", "angry",
+                             "jumpscare", "blackout"
+                         })
+                {
+                    yield return "char_" + code + "_" + pose;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 读一整套镜头帧。[0] 用正面那张，[1..N] 按格式名逐帧读 ——
+        /// 缺哪帧留空，运行时那一帧会退回黑场，不会崩。
+        /// </summary>
+        private static Sprite[] LoadFrameSequence(string frontName, string frameFormat)
+        {
+            var frames = new Sprite[TurnFrames + 1];
+            frames[0] = LoadSprite(frontName);
+
+            for (int i = 1; i <= TurnFrames; i++)
+            {
+                frames[i] = LoadSprite(string.Format(frameFormat, i));
+            }
+
+            return frames;
+        }
+
+        /// <summary>门片序列。第 0 帧是正前方 —— 那个角度看不到门，留空。</summary>
+        private static Sprite[] LoadDoorSequence(string frameFormat)
+        {
+            var frames = new Sprite[TurnFrames + 1];
+
+            for (int i = 1; i <= TurnFrames; i++)
+            {
+                frames[i] = LoadSprite(string.Format(frameFormat, i));
+            }
+
+            return frames;
         }
 
         /// <summary>
@@ -193,10 +263,13 @@ namespace NailongFNAF.EditorTools
         /// <summary>
         /// 把图片调成 UI 能直接用的 Sprite。
         ///
-        /// 立绘与门片都带 alpha，且会压在暗背景上 —— 所以关掉压缩与 mipmap，
+        /// <paramref name="needsAlpha"/> 决定要不要关压缩：
+        /// 立绘、门片、监控画面带 alpha 且会压在暗背景上 —— **必须关压缩**，
         /// 否则透明边缘会压出色块，暗场里一眼就能看出来。
+        /// 背景整段是不透明的大图（一转二十来张），反过来**必须压缩**，
+        /// 不然光背景就吃掉一百多 MB 显存。两边都是踩过坑的结论，别对调。
         /// </summary>
-        private static void EnsureSpriteImport(string path)
+        private static void EnsureSpriteImport(string path, bool needsAlpha)
         {
             if (string.IsNullOrEmpty(path))
             {
@@ -223,9 +296,9 @@ namespace NailongFNAF.EditorTools
                 dirty = true;
             }
 
-            if (!importer.alphaIsTransparency)
+            if (importer.alphaIsTransparency != needsAlpha)
             {
-                importer.alphaIsTransparency = true;
+                importer.alphaIsTransparency = needsAlpha;
                 dirty = true;
             }
 
@@ -241,9 +314,13 @@ namespace NailongFNAF.EditorTools
                 dirty = true;
             }
 
-            if (importer.textureCompression != TextureImporterCompression.Uncompressed)
+            var wanted = needsAlpha
+                ? TextureImporterCompression.Uncompressed
+                : TextureImporterCompression.CompressedHQ;
+
+            if (importer.textureCompression != wanted)
             {
-                importer.textureCompression = TextureImporterCompression.Uncompressed;
+                importer.textureCompression = wanted;
                 dirty = true;
             }
 
