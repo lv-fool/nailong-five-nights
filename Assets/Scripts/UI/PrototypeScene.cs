@@ -174,6 +174,16 @@ namespace NailongFNAF.UI
             get { return CanvasHeight * FrontCharacterHeightRatio; }
         }
 
+        /// <summary>
+        /// 正前方立绘的**下边缘切在哪儿**（占画布高度，从底往上算）。
+        ///
+        /// 噜噜是从后墙那道正门探进来的，**桌子在它前面** —— 所以膝盖以下不该看得见，
+        /// 得被桌沿挡住。背景图里桌子的远边正好落在画布高度 62.8% 处（从上算），
+        /// 也就是从下算 37.2%，这里对齐那条线，腿就「消失」在桌沿后面了。
+        /// **改了 <c>tools/gen_placeholder_art.py</c> 里的桌子位置或视场角，这个数要跟着重算。**
+        /// </summary>
+        private const float FrontCharacterClipBottom = 0.372f;
+
         /// <summary>正前方立绘贴屏幕底边多高。要高于监控热区（0.10 × 1080 = 108）。</summary>
         private const float FrontCharacterBottom = 40f;
 
@@ -444,6 +454,11 @@ namespace NailongFNAF.UI
 
         /// <summary>正前方那个立绘 —— 噜噜从正门来，站在这儿。</summary>
         private Image _frontCharacter;
+
+        /// <summary>正前方立绘的裁切遮罩（桌沿以下裁掉）。</summary>
+        private RectMask2D _frontCharacterClip;
+
+        private float _frontCharacterClipPadding = -1f;
 
         /// <summary>门片两层，跟背景同样两层结构。</summary>
         private Image _doorBase;
@@ -1080,13 +1095,15 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 正前方那个立绘 —— 噜噜从正门摸进来。
-        /// 逼近时是站姿，堵到门口换成正对镜头；被手电筒照着就换成受惊那张。
+        /// 逼近时是站姿，堵到门口换成正对镜头；**堵到门口之后**被手电筒照着才换成受惊。
         /// </summary>
         private void ApplyFrontCharacter(GameManager gm)
         {
             var lulu = _enemyDirector != null
                 ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
                 : null;
+
+            ApplyFrontCharacterClip();
 
             // 只有正前方才看得见 —— 转头看两边时它不在画面里
             float look = Mathf.Clamp01(1f - Mathf.Abs(_pan) * 1.6f);
@@ -1099,16 +1116,19 @@ namespace NailongFNAF.UI
 
             CharacterPose pose;
 
-            // 正被手电筒照着 → 慌。判定跟 LuluBrain 那边保持一致：
-            // 手电筒亮着 + 视角在正前方 + 没在看监控。
-            bool shiningAtIt = gm.FlashlightOn && !gm.MonitorUp
+            // 正被手电筒照着 → 慌。
+            // ⚠️ **只算它已经堵到正门口的时候** —— 还在逼近（侧身那张）时照它没用，
+            // 立绘当然也不该有反应，不然玩家会以为「闪了但它不走」。
+            // 判定跟 LuluBrain 那边保持一致：手电筒亮着 + 视角在正前方 + 没在看监控。
+            bool atDoor = lulu.Stage >= lulu.MaxStage;
+            bool shiningAtIt = atDoor && gm.FlashlightOn && !gm.MonitorUp
                 && gm.CurrentView == ViewSide.Front;
 
             if (shiningAtIt)
             {
                 pose = CharacterPose.Startled;
             }
-            else if (lulu.Stage >= lulu.MaxStage)
+            else if (atDoor)
             {
                 // 堵到正门口 → 正对镜头
                 pose = CharacterPose.Stare;
@@ -1807,13 +1827,21 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 正前方那个立绘 —— 噜噜从正门来就站在这儿。
-        /// 锚在屏幕下边中央，比两侧的门口立绘大一圈。
+        /// 正前方那个立绘 —— 噜噜从正门来，站在这儿。
+        /// 外面套一层 RectMask2D：**桌沿以下的部分要裁掉**，腿才会被桌子挡住。
         /// </summary>
         private void BuildFrontCharacter()
         {
+            // 遮罩铺满整块画布，靠 padding 从底部裁 —— 这样立绘自己的锚点
+            // 还是按整块画布算，位置不用跟着父物体改。
+            var clipGo = new GameObject("FrontCharacterClip",
+                typeof(RectTransform), typeof(RectMask2D));
+            clipGo.transform.SetParent(_canvas.transform, false);
+            StretchToParent(clipGo.GetComponent<RectTransform>());
+            _frontCharacterClip = clipGo.GetComponent<RectMask2D>();
+
             var go = new GameObject("FrontCharacter", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(clipGo.transform, false);
 
             var rect = go.GetComponent<RectTransform>();
             PlaceRect(rect, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
@@ -1828,6 +1856,26 @@ namespace NailongFNAF.UI
 
             go.SetActive(false);
             _frontCharacter = image;
+            ApplyFrontCharacterClip();
+        }
+
+        /// <summary>按当前画布高度重算遮罩裁掉多少 —— 宽屏下画布高度不是 1080，不能写死。</summary>
+        private void ApplyFrontCharacterClip()
+        {
+            if (_frontCharacterClip == null)
+            {
+                return;
+            }
+
+            float bottom = CanvasHeight * FrontCharacterClipBottom;
+
+            if (Mathf.Approximately(bottom, _frontCharacterClipPadding))
+            {
+                return;
+            }
+
+            _frontCharacterClipPadding = bottom;
+            _frontCharacterClip.padding = new Vector4(0f, bottom, 0f, 0f);
         }
 
         /// <summary>
