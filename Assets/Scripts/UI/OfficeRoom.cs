@@ -108,17 +108,21 @@ namespace NailongFNAF.UI
             for (int r = 0; r < Rows; r++)
             for (int c = 0; c < Cols; c++)
             {
-                int a = r * (Cols + 1) + c;
-                int b = a + 1;
-                int d = a + Cols + 1;
-                int e = d + 1;
+                int a = r * (Cols + 1) + c;     // 上·左
+                int b = a + 1;                  // 上·右
+                int d = a + Cols + 1;           // 下·左
+                int e = d + 1;                  // 下·右
 
+                // ⚠️ 绕序必须是**顺时针**（Unity 判正面的约定）—— 相机在圆柱**里面**，
+                // 看到的永远是内壁，只有顺时针绕出来的正面才朝向相机。绕反了整面会被
+                // 背面剔除掉，屏幕全黑。别想着用材质 `_Cull` 关剔除：内置
+                // `Unlit/Texture` 根本没声明 `_Cull` 属性，设了也不生效，只能改绕序。
                 tris[n++] = a;
-                tris[n++] = d;
-                tris[n++] = b;
                 tris[n++] = b;
                 tris[n++] = d;
+                tris[n++] = b;
                 tris[n++] = e;
+                tris[n++] = d;
             }
 
             var mesh = new Mesh { name = "OfficePanoramaCylinder" };
@@ -138,12 +142,10 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 相机在圆柱**里面**，照到的是背面；关掉背面剔除就不用纠结三角面绕序。
             var material = new Material(Shader.Find("Unlit/Texture"))
             {
                 mainTexture = texture
             };
-            material.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
 
             _shell.GetComponent<MeshRenderer>().sharedMaterial = material;
         }
