@@ -26,7 +26,17 @@ namespace NailongFNAF.UI
 
         private const float EyeHeight = 1.30f;
         private const float EyeZ = -1.20f;
-        private const float MaxYaw = 90f;
+
+        /// <summary>
+        /// 满转角（度）。⚠️ **必须和 tools/gen_placeholder_art.py 的 `TURN_MAX_YAW_DEG` 一致** ——
+        /// 门片是逐帧渲的，`ApplyDoors` 按 `|pan| × (帧数-1)` 取帧，末帧必须正好是
+        /// 相机 yaw = 这个角度时渲的那张，否则门片会和全景里的门洞错开。
+        ///
+        /// 70° 是 2026-10-15 定的：门开在座位旁边（世界偏航角 ±77°~103°）之后，
+        /// 转到七成门就进画面，摆动幅度也比原来的 90° 含蓄。
+        /// </summary>
+        private const float MaxYaw = 70f;
+
         private const float Radius = 8f;
 
         /// <summary>水平视场 85°（照渲染脚本的 FOV_H）在 16:9 下折算出的垂直视场角。</summary>
@@ -35,6 +45,15 @@ namespace NailongFNAF.UI
         private Camera _cam;
         private GameObject _shell;
         private float _appliedVFov = -1f;
+
+        /// <summary>
+        /// 房间相机。墙上按钮要按世界点投影到屏幕上，得借它来算（见
+        /// <c>PrototypeScene.TryProjectToCanvas</c>）。
+        /// </summary>
+        public Camera Camera
+        {
+            get { return _cam; }
+        }
 
         private void Awake()
         {
@@ -168,15 +187,15 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 视角照渲染时的 16:9 水平 85° 定。窗口拉宽了水平视场随之变大，得夹住，
-        /// 否则超广角会看到全景条（±145°）之外的空。边界：满转 90° + 半视场
-        /// 不能超过 145°，所以半视场最多 55°，取 52° 留一截余量。
+        /// 否则超广角会看到全景条（±145°）之外的空。边界：满转 <see cref="MaxYaw"/> + 半视场
+        /// 不能超过 145°，所以半视场最多 145 − 70 = 75°，取 70° 留一截余量。
         /// 竖向只剩 BaseVFov 一途，只会被压小 —— 全景上下各留到 35.75°，够用。
         /// </summary>
         private void ApplyFieldOfView()
         {
             float aspect = _cam.aspect > 0.01f ? _cam.aspect : 16f / 9f;
 
-            const float MaxHalfHFov = 52f;                          // 90° 满转 + 52° ≤ 145° 全景边界
+            const float MaxHalfHFov = 70f;                          // 70° 满转 + 70° ≤ 145° 全景边界
             float tanHalfVMax = Mathf.Tan(MaxHalfHFov * Mathf.Deg2Rad) / aspect;
             float maxVFov = 2f * Mathf.Atan(tanHalfVMax) * Mathf.Rad2Deg;
             float vfov = Mathf.Min(BaseVFov, maxVFov);

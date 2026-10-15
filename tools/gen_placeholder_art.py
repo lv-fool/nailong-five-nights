@@ -53,20 +53,24 @@ DESK_MIN = (-2.00, 0.00, 1.60)
 DESK_MAX = (2.00, 0.80, 2.60)
 
 # 门洞外的走廊（射线穿过门洞后继续往里打，打到这几只盒子的内壁）
+#
+# ⚠️ 走廊的 z 范围必须把门洞**两侧各包住 0.4m**。门洞挪位时走廊一定要跟着挪 ——
+# 否则射线穿出门洞后打不到走廊盒子，那块会渲成**纯黑**（不是走廊）。
 FRONT_CORR = ((-1.70, 0.0, 3.00), (1.70, 2.40, 8.00))
-LEFT_CORR = ((-7.00, 0.0, -3.60), (-2.60, 2.20, -1.60))
-RIGHT_CORR = ((2.60, 0.0, -3.60), (7.00, 2.20, -1.60))
+LEFT_CORR = ((-7.00, 0.0, -2.20), (-2.60, 2.20, -0.20))
+RIGHT_CORR = ((2.60, 0.0, -2.20), (7.00, 2.20, -0.20))
 
 # 墙上的洞。u/v 是那面墙的平面坐标（见 wall_uv）。
 #   axis 0 = x 墙，u = z；axis 1 = y 面，u = x；axis 2 = z 墙，u = x
 #
-# 两扇门放在**玩家侧后方**（门的 z 比相机 z 小）：转头 -90° 时屏幕右边对应 +z，
-# 门在身后才会落在画面左边。原版的门也在你侧后方 —— 得扭头才看得见。
+# 两扇门开在玩家**座位旁边**（门洞 z ∈ [-1.80, -0.60]，门心 z = -1.20 正好是眼点的 z）：
+# 门心偏航角 ±90°，跨度 ±77°~103°。这样镜头转到七成左右门就进画面了 ——
+# 早先门开在侧后方（z ∈ [-3.2, -2.0]，偏航 ±107°~128°），得转一大圈才看得见。
 FRONT_HOLE = dict(axis=2, side=True, plane=3.00, u0=-0.88, u1=0.88,
                   v0=0.00, v1=2.10, corr=FRONT_CORR)
-LEFT_HOLE = dict(axis=0, side=False, plane=-2.60, u0=-3.20, u1=-2.00,
+LEFT_HOLE = dict(axis=0, side=False, plane=-2.60, u0=-1.80, u1=-0.60,
                  v0=0.00, v1=2.05, corr=LEFT_CORR)
-RIGHT_HOLE = dict(axis=0, side=True, plane=2.60, u0=-3.20, u1=-2.00,
+RIGHT_HOLE = dict(axis=0, side=True, plane=2.60, u0=-1.80, u1=-0.60,
                   v0=0.00, v1=2.05, corr=RIGHT_CORR)
 
 HOLES = [FRONT_HOLE, LEFT_HOLE, RIGHT_HOLE]
@@ -854,8 +858,14 @@ def build_door(hole, cam, yaw, tex, closed, seed, dark=0.64, exposure=1.0):
     _, _, t, axf = box_t(o, dirs, ROOM_MIN, ROOM_MAX)     # 相机在屋里 → 看离开面
     p = o + dirs * t[..., None]
 
-    on_max = np.abs(p[..., hole["axis"]] - hole["plane"]) < 1e-3
-    wall = (axf == hole["axis"]) & (on_max == hole["side"])
+    # 「射线是从门洞所在的那面墙出去的」= 出射轴对 + 落点就在那面墙的平面上。
+    #
+    # ⚠️ 这里**不要**再跟 hole["side"] 比。side 说的是「这面墙在房间的 min 侧还是
+    # max 侧」（左墙 False / 右墙 True），而 on_plane 说的是「落点在不在这面墙上」——
+    # 两码事。以前写成 `on_plane == hole["side"]`，左门（False）就永远不成立，
+    # **左门片渲出来是整张透明的**（2026-10-15 才发现）。
+    on_plane = np.abs(p[..., hole["axis"]] - hole["plane"]) < 1e-3
+    wall = (axf == hole["axis"]) & on_plane
     u, v = wall_uv(hole["axis"], p)
     sel = wall & (u > hole["u0"]) & (u < hole["u1"]) & (v > hole["v0"]) & (v < hole["v1"])
 
@@ -872,7 +882,7 @@ def build_door(hole, cam, yaw, tex, closed, seed, dark=0.64, exposure=1.0):
 
     du = (u - hole["u0"]) / (hole["u1"] - hole["u0"])
     dv = (hole["v1"] - v) / (hole["v1"] - hole["v0"])
-    col = post(texel(DOOR_TEX, du, dv) * gain, seed, dark, exposure)
+    col = post(texel(DOOR_TEX, du, dv) * gain, seed, dark, exposure, W, H)
 
     canvas[sel, :3] = col[sel]
     canvas[sel, 3] = 1.0
@@ -881,15 +891,24 @@ def build_door(hole, cam, yaw, tex, closed, seed, dark=0.64, exposure=1.0):
 
 # ================================================================ 主流程
 
-# 转头帧数 —— 每侧这么多帧走完 90°。帧数越多转得越顺（代码在相邻两帧之间
+# ⚠️ **满转角**（度）—— 必须和 Assets/Scripts/UI/OfficeRoom.cs 的 `MaxYaw` 一致。
+#
+# 门片是**逐帧**渲的：帧号由 PrototypeScene.ApplyDoors 按 `|pan| × (帧数-1)` 线性取，
+# 所以满转（|pan|=1）落到的末帧，必须是相机 yaw = 这个角度时渲的那一张。
+# 两边对不上，门片就会和全景里的门洞错开（错开量 ≈ 两角之差对应的屏幕距离）。
+TURN_MAX_YAW_DEG = 70.0
+
+# 转头帧数 —— 每侧这么多帧走完 TURN_MAX_YAW_DEG。帧数越多转得越顺（代码在相邻两帧之间
 # 交叉淡化），但每帧都是一张 1920×1080 的图，别贪多。
 TURN_FRAMES = 10
 
 VIEWS = [("front", 0.0, 11)]
 for _i in range(1, TURN_FRAMES + 1):
-    VIEWS.append(("left_%02d" % _i, -math.pi / 2 * _i / TURN_FRAMES, 100 + _i))
+    VIEWS.append(("left_%02d" % _i,
+                  -math.radians(TURN_MAX_YAW_DEG) * _i / TURN_FRAMES, 100 + _i))
 for _i in range(1, TURN_FRAMES + 1):
-    VIEWS.append(("right_%02d" % _i, math.pi / 2 * _i / TURN_FRAMES, 200 + _i))
+    VIEWS.append(("right_%02d" % _i,
+                  math.radians(TURN_MAX_YAW_DEG) * _i / TURN_FRAMES, 200 + _i))
 
 VENT_TEX = None
 DOOR_TEX = None
@@ -932,12 +951,13 @@ def build_decals(tex):
         (2, True, 1.14, 1.14, 1.64, 1.64, draws[5]),
         (2, True, 1.70, 1.06, 2.20, 1.56, draws[6]),
         (2, True, 2.24, 1.46, 2.58, 1.80, draws[7]),
-        # 左墙（u = z, v = y）—— 左门在 u ∈ [-3.2, -2.0]，画挂在它前面那截墙上
-        (0, False, -1.12, 1.30, -0.56, 1.86, draws[0]),
-        (0, False, -0.48, 1.46, -0.02, 1.92, draws[2]),
+        # 左墙（u = z, v = y）—— 门洞在 u ∈ [-1.80, -0.60]（含门框挡到 -0.49），
+        # 画一律挂在门洞**前面**那截墙上（u > -0.49），否则会被门框整块裁掉
+        (0, False, -0.40, 1.30, 0.16, 1.86, draws[0]),
+        (0, False, 0.30, 1.46, 0.76, 1.92, draws[2]),
         # 右墙
-        (0, True, -1.12, 1.30, -0.56, 1.86, draws[1]),
-        (0, True, -0.48, 1.46, -0.02, 1.92, draws[3]),
+        (0, True, -0.40, 1.30, 0.16, 1.86, draws[1]),
+        (0, True, 0.30, 1.46, 0.76, 1.92, draws[3]),
     ]
 
 
@@ -956,14 +976,18 @@ def main():
 
     # 背景不再一张张渲了 —— 背景改成「全景条 + 旋转相机」（tools/render_pano.py），
     # 转头是相机真在转，不是若干张图交叉淡化。这里只留门片。
-    print("渲门片（%d 张）…" % (TURN_FRAMES * 2))
+    #
+    # 末帧的 yaw = TURN_MAX_YAW_DEG（满转），必须和 OfficeRoom.MaxYaw 一致。
+    print("渲门片（%d 张，满转 %.0f°）…" % (TURN_FRAMES * 2, TURN_MAX_YAW_DEG))
     for i in range(1, TURN_FRAMES + 1):
         path = os.path.join(DOOR_OUT, "ui_door_left_closed_%02d.png" % i)
-        build_door(LEFT_HOLE, CAM, -math.pi / 2 * i / TURN_FRAMES, tex, True,
+        build_door(LEFT_HOLE, CAM,
+                   -math.radians(TURN_MAX_YAW_DEG) * i / TURN_FRAMES, tex, True,
                    300 + i).save(path)
     for i in range(1, TURN_FRAMES + 1):
         path = os.path.join(DOOR_OUT, "ui_door_right_closed_%02d.png" % i)
-        build_door(RIGHT_HOLE, CAM, math.pi / 2 * i / TURN_FRAMES, tex, True,
+        build_door(RIGHT_HOLE, CAM,
+                   math.radians(TURN_MAX_YAW_DEG) * i / TURN_FRAMES, tex, True,
                    400 + i).save(path)
     print("  wrote %d 张门片" % (TURN_FRAMES * 2))
 

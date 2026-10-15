@@ -110,32 +110,35 @@ namespace NailongFNAF.UI
         /// 会被压到 1080 以下（当前 GameView 只有 925），写死 940 会把头顶切出屏幕。
         /// 按比例算，任何宽高比都放得下。
         ///
-        /// 这个数是照背景图反推的：左右两张背景的门洞顶边落在画布高度 16.6% 处，
+        /// 这个数是照几何反推的：满转（70°）时门洞顶边落在画布高度 **79.8%** 处，
         /// 立绘底边再沉下去一点（见 <see cref="SideCharacterSinkRatio"/>），
         /// 头顶就正好顶在门框下沿 —— 照原版那种「站在门里、下半身被裁掉」。
+        /// （0.878 − 0.08 = 0.798 ✓。改了门的位置或满转角就要重算这个数。）
         /// </summary>
-        private const float SideCharacterHeightRatio = 0.86f;
+        private const float SideCharacterHeightRatio = 0.878f;
 
         /// <summary>门口立绘默认沉到屏幕下方多少（占画布高度）。脚被裁掉，人才像站在门里。</summary>
         private const float SideCharacterSinkRatio = 0.08f;
 
         /// <summary>
-        /// 门口立绘的横向锚点 —— 门洞在屏幕上的中心位置（占画布宽度）。
-        /// 和 <c>tools/gen_placeholder_art.py</c> 里算出来的门洞投影一致：
-        /// 左门 x ∈ [8.0%, 33.2%]、右门 x ∈ [66.8%, 92.0%]，中心分别是 20.6% / 79.4%。
+        /// 门口立绘的横向锚点 —— **满转时门洞在屏幕上的中心位置**（占画布宽度）。
+        ///
+        /// 门开在座位旁边（世界偏航角 ±77°~103°、门心 ±90°），满转 70° 时门心差 20°，
+        /// 投影到 16:9 就是 x = 0.5 ∓ tan20°/1.8326 = **0.301 / 0.699**。
         ///
         /// **立绘按门心对齐，不是按屏幕边对齐** —— 换个宽高比不同的角色（牛来又高又窄、
         /// 袋鼠又矮又宽），贴着屏幕边摆就会各自偏到一边去。
         /// </summary>
-        private const float SideCharacterAnchorLeft = 0.206f;
-        private const float SideCharacterAnchorRight = 0.794f;
+        private const float SideCharacterAnchorLeft = 0.301f;
+        private const float SideCharacterAnchorRight = 0.699f;
 
         /// <summary>
         /// 镜头刚转起来时立绘停在哪儿 —— 故意放在画面外一点，
         /// 让它是**跟着门框从屏幕边缘滑进来**的，而不是凭空淡出来。
+        /// 取的是 <c>slide</c> 起点（turn = 0.74）时门心的屏幕 x。
         /// </summary>
-        private const float OffscreenAnchorLeft = -0.18f;
-        private const float OffscreenAnchorRight = 1.18f;
+        private const float OffscreenAnchorLeft = 0.071f;
+        private const float OffscreenAnchorRight = 0.929f;
 
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
@@ -218,32 +221,35 @@ namespace NailongFNAF.UI
         private const float JumpscareWidth = 1920f;
 
         /// <summary>
-        /// 镜头**直接跟鼠标**：鼠标在屏幕哪儿，镜头就朝哪儿 ——
-        /// 最左 = 满转左（-1）、正中 = 正前方（0）、最右 = 满转右（+1）。
-        /// （不再是原版那种「碰左右三分之一才满转、中间不动」的跳档。）
+        /// 镜头**直接跟鼠标**：鼠标在屏幕哪儿，镜头就朝哪儿。
         ///
         /// 这个值只是跟手的缓动时间（秒），用来吃掉鼠标的微小抖动，别调大 ——
         /// 大了镜头就会「拖」在鼠标后面。想完全 1:1 跟手就写 0。
         /// </summary>
         private const float TurnSmoothTime = 0.08f;
 
-        /// <summary>鼠标进入屏幕底部这个比例就切换监控。</summary>
-        private const float MonitorZone = 0.10f;
+        /// <summary>
+        /// 鼠标映射的「跟手区间」半宽：`pan = Clamp((x − 0.5) / K, −1, 1)`。
+        ///
+        /// K = 0.20 → 中间 40% 屏宽按比例跟手，**两边各 30% 是饱和区**（推到那儿视角
+        /// 就不再变）。饱和区是必需的：墙上的按钮跟着墙走，鼠标要靠「推过去」才能压住它，
+        /// 而绝对线性映射下墙上的点滑得比鼠标快（见 <see cref="BuildWallButtons"/>），
+        /// 永远追不上。有了饱和区，饱和区内 dx/dmouse = 0，按钮才稳。
+        ///
+        /// ⚠️ **别再调小**：按钮满转时的屏幕 x 随窗口宽高比变 —— 窗口越宽水平视场越大、
+        /// 按钮越往中间跑（16:9 时在 0.906，2.4:1 时只剩 0.798）。K 必须小到让**最靠中间
+        /// 的那个位置也落在饱和区里**（0.5 + 0.20 = 0.70）。K = 0.20 能覆盖到约 3.5:1 的窗口。
+        /// </summary>
+        private const float PanSaturationK = 0.20f;
 
         /// <summary>
-        /// 两侧墙上的 DOOR / LIGHT 按钮的淡入区间（按 |_pan|）。
-        ///
-        /// 门在侧墙上，**pan ≥ 0.72 左右门才进画面**（按钮也贴在门框那儿，
-        /// 见 <see cref="BuildWallButtons"/>），所以淡入要等到转过去才起 ——
-        /// 太早的话按钮会孤零零浮在没门的墙上。
-        /// 到 <see cref="WallButtonFadeEnd"/> 完全不透明、可点（要 alpha > 0.5 才收点击）。
-        ///
-        /// ⚠️ 这两个数和按钮位置（0.12 / 0.88）是一套：
-        /// 鼠标停在按钮上时 `|_pan|` = 0.76，所以 FadeEnd 必须 ≤ 0.76，
-        /// 而且 FadeStart 要够小，让按钮整条（pan 0.66~0.86）都过 0.5 那条线。改一个核另一个。
+        /// 判「玩家在看哪一边」的 |_pan| 阈值。只有噜噜的手电筒在用（`IsShiningAtFront`）。
+        /// 按**角度**定：0.64 × 满转 70° ≈ 45°，和满转 90° 时代一样，手感不变。
         /// </summary>
-        private const float WallButtonFadeStart = 0.54f;
-        private const float WallButtonFadeEnd = 0.74f;
+        private const float ViewSideThreshold = 0.64f;
+
+        /// <summary>鼠标进入屏幕底部这个比例就切换监控。</summary>
+        private const float MonitorZone = 0.10f;
 
         /// <summary>
         /// 监控机位表 —— 编号、房间名、前后顺序全照 FNAF 1 官方那张平面图。
@@ -654,8 +660,10 @@ namespace NailongFNAF.UI
                 float width = Screen.width;
                 float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
-                // 鼠标位置直接映射成转头量：左端 -1、正中 0、右端 +1。
-                _panTarget = Mathf.Clamp(x * 2f - 1f, -1f, 1f);
+                // 鼠标位置映射成转头量：正中 0，推到 |x−0.5| ≥ PanSaturationK 就满转。
+                // 中间那段按比例跟手，两边各留一段**饱和区**（推到那儿视角不再变）——
+                // 贴墙的按钮只有落在这段里，鼠标才压得住、点得到（见 BuildWallButtons）。
+                _panTarget = Mathf.Clamp((x - 0.5f) / PanSaturationK, -1f, 1f);
             }
             else
             {
@@ -666,13 +674,14 @@ namespace NailongFNAF.UI
             // 一点缓动：跟手，但不让鼠标的微小抖动直接抖到画面上
             _pan = Mathf.SmoothDamp(_pan, _panTarget, ref _panVelocity, TurnSmoothTime);
 
-            // 供敌人 AI 判断"玩家在看哪边"：转过一半才算真的看向那一侧
+            // 供敌人 AI 判断"玩家在看哪边"（只有噜噜的手电筒在用）。
+            // 阈值按**角度**定：0.64 × 70° ≈ 45°，和满转 90° 时代一样 —— 手电筒手感不变。
             ViewSide view;
-            if (_pan <= -0.5f)
+            if (_pan <= -ViewSideThreshold)
             {
                 view = ViewSide.Left;
             }
-            else if (_pan >= 0.5f)
+            else if (_pan >= ViewSideThreshold)
             {
                 view = ViewSide.Right;
             }
@@ -843,21 +852,9 @@ namespace NailongFNAF.UI
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
             _monitorMapGroup.blocksRaycasts = monitorUp;
 
-            // 两侧墙上的按钮：跟着转头淡入淡出，看监控时收起来
-            //
-            // ⚠️ 淡入区间（WallButtonFadeStart/End）必须和按钮位置配套，否则按不到：
-            // 镜头跟鼠标 —— 鼠标停在按钮上时 |_pan| 就等于 2×按钮屏幕x − 1
-            // （按钮在 0.12 / 0.88 → |_pan| = 0.76），而下面 blocksRaycasts 要
-            // alpha > 0.5 才收点击。淡入太靠后（|_pan| 到不了）按钮就永远点不着。
-            float shown = Mathf.Clamp01(
-                (Mathf.Abs(_pan) - WallButtonFadeStart) / (WallButtonFadeEnd - WallButtonFadeStart));
-            float leftAlpha = monitorUp || locked || _pan >= 0f ? 0f : shown;
-            float rightAlpha = monitorUp || locked || _pan <= 0f ? 0f : shown;
-
-            _leftWallGroup.alpha = leftAlpha;
-            _rightWallGroup.alpha = rightAlpha;
-            _leftWallGroup.blocksRaycasts = leftAlpha > 0.5f;
-            _rightWallGroup.blocksRaycasts = rightAlpha > 0.5f;
+            // 两侧墙上的按钮：贴在墙上 —— 每帧按世界点投影摆过去（看监控 / 断电时收起）。
+            // 视角没转过去时按钮本来就在画面外，所以不用额外做淡入。
+            ApplyWallButtons(monitorUp || locked);
 
             ApplyFlashlight(gm, monitorUp, locked);
 
@@ -963,8 +960,9 @@ namespace NailongFNAF.UI
             EnemyId id;
             bool present = TryGetEnemyAtSide(gm, side, out id);
 
-            // 门口是**随镜头扫进画面**的：镜头转到 70° 上下，门框才从屏幕边缘露出来。
-            // 所以立绘不能按「转了多少」线性淡入 —— 那会在门还在画面外的时候就先冒出来。
+            // 门口是**随镜头扫进画面**的：门心在世界偏航角 ±90°，半视场 42.5°，
+            // 所以镜头转到 47.5°（turn ≈ 0.68）门心才从屏幕边缘露出来。
+            // 立绘不能按「转了多少」线性淡入 —— 那会在门还在画面外的时候就先冒出来。
             // 这两条曲线都对着门洞进画面的角度来：
             //   · 0.70 之前完全不显示（门还没进来）
             //   · 0.74 → 1.0 之间从画面外滑到门心，同时淡入
@@ -1021,8 +1019,8 @@ namespace NailongFNAF.UI
             {
                 case EnemyId.Niulai:
                     // 全身照含腿，同一个「高度」下身体显得小一圈，所以放大一点、沉得更深。
-                    // 头顶要落在门框下沿（画布高 22%）：头顶 = 1 - 高度 + 下沉
-                    heightRatio = 0.94f;
+                    // 头顶要落在门框下沿（画布高 79.8%）：头顶 = 高度 − 下沉 = 0.958 − 0.16 ✓
+                    heightRatio = 0.958f;
                     sinkRatio = 0.16f;
                     break;
 
@@ -1922,31 +1920,41 @@ namespace NailongFNAF.UI
             _doorBlend.gameObject.SetActive(false);
         }
 
+        /// <summary>墙上 DOOR / LIGHT 按钮的尺寸（画布逻辑像素）。</summary>
+        private static readonly Vector2 WallButtonSize = new Vector2(190f, 62f);
+
+        // 墙上按钮锚的**世界点**（米）。在侧墙上、门框**外侧**一点：
+        // 门洞 z ∈ [-1.80, -0.60]，按钮取 z = -1.976（门框外沿 -1.80 再往外 0.18m），
+        // 世界偏航角约 ±106.6°。高度按「门在上、灯在下」取 1.55 / 1.05。
+        private static readonly Vector3 DoorButtonWorldRight = new Vector3(2.6f, 1.55f, -1.976f);
+        private static readonly Vector3 LightButtonWorldRight = new Vector3(2.6f, 1.05f, -1.976f);
+        private static readonly Vector3 DoorButtonWorldLeft = new Vector3(-2.6f, 1.55f, -1.976f);
+        private static readonly Vector3 LightButtonWorldLeft = new Vector3(-2.6f, 1.05f, -1.976f);
+
         /// <summary>
         /// 两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。
-        /// 位置**贴着门框**（屏幕 x = 0.12 / 0.88）—— 门在侧墙上（世界偏航角约 ±107°~128°），
-        /// 镜头要转到 pan ≥ 0.72 门才进画面，而鼠标停在按钮上时 |_pan| = 2×0.88−1 = 0.76，
-        /// 正好是门框内沿刚进画面的角度 —— 所以按钮就落在门框边上。
         ///
-        /// ⚠️ 按钮是**固定屏幕位置**，不是挂在 3D 墙上的 —— 因为镜头跟鼠标，
-        /// 鼠标位置同时决定转头量：按钮要是跟着 3D 点走，鼠标一挪过去镜头就跟着转、
-        /// 按钮又被甩开，永远追不上（不稳定平衡）。固定屏幕位置才追得上。
-        /// 位置和 <see cref="WallButtonFadeStart"/>/<see cref="WallButtonFadeEnd"/> 是一套，
-        /// 改一个就得核另一个。
+        /// **按钮贴在墙上**（不是钉在屏幕固定位置）：锚点是墙上一个固定的世界点
+        /// （<see cref="DoorButtonWorld"/> 等），每帧投影到画布上摆过去 —— 转头时
+        /// 按钮跟着墙一起移动，像画在墙上。
+        ///
+        /// 位置贴着门框**外侧**：门洞世界偏航角 ±77°~103°，按钮世界点约 ±106.6°，
+        /// 满转 70° 时投到屏幕 x ≈ 0.905（门框外沿在 0.854），正好紧挨着门框。
+        ///
+        /// ⚠️ **必须靠 <see cref="PanSaturationK"/> 那段饱和区才能点得到**：
+        /// 鼠标位置同时决定转头量，按钮又跟着墙走 —— 若映射是绝对线性的，鼠标每挪 1 单位，
+        /// 墙上的点要滑 `1.09 × 满转角(rad) × sec²Δ` 单位（满转 70°、Δ=34° 时约 1.6），
+        /// 比鼠标快，**永远追不上**。饱和区里 `dx/dmouse = 0`，按钮就钉住不动了。
         /// </summary>
         private void BuildWallButtons()
         {
             _leftWallGroup = MakeGroup("WallLeft");
-            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR",
-                new Vector2(0.12f, 0.66f), OnDoorLeft);
-            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT",
-                new Vector2(0.12f, 0.34f), OnLightLeft);
+            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR", OnDoorLeft);
+            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT", OnLightLeft);
 
             _rightWallGroup = MakeGroup("WallRight");
-            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR",
-                new Vector2(0.88f, 0.66f), OnDoorRight);
-            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT",
-                new Vector2(0.88f, 0.34f), OnLightRight);
+            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR", OnDoorRight);
+            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT", OnLightRight);
         }
 
         private void BuildMonitorLayer()
@@ -2253,13 +2261,105 @@ namespace NailongFNAF.UI
             return group;
         }
 
+        /// <summary>
+        /// 墙上按钮。位置**不在建的时候定** —— 锚点钉在画布中心，之后每帧由
+        /// <see cref="ApplyWallButtons"/> 按世界点投影摆过去。
+        /// </summary>
         private Image MakeWallButton(Transform parent, string name, string label,
-            Vector2 anchor, UnityEngine.Events.UnityAction onClick)
+            UnityEngine.Events.UnityAction onClick)
         {
-            var button = MakeButton(parent, name, label, anchor, Vector2.zero,
-                new Vector2(190f, 62f), onClick);
+            var button = MakeButton(parent, name, label, new Vector2(0.5f, 0.5f), Vector2.zero,
+                WallButtonSize, onClick);
 
             return button.GetComponent<Image>();
+        }
+
+        /// <summary>
+        /// 把一个固定世界点投到 ScreenSpaceOverlay 画布上的本地坐标。
+        /// 返回 false = 点在相机背后（或没有相机/画布），调用方应把按钮收起来。
+        ///
+        /// ⚠️ `WorldToScreenPoint` 在点跑到相机背后时会返回**镜像过的** x/y，
+        /// 必须靠 `z <= 0` 丢掉，否则按钮会瞬移到屏幕另一边。
+        /// </summary>
+        private bool TryProjectToCanvas(Vector3 world, out Vector2 canvasLocal)
+        {
+            canvasLocal = Vector2.zero;
+
+            var cam = _room != null ? _room.Camera : null;
+            if (cam == null || _canvas == null)
+            {
+                return false;
+            }
+
+            Vector3 screen = cam.WorldToScreenPoint(world);
+            if (screen.z <= 0f)
+            {
+                return false;
+            }
+
+            // overlay 画布没有相机 → camera 参数传 null。缩放（CanvasScaler）它已经算进去了。
+            return RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                (RectTransform)_canvas.transform, screen, null, out canvasLocal);
+        }
+
+        /// <summary>
+        /// 每帧把墙上按钮摆到各自世界点的投影处。**必须在 `_room.SetPan(_pan)` 之后调** ——
+        /// 相机朝向变了投影才准。
+        ///
+        /// 投影失败（点在相机背后）或落在画布外太远就整组收起来 —— 视角没转过去时
+        /// 按钮本来就在画面外，不用额外做淡入。
+        /// </summary>
+        private void ApplyWallButtons(bool hidden)
+        {
+            ApplyWallSide(_leftWallGroup, _doorLeftButton, _lightLeftButton, hidden,
+                DoorButtonWorldLeft, LightButtonWorldLeft);
+            ApplyWallSide(_rightWallGroup, _doorRightButton, _lightRightButton, hidden,
+                DoorButtonWorldRight, LightButtonWorldRight);
+        }
+
+        private void ApplyWallSide(CanvasGroup group, Image doorButton, Image lightButton,
+            bool hidden, Vector3 doorWorld, Vector3 lightWorld)
+        {
+            if (hidden)
+            {
+                group.alpha = 0f;
+                group.blocksRaycasts = false;
+                return;
+            }
+
+            Vector2 doorPos;
+            Vector2 lightPos;
+            bool okDoor = TryProjectToCanvas(doorWorld, out doorPos) && InsideCanvas(doorPos);
+            bool okLight = TryProjectToCanvas(lightWorld, out lightPos) && InsideCanvas(lightPos);
+
+            PlaceWallButton(doorButton, okDoor, doorPos);
+            PlaceWallButton(lightButton, okLight, lightPos);
+
+            bool any = okDoor || okLight;
+            group.alpha = any ? 1f : 0f;
+            group.blocksRaycasts = any;
+        }
+
+        private void PlaceWallButton(Image button, bool visible, Vector2 canvasLocal)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.gameObject.SetActive(visible);
+            if (visible)
+            {
+                ((RectTransform)button.transform).anchoredPosition = canvasLocal;
+            }
+        }
+
+        /// <summary>投影点是不是落在画布内（留半个按钮的余量，让按钮能贴着边露出半个）。</summary>
+        private bool InsideCanvas(Vector2 canvasLocal)
+        {
+            var rect = (RectTransform)_canvas.transform;
+            Vector2 half = rect.rect.size * 0.5f + WallButtonSize * 0.5f;
+            return Mathf.Abs(canvasLocal.x) <= half.x && Mathf.Abs(canvasLocal.y) <= half.y;
         }
 
         private Image MakeFullScreenImage(string name, Color color, bool raycast = false)
