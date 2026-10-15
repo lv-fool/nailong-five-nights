@@ -104,9 +104,6 @@ namespace NailongFNAF.UI
             }
         }
 
-        /// <summary>鼠标进入屏幕左右各这个比例就转头（左右各三分之一）。</summary>
-        private const float TurnZone = 1f / 3f;
-
         /// <summary>
         /// 门口立绘占画布高度的比例。
         /// **别改回写死的像素** —— CanvasScaler 按宽高折中缩放，宽屏下画布的逻辑高度
@@ -221,13 +218,14 @@ namespace NailongFNAF.UI
         private const float JumpscareWidth = 1920f;
 
         /// <summary>
-        /// 转头平滑时间（秒）。越大越慢、越"重"。
+        /// 镜头**直接跟鼠标**：鼠标在屏幕哪儿，镜头就朝哪儿 ——
+        /// 最左 = 满转左（-1）、正中 = 正前方（0）、最右 = 满转右（+1）。
+        /// （不再是原版那种「碰左右三分之一才满转、中间不动」的跳档。）
         ///
-        /// **别调回 0.12** —— 那时候转完只要零点几秒，看起来像从正面硬切到侧面。
-        /// 现在背景是一整套逐帧的镜头序列（10 帧走完 90°），得给它时间一帧帧扫过去，
-        /// 玩家才看得出「镜头在转」。0.3 秒左右走完，是个能看清又不拖沓的节奏。
+        /// 这个值只是跟手的缓动时间（秒），用来吃掉鼠标的微小抖动，别调大 ——
+        /// 大了镜头就会「拖」在鼠标后面。想完全 1:1 跟手就写 0。
         /// </summary>
-        private const float TurnSmoothTime = 0.30f;
+        private const float TurnSmoothTime = 0.08f;
 
         /// <summary>鼠标进入屏幕底部这个比例就切换监控。</summary>
         private const float MonitorZone = 0.10f;
@@ -631,7 +629,7 @@ namespace NailongFNAF.UI
         }
 
         // ---------------------------------------------------------------
-        // 视角：鼠标进左右三分之一就平滑转头
+        // 视角：镜头直接跟着鼠标走
         // ---------------------------------------------------------------
 
         private void UpdateView(GameManager gm)
@@ -641,18 +639,8 @@ namespace NailongFNAF.UI
                 float width = Screen.width;
                 float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
-                if (x <= TurnZone)
-                {
-                    _panTarget = -1f;
-                }
-                else if (x >= 1f - TurnZone)
-                {
-                    _panTarget = 1f;
-                }
-                else
-                {
-                    _panTarget = 0f;
-                }
+                // 鼠标位置直接映射成转头量：左端 -1、正中 0、右端 +1。
+                _panTarget = Mathf.Clamp(x * 2f - 1f, -1f, 1f);
             }
             else
             {
@@ -660,7 +648,7 @@ namespace NailongFNAF.UI
                 _panTarget = 0f;
             }
 
-            // SmoothDamp 让转头有加速与减速，不是硬切
+            // 一点缓动：跟手，但不让鼠标的微小抖动直接抖到画面上
             _pan = Mathf.SmoothDamp(_pan, _panTarget, ref _panVelocity, TurnSmoothTime);
 
             // 供敌人 AI 判断"玩家在看哪边"：转过一半才算真的看向那一侧
