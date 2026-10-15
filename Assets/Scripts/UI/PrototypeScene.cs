@@ -232,13 +232,18 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 两侧墙上的 DOOR / LIGHT 按钮的淡入区间（按 |_pan|）。
-        /// 转过一点点就开始出现，到 <see cref="WallButtonFadeEnd"/> 就完全不透明、可点。
         ///
-        /// **别调大**：镜头跟鼠标，鼠标停在按钮上时 |_pan| 只有 0.28 左右（见 UpdateVisuals），
-        /// 淡入太靠后按钮就永远点不着了。
+        /// 门在侧墙上，**pan ≥ 0.72 左右门才进画面**（按钮也贴在门框那儿，
+        /// 见 <see cref="BuildWallButtons"/>），所以淡入要等到转过去才起 ——
+        /// 太早的话按钮会孤零零浮在没门的墙上。
+        /// 到 <see cref="WallButtonFadeEnd"/> 完全不透明、可点（要 alpha > 0.5 才收点击）。
+        ///
+        /// ⚠️ 这两个数和按钮位置（0.12 / 0.88）是一套：
+        /// 鼠标停在按钮上时 `|_pan|` = 0.76，所以 FadeEnd 必须 ≤ 0.76，
+        /// 而且 FadeStart 要够小，让按钮整条（pan 0.66~0.86）都过 0.5 那条线。改一个核另一个。
         /// </summary>
-        private const float WallButtonFadeStart = 0.06f;
-        private const float WallButtonFadeEnd = 0.26f;
+        private const float WallButtonFadeStart = 0.54f;
+        private const float WallButtonFadeEnd = 0.74f;
 
         /// <summary>
         /// 监控机位表 —— 编号、房间名、前后顺序全照 FNAF 1 官方那张平面图。
@@ -840,10 +845,10 @@ namespace NailongFNAF.UI
 
             // 两侧墙上的按钮：跟着转头淡入淡出，看监控时收起来
             //
-            // ⚠️ 淡入必须**很快就满**（|_pan| 到 0.26 就全亮），否则按不到：
-            // 镜头是跟鼠标的，鼠标停在按钮上时 |_pan| 只有 0.28 左右
-            // （按钮锚点 0.36 / 0.64 → pan = 2×0.64−1 = 0.28），
-            // 而下面 blocksRaycasts 要 alpha > 0.5 才收点击 —— 淡入太慢就永远点不着。
+            // ⚠️ 淡入区间（WallButtonFadeStart/End）必须和按钮位置配套，否则按不到：
+            // 镜头跟鼠标 —— 鼠标停在按钮上时 |_pan| 就等于 2×按钮屏幕x − 1
+            // （按钮在 0.12 / 0.88 → |_pan| = 0.76），而下面 blocksRaycasts 要
+            // alpha > 0.5 才收点击。淡入太靠后（|_pan| 到不了）按钮就永远点不着。
             float shown = Mathf.Clamp01(
                 (Mathf.Abs(_pan) - WallButtonFadeStart) / (WallButtonFadeEnd - WallButtonFadeStart));
             float leftAlpha = monitorUp || locked || _pan >= 0f ? 0f : shown;
@@ -1919,22 +1924,29 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。
-        /// 位置贴在**门框靠里那一侧**的墙上 —— 摆太靠屏幕边就会被门口立绘整个盖住。
-        /// （门洞在屏幕上的中心是 14.9% / 85.1%，宽度约 30%。）
+        /// 位置**贴着门框**（屏幕 x = 0.12 / 0.88）—— 门在侧墙上（世界偏航角约 ±107°~128°），
+        /// 镜头要转到 pan ≥ 0.72 门才进画面，而鼠标停在按钮上时 |_pan| = 2×0.88−1 = 0.76，
+        /// 正好是门框内沿刚进画面的角度 —— 所以按钮就落在门框边上。
+        ///
+        /// ⚠️ 按钮是**固定屏幕位置**，不是挂在 3D 墙上的 —— 因为镜头跟鼠标，
+        /// 鼠标位置同时决定转头量：按钮要是跟着 3D 点走，鼠标一挪过去镜头就跟着转、
+        /// 按钮又被甩开，永远追不上（不稳定平衡）。固定屏幕位置才追得上。
+        /// 位置和 <see cref="WallButtonFadeStart"/>/<see cref="WallButtonFadeEnd"/> 是一套，
+        /// 改一个就得核另一个。
         /// </summary>
         private void BuildWallButtons()
         {
             _leftWallGroup = MakeGroup("WallLeft");
             _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR",
-                new Vector2(0.36f, 0.66f), OnDoorLeft);
+                new Vector2(0.12f, 0.66f), OnDoorLeft);
             _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT",
-                new Vector2(0.36f, 0.34f), OnLightLeft);
+                new Vector2(0.12f, 0.34f), OnLightLeft);
 
             _rightWallGroup = MakeGroup("WallRight");
             _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR",
-                new Vector2(0.64f, 0.66f), OnDoorRight);
+                new Vector2(0.88f, 0.66f), OnDoorRight);
             _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT",
-                new Vector2(0.64f, 0.34f), OnLightRight);
+                new Vector2(0.88f, 0.34f), OnLightRight);
         }
 
         private void BuildMonitorLayer()
