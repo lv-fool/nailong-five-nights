@@ -21,9 +21,6 @@ namespace NailongFNAF.EditorTools
         private const string MonitoringDir = "Assets/Art/Monitoring/";
         private const string CharacterDir = "Assets/Art/Characters/";
 
-        /// <summary>每侧转头的帧数 —— 必须和 tools/gen_placeholder_art.py 的 TURN_FRAMES 一致。</summary>
-        private const int TurnFrames = 10;
-
         [MenuItem("奶龙/5. 接入素材", false, 14)]
         public static void Bind()
         {
@@ -38,9 +35,9 @@ namespace NailongFNAF.EditorTools
                 return;
             }
 
-            // 办公室已经改成 3D 全景 + 旋转相机（OfficeRoom），不再需要
-            // 「左/右各十张背景帧」—— 背景是 Assets/Resources/office_pano.png。
-            // 带 alpha 的（门片、立绘、监控）必须不压缩导入，压缩会让透明边缘出色块。
+            // 办公室已经改成 3D 全景 + 旋转相机（OfficeRoom），门也是 3D 世界物体
+            // （贴在门洞里，不再是全屏叠层）—— 门板是单张正视贴图。
+            // 带 alpha 的（门板、立绘、监控）必须不压缩导入，压缩会让透明边缘出色块。
             EnsurePanoImport();
 
             foreach (var name in AlphaSpriteNames())
@@ -53,8 +50,8 @@ namespace NailongFNAF.EditorTools
             var characters = LoadCharacters();
 
             prototype.SetArtwork(
-                LoadDoorSequence("ui_door_left_closed_{0:00}"),
-                LoadDoorSequence("ui_door_right_closed_{0:00}"),
+                LoadSprite("door_face_left"),
+                LoadSprite("door_face_right"),
                 LoadMonitorFrames(),
                 characters);
 
@@ -84,23 +81,14 @@ namespace NailongFNAF.EditorTools
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
 
-            Debug.Log("[奶龙] 素材已接入：背景镜头序列 " + (TurnFrames * 2 + 1) + " 帧、"
-                + "门片序列 " + (TurnFrames * 2) + " 帧、监控画面 11 张、"
+            Debug.Log("[奶龙] 素材已接入：背景全景、门板 2 张、监控画面 11 张、"
                 + "角色立绘 " + characters.Length + " 套、音频 10 条。按 Play 看效果。");
         }
 
         private static IEnumerable<string> AlphaSpriteNames()
         {
-            yield return "ui_door_left_open";
-            yield return "ui_door_left_closed";
-            yield return "ui_door_right_open";
-            yield return "ui_door_right_closed";
-
-            for (int i = 1; i <= TurnFrames; i++)
-            {
-                yield return string.Format("ui_door_left_closed_{0:00}", i);
-                yield return string.Format("ui_door_right_closed_{0:00}", i);
-            }
+            yield return "door_face_left";
+            yield return "door_face_right";
 
             yield return "mon_1a";
             yield return "mon_1b";
@@ -126,19 +114,6 @@ namespace NailongFNAF.EditorTools
                     yield return "char_" + code + "_" + pose;
                 }
             }
-        }
-
-        /// <summary>门片序列。第 0 帧是正前方 —— 那个角度看不到门，留空。</summary>
-        private static Sprite[] LoadDoorSequence(string frameFormat)
-        {
-            var frames = new Sprite[TurnFrames + 1];
-
-            for (int i = 1; i <= TurnFrames; i++)
-            {
-                frames[i] = LoadSprite(string.Format(frameFormat, i));
-            }
-
-            return frames;
         }
 
         /// <summary>

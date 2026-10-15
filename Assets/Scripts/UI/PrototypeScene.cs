@@ -104,51 +104,20 @@ namespace NailongFNAF.UI
             }
         }
 
-        /// <summary>
-        /// 门口立绘占画布高度的比例。
-        /// **别改回写死的像素** —— CanvasScaler 按宽高折中缩放，宽屏下画布的逻辑高度
-        /// 会被压到 1080 以下（当前 GameView 只有 925），写死 940 会把头顶切出屏幕。
-        /// 按比例算，任何宽高比都放得下。
-        ///
-        /// 这个数是照几何反推的：满转（70°）时门洞顶边落在画布高度 **79.8%** 处，
-        /// 立绘底边再沉下去一点（见 <see cref="SideCharacterSinkRatio"/>），
-        /// 头顶就正好顶在门框下沿 —— 照原版那种「站在门里、下半身被裁掉」。
-        /// （0.878 − 0.08 = 0.798 ✓。改了门的位置或满转角就要重算这个数。）
-        /// </summary>
-        private const float SideCharacterHeightRatio = 0.878f;
-
-        /// <summary>门口立绘默认沉到屏幕下方多少（占画布高度）。脚被裁掉，人才像站在门里。</summary>
-        private const float SideCharacterSinkRatio = 0.08f;
-
-        /// <summary>
-        /// 门口立绘的横向锚点 —— **满转时门洞在屏幕上的中心位置**（占画布宽度）。
-        ///
-        /// 门开在座位旁边（世界偏航角 ±77°~103°、门心 ±90°），满转 70° 时门心差 20°，
-        /// 投影到 16:9 就是 x = 0.5 ∓ tan20°/1.8326 = **0.301 / 0.699**。
-        ///
-        /// **立绘按门心对齐，不是按屏幕边对齐** —— 换个宽高比不同的角色（牛来又高又窄、
-        /// 袋鼠又矮又宽），贴着屏幕边摆就会各自偏到一边去。
-        /// </summary>
-        private const float SideCharacterAnchorLeft = 0.301f;
-        private const float SideCharacterAnchorRight = 0.699f;
-
-        /// <summary>
-        /// 镜头刚转起来时立绘停在哪儿 —— 故意放在画面外一点，
-        /// 让它是**跟着门框从屏幕边缘滑进来**的，而不是凭空淡出来。
-        /// 取的是 <c>slide</c> 起点（turn = 0.74）时门心的屏幕 x。
-        /// </summary>
-        private const float OffscreenAnchorLeft = 0.071f;
-        private const float OffscreenAnchorRight = 0.929f;
-
         /// <summary>监控画面里立绘的高度。</summary>
         private const float MonitorCharacterHeight = 660f;
 
-        /// <summary>正前方那个立绘（噜噜）占画布高度的比例 —— 比两侧大一圈，它是正对着你的。</summary>
-        private const float FrontCharacterHeightRatio = 0.80f;
+        // 3D 世界物体的排序层。门板在敌人后面一层（敌人站门里，门关上门板挡住它）；
+        // 都比相机近，不会和全景内壁交叠闪烁（Sprite 渲染走 sortingOrder，同相机深度）。
+        private const int SpriteSortDoor = -1;
+        private const int SpriteSortEnemy = 0;
+
+        /// <summary>正门口（前墙门洞 z=3.0），噜噜站在那儿。</summary>
+        private static readonly Vector3 FrontDoorCenter = new Vector3(0f, 1.1f, 3.0f);
 
         /// <summary>
-        /// 画布的逻辑高度。**不能当成 1080 用** —— 立绘尺寸都按它折算，
-        /// 宽屏下才不会切到头顶。
+        /// 画布的逻辑高度。跳杀立绘等满屏 UI 按它铺。**不能当成 1080 用** ——
+        /// CanvasScaler 按宽高折中缩放，宽屏下画布的逻辑高度会被压到 1080 以下。
         /// </summary>
         private float CanvasHeight
         {
@@ -163,29 +132,6 @@ namespace NailongFNAF.UI
                 return height > 1f ? height : 1080f;
             }
         }
-
-        private float SideCharacterHeight
-        {
-            get { return CanvasHeight * SideCharacterHeightRatio; }
-        }
-
-        private float FrontCharacterHeight
-        {
-            get { return CanvasHeight * FrontCharacterHeightRatio; }
-        }
-
-        /// <summary>
-        /// 正前方立绘的**下边缘切在哪儿**（占画布高度，从底往上算）。
-        ///
-        /// 噜噜是从后墙那道正门探进来的，**桌子在它前面** —— 所以膝盖以下不该看得见，
-        /// 得被桌沿挡住。背景图里桌子的远边正好落在画布高度 62.8% 处（从上算），
-        /// 也就是从下算 37.2%，这里对齐那条线，腿就「消失」在桌沿后面了。
-        /// **改了 <c>tools/gen_placeholder_art.py</c> 里的桌子位置或视场角，这个数要跟着重算。**
-        /// </summary>
-        private const float FrontCharacterClipBottom = 0.372f;
-
-        /// <summary>正前方立绘贴屏幕底边多高。要高于监控热区（0.10 × 1080 = 108）。</summary>
-        private const float FrontCharacterBottom = 40f;
 
         /// <summary>
         /// 手电筒按钮中心离屏幕底边多高。按钮半高 30，所以底边在 172 - 30 = 142，
@@ -441,9 +387,9 @@ namespace NailongFNAF.UI
         private static readonly Color CamBoxText = new Color(0.86f, 0.93f, 0.86f, 1f);
 
         [Header("素材（留空则用色块占位）")]
-        /// <summary>门片也是逐帧的 —— 门关着时，门在画面上的位置随镜头一起动。</summary>
-        [SerializeField] private Sprite[] _doorLeftClosedFrames;
-        [SerializeField] private Sprite[] _doorRightClosedFrames;
+        /// <summary>门板正视贴图 —— 3D 世界里的门（吊在门洞里，不再是 UI 叠层）。</summary>
+        [SerializeField] private Sprite _doorFaceLeft;
+        [SerializeField] private Sprite _doorFaceRight;
 
         [SerializeField] private Sprite[] _monitorFrames;
 
@@ -455,25 +401,19 @@ namespace NailongFNAF.UI
         /// <summary>3D 办公室（全景条 + 旋转相机）。背景是它，不是背景帧序列。</summary>
         private OfficeRoom _room;
 
+        // 3D 世界物体：门板 + 门口敌人。挂在场景根（和 OfficeRoom 平级），
+        // 由相机透视 —— 不再是 UI 叠层，也就没有「转场/滑入淡入」那套特效。
+        private SpriteRenderer _doorLeft3D;
+        private SpriteRenderer _doorRight3D;
+        private SpriteRenderer _enemySideLeft;
+        private SpriteRenderer _enemySideRight;
+        private SpriteRenderer _enemyFront;
+
         /// <summary>
         /// 断电时盖全屏的黑幕。平时整层透明，露出后面的 3D 房间（见 OfficeRoom）。
         /// </summary>
         private Image _bgBase;
 
-        private Image _sideLeftCharacter;
-        private Image _sideRightCharacter;
-
-        /// <summary>正前方那个立绘 —— 噜噜从正门来，站在这儿。</summary>
-        private Image _frontCharacter;
-
-        /// <summary>正前方立绘的裁切遮罩（桌沿以下裁掉）。</summary>
-        private RectMask2D _frontCharacterClip;
-
-        private float _frontCharacterClipPadding = -1f;
-
-        /// <summary>门片两层，跟背景同样两层结构。</summary>
-        private Image _doorBase;
-        private Image _doorBlend;
         private CanvasGroup _leftWallGroup;
         private CanvasGroup _rightWallGroup;
         private Image _doorLeftButton;
@@ -829,15 +769,11 @@ namespace NailongFNAF.UI
 
                 if (_hasJumpscare)
                 {
-                    HideDoors();
-                    HideSideCharacters();
-                    HideFrontCharacter();
+                    HideWorldObjects();
                 }
                 else
                 {
-                    ApplyDoors(gm);
-                    ApplySideCharacters(gm);
-                    ApplyFrontCharacter(gm);
+                    ApplyWorldObjects(gm);
                 }
             }
 
@@ -894,140 +830,118 @@ namespace NailongFNAF.UI
 
         private void HideDoors()
         {
-            _doorBase.gameObject.SetActive(false);
-            _doorBlend.gameObject.SetActive(false);
+            if (_doorLeft3D != null)
+            {
+                _doorLeft3D.gameObject.SetActive(false);
+            }
+
+            if (_doorRight3D != null)
+            {
+                _doorRight3D.gameObject.SetActive(false);
+            }
         }
 
         /// <summary>
-        /// 门片跟着镜头一起走 —— 帧序号直接由 _pan 按自己的帧数算，
-        /// 满转（|_pan| = 1）正好落在序列末帧，那一帧是正侧面对准相机的那一张。
-        /// 原来是从背景序列借帧号（背景改用 3D 相机后就没了），现在自己算。
+        /// 门是 3D 世界物体：关上门就把门板 SpriteRenderer 点亮（立在门洞里），
+        /// 开门就熄灭。**没有转场** —— 门就在那儿，开关是即时的（叠层那套
+        /// 逐帧门片 / 交叉淡化已经删掉）。
         /// </summary>
         private void ApplyDoors(GameManager gm)
         {
-            Sprite[] frames = _pan < 0f ? _doorLeftClosedFrames : _doorRightClosedFrames;
-            bool closed = _pan < 0f ? gm.LeftDoorClosed : gm.RightDoorClosed;
-
-            if (!closed || frames == null || frames.Length <= 1)
+            if (_doorLeft3D == null || _doorRight3D == null)
             {
-                HideDoors();
                 return;
             }
 
-            // 第 0 帧留空（正前方看不到门），所以有效帧是 1..n-1
-            float t = Mathf.Abs(Mathf.Clamp(_pan, -1f, 1f)) * (frames.Length - 1);
-            int i0 = Mathf.Clamp(Mathf.FloorToInt(t), 0, frames.Length - 1);
-            int i1 = Mathf.Min(i0 + 1, frames.Length - 1);
-            float frac = Mathf.Clamp01(t - i0);
-
-            SetDoorLayer(_doorBase, At(frames, i0), 1f);
-            SetDoorLayer(_doorBlend, i1 != i0 ? At(frames, i1) : null, frac);
-        }
-
-        private static Sprite At(Sprite[] frames, int index)
-        {
-            return index >= 0 && index < frames.Length ? frames[index] : null;
-        }
-
-        private void SetDoorLayer(Image image, Sprite sprite, float alpha)
-        {
-            if (sprite == null || alpha <= 0.001f)
-            {
-                image.gameObject.SetActive(false);
-                return;
-            }
-
-            image.gameObject.SetActive(true);
-            image.sprite = sprite;
-
-            Color color = Color.white;
-            color.a = alpha;
-            image.color = color;
+            // 门开着：整层看不见（门洞露出来，走廊在那头）
+            _doorLeft3D.gameObject.SetActive(gm.LeftDoorClosed && _doorFaceLeft != null);
+            _doorRight3D.gameObject.SetActive(gm.RightDoorClosed && _doorFaceRight != null);
         }
 
         // ---------------------------------------------------------------
-        // 敌人立绘
+        // 敌人立绘（3D 世界物体）
         // ---------------------------------------------------------------
 
-        private void ApplySideCharacters(GameManager gm)
+        /// <summary>
+        /// 每帧驱动门板 + 3 个站门口的敌人（世界 SpriteRenderer）。
+        /// 门关 → 门板立起来；门开 + 灯亮 → 对应门口的敌人现身。没有转场。
+        /// </summary>
+        private void ApplyWorldObjects(GameManager gm)
         {
-            ApplySideCharacter(gm, Side.Left, _sideLeftCharacter);
-            ApplySideCharacter(gm, Side.Right, _sideRightCharacter);
-        }
+            ApplyDoors(gm);
 
-        private void ApplySideCharacter(GameManager gm, Side side, Image image)
-        {
-            EnemyId id;
-            bool present = TryGetEnemyAtSide(gm, side, out id);
-
-            // 门口是**随镜头扫进画面**的：门心在世界偏航角 ±90°，半视场 42.5°，
-            // 所以镜头转到 47.5°（turn ≈ 0.68）门心才从屏幕边缘露出来。
-            // 立绘不能按「转了多少」线性淡入 —— 那会在门还在画面外的时候就先冒出来。
-            // 这两条曲线都对着门洞进画面的角度来：
-            //   · 0.70 之前完全不显示（门还没进来）
-            //   · 0.74 → 1.0 之间从画面外滑到门心，同时淡入
-            //
-            // ⚠️ 取的是**带符号**的 _pan：往左转时右边门口的人不该跟着冒出来。
-            float turn = Mathf.Clamp01(side == Side.Left ? -_pan : _pan);
-            float look = Mathf.Clamp01((turn - 0.70f) / 0.24f);
-            float alpha = present ? look : 0f;
-
-            if (alpha <= 0.01f)
+            if (_enemySideLeft == null || _enemySideRight == null || _enemyFront == null)
             {
-                image.gameObject.SetActive(false);
                 return;
             }
 
-            // 门口站着的都是门类敌人（噜噜改走正门了），用站姿
-            float heightRatio, sinkRatio;
-            SideCharacterFit(id, out heightRatio, out sinkRatio);
+            EnemyId leftId, rightId;
+            bool leftPresent = TryGetEnemyAtSide(gm, Side.Left, out leftId);
+            bool rightPresent = TryGetEnemyAtSide(gm, Side.Right, out rightId);
 
-            ShowCharacter(image, id, CharacterPose.Idle, CanvasHeight * heightRatio, alpha);
+            ShowWorldCharacter(_enemySideLeft, leftPresent, leftId, CharacterPose.Idle, Side.Left);
+            ShowWorldCharacter(_enemySideRight, rightPresent, rightId, CharacterPose.Idle, Side.Right);
 
-            // 门口的敌人一律面朝玩家。素材都是朝左画的 ——
-            // 右门原样就对着玩家，左门要镜像过来。
-            // pivot 在立绘底边正中，镜像以 pivot 为轴，所以横向位置不会跑。
-            var rect = image.rectTransform;
-            bool mirrored = side == Side.Left;
-
-            // 门是随镜头扫进来的，立绘就得跟着门一起滑 —— 站位固定在门心，
-            // 但转的过程中门心自己就在往画面里移。不跟着走的话，人比门先出现。
-            float slide = Mathf.InverseLerp(0.74f, 1f, turn);
-            float anchorX = side == Side.Left
-                ? Mathf.Lerp(OffscreenAnchorLeft, SideCharacterAnchorLeft, slide)
-                : Mathf.Lerp(OffscreenAnchorRight, SideCharacterAnchorRight, slide);
-
-            rect.anchorMin = new Vector2(anchorX, 0f);
-            rect.anchorMax = new Vector2(anchorX, 0f);
-
-            rect.localScale = new Vector3(mirrored ? -1f : 1f, 1f, 1f);
-            rect.anchoredPosition = new Vector2(0f, -CanvasHeight * sinkRatio);
+            ApplyFrontCharacter3D(gm);
         }
 
         /// <summary>
-        /// 门口立绘的尺寸 —— 素材构图不一样，按同一个高度对齐会不协调：
-        /// 牛来是全身拟人照（含长腿），身体只占整图的上半截；袋鼠是四足站姿，本来就矮胖。
-        /// 所以每个角色给一组系数，都乘在画布高度上。
-        ///
-        /// <c>sinkRatio</c> = 立绘底边沉到屏幕下方多少 ——
-        /// 照原版那种「它站在门里、下半身被画面裁掉」，露出来的身体才够大。
+        /// 把立绘贴到世界 SpriteRenderer 上。尺寸按**真实米数**算：
+        /// 门口站的人大约 1.8m 高（门洞 2.05m），立绘像素按各自 PNG 尺寸等比换算成
+        /// 米制缩放（PPU 100 的基准），保证所有角色站门口高度一致、透视由相机算。
         /// </summary>
-        private static void SideCharacterFit(EnemyId id, out float heightRatio,
-            out float sinkRatio)
+        private void ShowWorldCharacter(SpriteRenderer sr, bool present, EnemyId id,
+            CharacterPose pose, Side side)
         {
-            switch (id)
+            if (sr == null)
             {
-                case EnemyId.Niulai:
-                    // 全身照含腿，同一个「高度」下身体显得小一圈，所以放大一点、沉得更深。
-                    // 头顶要落在门框下沿（画布高 79.8%）：头顶 = 高度 − 下沉 = 0.958 − 0.16 ✓
-                    heightRatio = 0.958f;
-                    sinkRatio = 0.16f;
-                    break;
+                return;
+            }
 
-                default:
-                    heightRatio = SideCharacterHeightRatio;
-                    sinkRatio = SideCharacterSinkRatio;
-                    break;
+            if (!present)
+            {
+                sr.gameObject.SetActive(false);
+                return;
+            }
+
+            var art = FindCharacter(id);
+            Sprite sprite = art != null ? art.Get(pose) : null;
+            if (sprite == null)
+            {
+                sr.gameObject.SetActive(false);
+                return;
+            }
+
+            sr.gameObject.SetActive(true);
+            sr.sprite = sprite;
+
+            // 高度定 1.8m（人站门洞里，头顶低于门洞顶 2.05m）。
+            // 按「目标米高 / (rect.height / PPU)」算缩放 —— Simple 模式下
+            // 世界尺寸 = 像素 ÷ PPU × scale，所以 scale = 目标米高 ÷ (像素 ÷ PPU)。
+            const float TargetHeightMeters = 1.8f;
+            float worldH = sprite.rect.height / sprite.pixelsPerUnit;
+            float s = worldH > 0.001f ? TargetHeightMeters / worldH : 1f;
+            sr.drawMode = SpriteDrawMode.Simple;
+            sr.transform.localScale = new Vector3(side == Side.Left ? -s : s, s, 1f);
+        }
+
+        private void HideWorldObjects()
+        {
+            HideDoors();
+
+            if (_enemySideLeft != null)
+            {
+                _enemySideLeft.gameObject.SetActive(false);
+            }
+
+            if (_enemySideRight != null)
+            {
+                _enemySideRight.gameObject.SetActive(false);
+            }
+
+            if (_enemyFront != null)
+            {
+                _enemyFront.gameObject.SetActive(false);
             }
         }
 
@@ -1072,23 +986,24 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 正前方那个立绘 —— 噜噜从正门摸进来。
-        /// 逼近时是站姿，堵到门口换成正对镜头；**堵到门口之后**被手电筒照着才换成受惊。
+        /// 正前方那个噜噜 —— 3D 世界物体，站在正门口（世界坐标 z=3.0，前墙门洞）。
+        /// 逼近时站姿，堵到门口换正对镜头；**堵到门口之后**被手电筒照着才换成受惊。
+        /// 走世界坐标后「转头看不见它」是相机透视自然的结果，不用再叠 UI 淡出。
         /// </summary>
-        private void ApplyFrontCharacter(GameManager gm)
+        private void ApplyFrontCharacter3D(GameManager gm)
         {
             var lulu = _enemyDirector != null
                 ? _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain
                 : null;
 
-            ApplyFrontCharacterClip();
-
-            // 只有正前方才看得见 —— 转头看两边时它不在画面里
-            float look = Mathf.Clamp01(1f - Mathf.Abs(_pan) * 1.6f);
-
-            if (lulu == null || lulu.IsAttacking || lulu.Stage < 1 || look <= 0.01f)
+            if (_enemyFront == null)
             {
-                HideFrontCharacter();
+                return;
+            }
+
+            if (lulu == null || lulu.IsAttacking || lulu.Stage < 1)
+            {
+                _enemyFront.gameObject.SetActive(false);
                 return;
             }
 
@@ -1117,14 +1032,15 @@ namespace NailongFNAF.UI
                 pose = CharacterPose.Idle;
             }
 
-            ShowCharacter(_frontCharacter, EnemyId.Lulu, pose, FrontCharacterHeight, look);
+            // 噜噜站正门口（前墙门洞 z=3.0）。素材朝左画，正前方直接面朝玩家，不用镜像。
+            ShowWorldCharacter(_enemyFront, true, EnemyId.Lulu, pose, Side.Right);
         }
 
         private void HideFrontCharacter()
         {
-            if (_frontCharacter != null)
+            if (_enemyFront != null)
             {
-                _frontCharacter.gameObject.SetActive(false);
+                _enemyFront.gameObject.SetActive(false);
             }
         }
 
@@ -1176,8 +1092,16 @@ namespace NailongFNAF.UI
 
         private void HideSideCharacters()
         {
-            _sideLeftCharacter.gameObject.SetActive(false);
-            _sideRightCharacter.gameObject.SetActive(false);
+            if (_enemySideLeft != null)
+            {
+                _enemySideLeft.gameObject.SetActive(false);
+            }
+
+            if (_enemySideRight != null)
+            {
+                _enemySideRight.gameObject.SetActive(false);
+            }
+
             _monitorCharacter.gameObject.SetActive(false);
         }
 
@@ -1570,16 +1494,27 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 由编辑器菜单「奶龙 → 5. 接入素材」调用，一次性注入背景帧序列、门片、
         /// 监控画面与角色立绘。
-        /// 背景与门片都是**整段镜头序列**：[0] 正前方，[1..N] 逐帧转过去。
+        /// 背景与门都是 **3D 世界物体**（门板 / 敌人站门里），由相机透视，
+        /// 不再有 UI 叠层转场。
         /// </summary>
         public void SetArtwork(
-            Sprite[] doorLeftClosedFrames, Sprite[] doorRightClosedFrames,
+            Sprite doorFaceLeft, Sprite doorFaceRight,
             Sprite[] monitorFrames, CharacterArt[] characters)
         {
-            _doorLeftClosedFrames = doorLeftClosedFrames;
-            _doorRightClosedFrames = doorRightClosedFrames;
+            _doorFaceLeft = doorFaceLeft;
+            _doorFaceRight = doorFaceRight;
             _monitorFrames = monitorFrames;
             _characters = characters;
+
+            if (_doorLeft3D != null && _doorFaceLeft != null)
+            {
+                _doorLeft3D.sprite = _doorFaceLeft;
+            }
+
+            if (_doorRight3D != null && _doorFaceRight != null)
+            {
+                _doorRight3D.sprite = _doorFaceRight;
+            }
         }
 
         // ---------------------------------------------------------------
@@ -1741,10 +1676,8 @@ namespace NailongFNAF.UI
             _canvas = GetOrCreateCanvas();
             _solidSprite = MakeSolidSprite();
 
+            BuildWorldObjects();
             BuildBackgroundLayers();
-            BuildSideCharacters();
-            BuildFrontCharacter();
-            BuildDoorLayers();
             BuildFlashlightGlow();
             BuildWallButtons();
             BuildFlashlightButton();
@@ -1790,69 +1723,103 @@ namespace NailongFNAF.UI
             _bgBase = MakeFullScreenImage("BlackoutCurtain", Color.black);
         }
 
-        /// <summary>
-        /// 门口立绘：贴在屏幕左右下角，压在门片之下 —— 门关上了就盖住它。
-        /// 没有立绘素材时退回该角色的代表色剪影。
-        /// </summary>
-        private void BuildSideCharacters()
+        // ---------------------------------------------------------------
+        // 3D 世界物体：门板 + 门口敌人。
+        //
+        // 背景是圆柱全景 + 旋转相机，所以门和敌人也放进**同一个 3D 世界**里，
+        // 用真实米数摆在门洞 / 正门口，透视由相机自己算 —— 不再是 UI 叠层，
+        // 也就没有「叠层转场 / 滑入淡入」那套东西了。
+        // 门的坐标就是门洞平面（±2.6, ·, z∈[-1.8,-0.6]）→ 对眼点的偏航正好 77°~103°，
+        // 和全景里画的门洞重合，关上时严丝合缝。
+        // ---------------------------------------------------------------
+        private static readonly Vector3 DoorWorldCenterLeft = new Vector3(-2.6f, 1.025f, -1.2f);
+        private static readonly Vector3 DoorWorldCenterRight = new Vector3(2.6f, 1.025f, -1.2f);
+
+        private void BuildWorldObjects()
         {
-            _sideLeftCharacter = MakeSideCharacter("SideCharacterLeft",
-                new Vector2(SideCharacterAnchorLeft, 0f), new Vector2(0.5f, 0f));
-            _sideRightCharacter = MakeSideCharacter("SideCharacterRight",
-                new Vector2(SideCharacterAnchorRight, 0f), new Vector2(0.5f, 0f));
+            _doorLeft3D = MakeWorldSprite("Door3DLeft", DoorWorldCenterLeft, SpriteSortDoor);
+            _doorRight3D = MakeWorldSprite("Door3DRight", DoorWorldCenterRight, SpriteSortDoor);
+
+            _enemySideLeft = MakeWorldSprite("EnemySideLeft", DoorWorldCenterLeft, SpriteSortEnemy);
+            _enemySideRight = MakeWorldSprite("EnemySideRight", DoorWorldCenterRight, SpriteSortEnemy);
+            _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
+
+            // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
+            // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
+            // 否则相机侧看它，屏幕上是根竖线（2026-10-15 踩过，门洞区域一直渲染不出门）。
+            // 右门（x=+2.6）法线朝 -x：绕 Y 转 -90°（+z → -x）。
+            // 左门（x=-2.6）法线朝 +x：绕 Y 转 +90°（+z → +x）。
+            _doorLeft3D.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            _doorRight3D.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
+            _enemySideLeft.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            _enemySideRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
+            // 正门口噜噜（z=+3.0）面朝房间中心（-z）：sprite 默认朝 +z，转 180°。
+            _enemyFront.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+
+            if (_doorFaceLeft != null)
+            {
+                _doorLeft3D.sprite = _doorFaceLeft;
+                SetDoorFaceScale(_doorLeft3D);
+            }
+
+            if (_doorFaceRight != null)
+            {
+                _doorRight3D.sprite = _doorFaceRight;
+                SetDoorFaceScale(_doorRight3D);
+            }
         }
 
         /// <summary>
-        /// 正前方那个立绘 —— 噜噜从正门来，站在这儿。
-        /// 外面套一层 RectMask2D：**桌沿以下的部分要裁掉**，腿才会被桌子挡住。
+        /// 门板贴图是 1.2m × 2.05m 渲出来的（1200×2050 像素），但导入后 PPU 会被
+        /// 压到 2048 以下（99.9），直接 scale=1 世界尺寸是 12×20.5m —— 比门洞大十倍。
+        /// 按「贴图像素 / 门洞真实尺寸」重算 scale，让世界尺寸正好是 1.2×2.05m：
+        /// scale.x = 1.2 / (rect.width / ppu)，scale.y = 2.05 / (rect.height / ppu)。
         /// </summary>
-        private void BuildFrontCharacter()
+        private static void SetDoorFaceScale(SpriteRenderer sr)
         {
-            // 遮罩铺满整块画布，靠 padding 从底部裁 —— 这样立绘自己的锚点
-            // 还是按整块画布算，位置不用跟着父物体改。
-            var clipGo = new GameObject("FrontCharacterClip",
-                typeof(RectTransform), typeof(RectMask2D));
-            clipGo.transform.SetParent(_canvas.transform, false);
-            StretchToParent(clipGo.GetComponent<RectTransform>());
-            _frontCharacterClip = clipGo.GetComponent<RectMask2D>();
-
-            var go = new GameObject("FrontCharacter", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(clipGo.transform, false);
-
-            var rect = go.GetComponent<RectTransform>();
-            PlaceRect(rect, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(0f, FrontCharacterBottom),
-                new Vector2(FrontCharacterHeight * 0.7f, FrontCharacterHeight));
-
-            var image = go.GetComponent<Image>();
-            image.sprite = _solidSprite;
-            image.preserveAspect = true;
-            image.raycastTarget = false;
-            image.color = new Color(1f, 1f, 1f, 0.9f);
-
-            go.SetActive(false);
-            _frontCharacter = image;
-            ApplyFrontCharacterClip();
-        }
-
-        /// <summary>按当前画布高度重算遮罩裁掉多少 —— 宽屏下画布高度不是 1080，不能写死。</summary>
-        private void ApplyFrontCharacterClip()
-        {
-            if (_frontCharacterClip == null)
+            var sp = sr.sprite;
+            if (sp == null)
             {
                 return;
             }
 
-            float bottom = CanvasHeight * FrontCharacterClipBottom;
+            const float DoorWidthMeters = 1.2f;
+            const float DoorHeightMeters = 2.05f;
 
-            if (Mathf.Approximately(bottom, _frontCharacterClipPadding))
+            float worldW = sp.rect.width / sp.pixelsPerUnit;
+            float worldH = sp.rect.height / sp.pixelsPerUnit;
+
+            if (worldW <= 0.001f || worldH <= 0.001f)
             {
                 return;
             }
 
-            _frontCharacterClipPadding = bottom;
-            _frontCharacterClip.padding = new Vector4(0f, bottom, 0f, 0f);
+            sr.transform.localScale = new Vector3(
+                DoorWidthMeters / worldW,
+                DoorHeightMeters / worldH,
+                1f);
         }
+
+        /// <summary>
+        /// 世界空间 SpriteRenderer —— 不缩放到米制以外，靠 PPU 保证「像素 = 真实米」：
+        /// 立绘字面是真实身高的像素（噜噜 ~1.7m 的 PNG），尺寸就是对的。
+        /// </summary>
+        private static SpriteRenderer MakeWorldSprite(string name, Vector3 pivotPoint,
+            int sortingOrder)
+        {
+            var go = new GameObject(name, typeof(SpriteRenderer));
+            var sr = go.GetComponent<SpriteRenderer>();
+            sr.sortingOrder = sortingOrder;
+            sr.color = Color.white;
+            go.transform.position = pivotPoint;
+            return sr;
+        }
+
+
+
+
+
+
 
         /// <summary>
         /// 手电筒的光 —— 盖在画面之上的一层提亮，中心亮、往外渐隐，
@@ -1889,36 +1856,9 @@ namespace NailongFNAF.UI
             _flashlightGroup.blocksRaycasts = true;
         }
 
-        private Image MakeSideCharacter(string name, Vector2 anchor, Vector2 pivot)
-        {
-            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
 
-            var rect = go.GetComponent<RectTransform>();
-            rect.anchorMin = anchor;
-            rect.anchorMax = anchor;
-            rect.pivot = pivot;
-            rect.anchoredPosition = Vector2.zero;
-            rect.sizeDelta = new Vector2(620f, SideCharacterHeight);
 
-            var image = go.GetComponent<Image>();
-            image.sprite = _solidSprite;
-            image.preserveAspect = true;
-            image.raycastTarget = false;
-            image.color = new Color(0.5f, 0.5f, 0.5f, 0.85f);
 
-            go.SetActive(false);
-            return image;
-        }
-
-        private void BuildDoorLayers()
-        {
-            _doorBase = MakeFullScreenImage("DoorBase", Color.white);
-            _doorBase.gameObject.SetActive(false);
-
-            _doorBlend = MakeFullScreenImage("DoorBlend", Color.white);
-            _doorBlend.gameObject.SetActive(false);
-        }
 
         /// <summary>墙上 DOOR / LIGHT 按钮的尺寸（画布逻辑像素）。</summary>
         private static readonly Vector2 WallButtonSize = new Vector2(190f, 62f);

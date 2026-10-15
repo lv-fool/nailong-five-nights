@@ -842,6 +842,54 @@ def draw_props(col_img, mask_img, cam, yaw, proj=None, draw_flat=True):
 
 # ================================================================ 门片
 
+def build_door_face(hole, tex, seed, dark=0.95, exposure=1.0):
+    """门板**正视贴图**：竖直正对门洞渲的矩形，给 3D 世界的门板用。
+
+    背景改「圆柱全景 + 旋转相机」后，门不再做全屏叠层，而是**真实立在门洞里**的
+    世界物体（Unity `SpriteRenderer`，世界米数尺寸，透视由引擎算）。所以这里渲一张
+    正好 2.05m 高、1.2m 宽的矩形门板 —— 像素尺寸 2050×1200，走和全景/门片同一条
+    光照与后期管线，直接贴上去不会比墙亮。
+
+    门板：深绿金属（DOOR_TEX 的 `du` 走横向渐变，让两扇门不是同一块板砖）、
+    中间一条横杠把手。用 `light_at` 照一下 —— 门在侧墙，正面朝房间中心，
+    光照和墙一致，看着才像长在门洞里。
+
+    ⚠️ **dark 别用 0.64**：那是「叠层门片」时代的参数 —— 门片贴在全景上
+    再叠背景所以敢压暗。门板是独立世界物体，自己就得有正确亮度，
+    dark 用 0.95，亮度才接近墙（墙 ~0.23，门板 ~0.18）。用 0.64 门板几乎全黑，
+    关上门像没关（2026-10-15 踩过，绿子说「关门看不见门」）。
+    """
+    w, h = 1200, 2050                      # 毫米：1.2m × 2.05m（贴图高度是灰长向）
+    u = np.linspace(0.08, 0.92, w, dtype=np.float32)          # 门板横向（宽）
+    v = np.linspace(0.03, 0.97, h, dtype=np.float32)          # 门板纵向（高）
+    U, V = np.meshgrid(u, v)               # (h, w)
+
+    # 门板表面在世界空间是哪块平面 —— 取门洞平面，法线朝房间中心。
+    # right: plane=+2.6, 法线 -x；left: plane=-2.6, 法线 +x
+    plane = hole["plane"]
+    n = np.zeros((h, w, 3), np.float32)
+    n[..., 0] = -1.0 if hole["side"] else 1.0
+
+    p = np.zeros((h, w, 3), np.float32)
+    p[..., 0] = plane
+    # 门洞 u(=z) ∈ [u0, u1]，v(=y) ∈ [v0, v1]；把 U/V 映射回世界坐标再去取样光照
+    p[..., 1] = hole["v0"] + V * (hole["v1"] - hole["v0"])
+    p[..., 2] = hole["u0"] + U * (hole["u1"] - hole["u0"])
+
+    gain = light_at(p, n)
+
+    # 门板纹理：横向一条条钢板，中间一道把手。
+    # 不用 DOOR_TEX 原图（它乘过灰蓝因子太暗），把亮一点的金属底 + 横条重画出来。
+    plate = make_door_texture(tex["metal"]) * 1.35          # 提亮：门板要看得见
+    plate = texel(plate, U * 1.0, V * 1.0)
+    handle = np.abs(U - 0.62) < 0.012
+    plate[handle] *= 0.5
+
+    col = post(plate * gain, seed, dark, exposure, w, h)
+    img = Image.fromarray((np.clip(col, 0, 1) * 255).astype(np.uint8), "RGB")
+    return img
+
+
 def build_door(hole, cam, yaw, tex, closed, seed, dark=0.64, exposure=1.0):
     """叠层门片。整屏透明画布，门只画在门洞那个四边形里。
 
@@ -990,6 +1038,14 @@ def main():
                    math.radians(TURN_MAX_YAW_DEG) * i / TURN_FRAMES, tex, True,
                    400 + i).save(path)
     print("  wrote %d 张门片" % (TURN_FRAMES * 2))
+
+    # 门板正视贴图（3D 世界的门）：不再做全屏叠层，门是立在门洞里的真实物体。
+    # 渲成 1.2m × 2.05m 的矩形（PPU 1000 → 像素即毫米），放着由 PrototypeScene 建
+    # SpriteRenderer 挂到门洞。
+    print("渲门板正视贴图 …")
+    build_door_face(LEFT_HOLE, tex, 151).save(os.path.join(DOOR_OUT, "door_face_left.png"))
+    build_door_face(RIGHT_HOLE, tex, 152).save(os.path.join(DOOR_OUT, "door_face_right.png"))
+    print("  wrote door_face_left/right.png")
 
     # 门开着时整层透明。旧命名保留成空图，免得老引用报错。
     blank = Image.new("RGBA", (W, H), (0, 0, 0, 0))
