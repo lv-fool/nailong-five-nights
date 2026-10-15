@@ -409,6 +409,10 @@ namespace NailongFNAF.UI
         private SpriteRenderer _enemySideRight;
         private SpriteRenderer _enemyFront;
 
+        // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
+        private SpriteRenderer _doorLightLeft;
+        private SpriteRenderer _doorLightRight;
+
         /// <summary>
         /// 断电时盖全屏的黑幕。平时整层透明，露出后面的 3D 房间（见 OfficeRoom）。
         /// </summary>
@@ -420,6 +424,10 @@ namespace NailongFNAF.UI
         private Image _doorRightButton;
         private Image _lightLeftButton;
         private Image _lightRightButton;
+
+        // LIGHT 按钮的光晕 —— 灯亮时绿光呼吸，灯灭熄灭。
+        private Image _lightLeftGlow;
+        private Image _lightRightGlow;
         private CanvasGroup _flashlightGroup;
         private Image _flashlightButton;
         private HoldButton _flashlightHold;
@@ -883,6 +891,30 @@ namespace NailongFNAF.UI
             ShowWorldCharacter(_enemySideRight, rightPresent, rightId, CharacterPose.Idle, Side.Right);
 
             ApplyFrontCharacter3D(gm);
+
+            // 门洞外的灯：灯亮 → 门口亮起一团光（呼吸），灯灭 → 熄灭
+            float breathe = 0.85f + Mathf.Sin(Time.time * 2.4f) * 0.15f;
+            ApplyDoorLight(_doorLightLeft, gm.LeftLightOn, breathe);
+            ApplyDoorLight(_doorLightRight, gm.RightLightOn, breathe);
+        }
+
+        private static void ApplyDoorLight(SpriteRenderer light, bool on, float breathe)
+        {
+            if (light == null)
+            {
+                return;
+            }
+
+            light.gameObject.SetActive(on);
+
+            Color color = light.color;
+            color.a = on ? 0.5f * breathe : 0f;
+            light.color = color;
+
+            if (on)
+            {
+                light.transform.localScale = new Vector3(2.4f * breathe, 3.2f * breathe, 1f);
+            }
         }
 
         /// <summary>
@@ -942,6 +974,16 @@ namespace NailongFNAF.UI
             if (_enemyFront != null)
             {
                 _enemyFront.gameObject.SetActive(false);
+            }
+
+            if (_doorLightLeft != null)
+            {
+                _doorLightLeft.gameObject.SetActive(false);
+            }
+
+            if (_doorLightRight != null)
+            {
+                _doorLightRight.gameObject.SetActive(false);
             }
         }
 
@@ -1328,6 +1370,29 @@ namespace NailongFNAF.UI
             _doorRightButton.color = gm.RightDoorClosed ? DoorOn : DoorOff;
             _lightLeftButton.color = gm.LeftLightOn ? LightOn : LightOff;
             _lightRightButton.color = gm.RightLightOn ? LightOn : LightOff;
+
+            // LIGHT 光晕：灯亮 → 亮绿呼吸（径向渐变淡入淡出），灯灭 → 熄灭。
+            // 呼吸只动 alpha 和 scale，不动颜色。
+            float breathe = 0.82f + Mathf.Sin(Time.time * 2.4f) * 0.18f;
+            ApplyLightGlow(_lightLeftGlow, gm.LeftLightOn, breathe);
+            ApplyLightGlow(_lightRightGlow, gm.RightLightOn, breathe);
+        }
+
+        private static void ApplyLightGlow(Image glow, bool on, float breathe)
+        {
+            if (glow == null)
+            {
+                return;
+            }
+
+            Color color = glow.color;
+            color.a = on ? 0.55f * breathe : 0f;
+            glow.color = color;
+
+            var rect = glow.rectTransform;
+            rect.localScale = on
+                ? new Vector3(breathe, breathe, 1f)
+                : new Vector3(0.8f, 0.8f, 1f);
         }
 
         // ---------------------------------------------------------------
@@ -1744,6 +1809,10 @@ namespace NailongFNAF.UI
             _enemySideRight = MakeWorldSprite("EnemySideRight", DoorWorldCenterRight, SpriteSortEnemy);
             _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
 
+            // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
+            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
+            _doorLightRight = MakeDoorLight("DoorLightRight", DoorWorldCenterRight, SpriteSortDoor - 1);
+
             // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
             // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
             // 否则相机侧看它，屏幕上是根竖线（2026-10-15 踩过，门洞区域一直渲染不出门）。
@@ -1815,6 +1884,42 @@ namespace NailongFNAF.UI
             return sr;
         }
 
+        /// <summary>
+        /// 门洞外的灯光特效：径向渐变光斑，Additive 叠加（只加亮不遮黑），
+        /// 灯亮时门口像真的亮了。默认隐藏，由 <see cref="ApplyWorldObjects"/> 按灯状态点亮。
+        /// 和门板一样在侧墙平面（绕 Y 转 ±90° 朝房间中心）。
+        /// </summary>
+        private static SpriteRenderer MakeDoorLight(string name, Vector3 pivotPoint,
+            int sortingOrder)
+        {
+            var sr = MakeWorldSprite(name, pivotPoint, sortingOrder);
+
+            sr.sprite = MakeRadialSprite();
+            sr.color = new Color(0.35f, 0.55f, 0.30f, 0f);   // 绿光，alpha 0 = 关
+
+            // Additive：纯加亮，不产生「遮黑」的边
+            var mat = new Material(Shader.Find("Sprites/Default"));
+            if (mat != null)
+            {
+                // Sprites/Default 没有加法混合，用内置的加亮混合参数
+                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                mat.SetInt("_ZWrite", 0);
+                sr.sharedMaterial = mat;
+            }
+
+            // 和门板/门敌一样：侧墙平面朝房间中心
+            sr.transform.rotation = pivotPoint.x > 0f
+                ? Quaternion.Euler(0f, -90f, 0f)
+                : Quaternion.Euler(0f, 90f, 0f);
+
+            // 光斑比门洞大一圈（宽 2.4m、高 3.2m），让光晕透出走廊
+            sr.transform.localScale = new Vector3(2.4f, 3.2f, 1f);
+
+            sr.gameObject.SetActive(false);
+            return sr;
+        }
+
 
 
 
@@ -1863,6 +1968,9 @@ namespace NailongFNAF.UI
         /// <summary>墙上 DOOR / LIGHT 按钮的尺寸（画布逻辑像素）。</summary>
         private static readonly Vector2 WallButtonSize = new Vector2(190f, 62f);
 
+        /// <summary>LIGHT 按钮的光晕尺寸（画布逻辑像素）—— 比按钮大一圈。</summary>
+        private static readonly Vector2 LightGlowSize = new Vector2(240f, 92f);
+
         // 墙上按钮锚的**世界点**（米）。在侧墙上、门框**外侧**一点：
         // 门洞 z ∈ [-1.80, -0.60]，按钮取 z = -1.976（门框外沿 -1.80 再往外 0.18m），
         // 世界偏航角约 ±106.6°。高度按「门在上、灯在下」取 1.55 / 1.05。
@@ -1891,10 +1999,37 @@ namespace NailongFNAF.UI
             _leftWallGroup = MakeGroup("WallLeft");
             _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR", OnDoorLeft);
             _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT", OnLightLeft);
+            _lightLeftGlow = MakeLightGlow(_lightLeftButton.transform);
 
             _rightWallGroup = MakeGroup("WallRight");
             _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR", OnDoorRight);
             _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT", OnLightRight);
+            _lightRightGlow = MakeLightGlow(_lightRightButton.transform);
+        }
+
+        /// <summary>
+        /// LIGHT 按钮的光晕 —— 叠在按钮底下的径向渐变，灯亮时亮绿呼吸。
+        /// 放按钮 transform 的**最底**（SetAsFirstSibling），所以按钮文字盖在光上。
+        /// </summary>
+        private static Image MakeLightGlow(Transform button)
+        {
+            var go = new GameObject("LightGlow", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(button, false);
+            go.transform.SetAsFirstSibling();
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = LightGlowSize;
+
+            var image = go.GetComponent<Image>();
+            image.sprite = MakeRadialSprite();
+            image.color = new Color(0.35f, 0.95f, 0.30f, 0f);
+            image.raycastTarget = false;
+
+            return image;
         }
 
         private void BuildMonitorLayer()
