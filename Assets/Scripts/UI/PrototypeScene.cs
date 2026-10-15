@@ -231,6 +231,16 @@ namespace NailongFNAF.UI
         private const float MonitorZone = 0.10f;
 
         /// <summary>
+        /// 两侧墙上的 DOOR / LIGHT 按钮的淡入区间（按 |_pan|）。
+        /// 转过一点点就开始出现，到 <see cref="WallButtonFadeEnd"/> 就完全不透明、可点。
+        ///
+        /// **别调大**：镜头跟鼠标，鼠标停在按钮上时 |_pan| 只有 0.28 左右（见 UpdateVisuals），
+        /// 淡入太靠后按钮就永远点不着了。
+        /// </summary>
+        private const float WallButtonFadeStart = 0.06f;
+        private const float WallButtonFadeEnd = 0.26f;
+
+        /// <summary>
         /// 监控机位表 —— 编号、房间名、前后顺序全照 FNAF 1 官方那张平面图。
         /// **数组下标就是机位号**；加机位只往这里加一行，别处不用动。
         /// </summary>
@@ -829,8 +839,15 @@ namespace NailongFNAF.UI
             _monitorMapGroup.blocksRaycasts = monitorUp;
 
             // 两侧墙上的按钮：跟着转头淡入淡出，看监控时收起来
-            float leftAlpha = monitorUp || locked ? 0f : Mathf.Clamp01(-_pan);
-            float rightAlpha = monitorUp || locked ? 0f : Mathf.Clamp01(_pan);
+            //
+            // ⚠️ 淡入必须**很快就满**（|_pan| 到 0.26 就全亮），否则按不到：
+            // 镜头是跟鼠标的，鼠标停在按钮上时 |_pan| 只有 0.28 左右
+            // （按钮锚点 0.36 / 0.64 → pan = 2×0.64−1 = 0.28），
+            // 而下面 blocksRaycasts 要 alpha > 0.5 才收点击 —— 淡入太慢就永远点不着。
+            float shown = Mathf.Clamp01(
+                (Mathf.Abs(_pan) - WallButtonFadeStart) / (WallButtonFadeEnd - WallButtonFadeStart));
+            float leftAlpha = monitorUp || locked || _pan >= 0f ? 0f : shown;
+            float rightAlpha = monitorUp || locked || _pan <= 0f ? 0f : shown;
 
             _leftWallGroup.alpha = leftAlpha;
             _rightWallGroup.alpha = rightAlpha;
