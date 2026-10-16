@@ -14,7 +14,10 @@
 盒子求交，命中面的三维坐标决定取哪块贴图。透视、遮挡、光照全是算出来的 ——
 改尺寸、换贴图只要重跑一次，不用手调像素。
 
-贴图来自 ambientCG（CC0，可商用、无需署名），放在 tools/cc0/。
+贴图分两套，按需切换 `TEX_DIR` / `TEX_FILES`：
+- `tools/handpainted/`（**当前使用**）—— 手绘绘本风，由 AI 生成（水彩+水粉笔触），
+  几何不受影响，只换观感。生成与无缝处理见 `docs/06-手绘贴图.md`
+- `tools/cc0/` —— 照片写实风，来自 ambientCG（CC0，可商用、无需署名）
 
 运行：
     C:/Users/DELL/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe tools/gen_placeholder_art.py
@@ -28,7 +31,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 W, H = 1920, 1080
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEX_DIR = os.path.join(ROOT, "tools", "cc0")
+TEX_DIR = os.path.join(ROOT, "tools", "handpainted")
 CHAR_DIR = os.path.join(ROOT, "Assets", "Art", "Characters")
 OUT = os.path.join(ROOT, "Assets", "Art", "Backgrounds")
 DOOR_OUT = os.path.join(ROOT, "Assets", "Art", "UI")
@@ -99,11 +102,11 @@ CORR_GAIN = 0.70               # 走廊整体再压一档 —— 办公室的灯
 POSTER_GAIN = 0.80             # 墙上的画别比墙还亮
 
 TEX_FILES = {
-    "floor": "floor_tiles.jpg",
-    "wall": "wall_plaster.jpg",
-    "concrete": "concrete.jpg",
-    "metal": "metal.jpg",
-    "paper": "paper.jpg",
+    "floor": "floor.png",
+    "wall": "wall.png",
+    "concrete": "concrete.png",
+    "metal": "metal.png",
+    "paper": "paper.png",
 }
 
 
