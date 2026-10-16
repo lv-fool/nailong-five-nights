@@ -913,7 +913,8 @@ namespace NailongFNAF.UI
 
             if (on)
             {
-                light.transform.localScale = new Vector3(2.4f * breathe, 3.2f * breathe, 1f);
+                light.transform.localScale = new Vector3(
+                    DoorLightWidth * breathe, DoorLightHeight * breathe, 1f);
             }
         }
 
@@ -1800,6 +1801,21 @@ namespace NailongFNAF.UI
         private static readonly Vector3 DoorWorldCenterLeft = new Vector3(-2.6f, 1.025f, -1.2f);
         private static readonly Vector3 DoorWorldCenterRight = new Vector3(2.6f, 1.025f, -1.2f);
 
+        /// <summary>
+        /// 门口那盏灯的光心 —— 放在门洞**上沿**（门洞顶 2.05m）。
+        /// 光晕往下洒进门洞，门洞里就是「上亮下暗」，像门外上方挂着一盏灯。
+        /// （原来放在门洞正中，看着像门洞中间悬了个发光球。）
+        /// </summary>
+        private static readonly Vector3 DoorLightCenterLeft = new Vector3(-2.6f, 2.05f, -1.2f);
+        private static readonly Vector3 DoorLightCenterRight = new Vector3(2.6f, 2.05f, -1.2f);
+
+        /// <summary>
+        /// 门灯光斑的尺寸（米）。比门洞（1.2 × 2.05）大一圈，光晕能溢出到门框外。
+        /// <see cref="MakeDoorLight"/> 和 <see cref="ApplyDoorLight"/> 共用，别各写一份。
+        /// </summary>
+        private const float DoorLightWidth = 2.2f;
+        private const float DoorLightHeight = 2.8f;
+
         private void BuildWorldObjects()
         {
             _doorLeft3D = MakeWorldSprite("Door3DLeft", DoorWorldCenterLeft, SpriteSortDoor);
@@ -1810,8 +1826,8 @@ namespace NailongFNAF.UI
             _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
 
             // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
-            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
-            _doorLightRight = MakeDoorLight("DoorLightRight", DoorWorldCenterRight, SpriteSortDoor - 1);
+            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorLightCenterLeft, SpriteSortDoor - 1);
+            _doorLightRight = MakeDoorLight("DoorLightRight", DoorLightCenterRight, SpriteSortDoor - 1);
 
             // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
             // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
@@ -1885,9 +1901,12 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 门洞外的灯光特效：径向渐变光斑，Additive 叠加（只加亮不遮黑），
+        /// 门口那盏灯：径向渐变光斑，Additive 叠加（只加亮不遮黑），
         /// 灯亮时门口像真的亮了。默认隐藏，由 <see cref="ApplyWorldObjects"/> 按灯状态点亮。
         /// 和门板一样在侧墙平面（绕 Y 转 ±90° 朝房间中心）。
+        ///
+        /// 光心在门洞**上沿**而不是正中（见 <see cref="DoorLightCenterRight"/>）——
+        /// 这样门洞里是上亮下暗，看着像门外上方挂了盏灯。
         /// </summary>
         private static SpriteRenderer MakeDoorLight(string name, Vector3 pivotPoint,
             int sortingOrder)
@@ -1913,8 +1932,7 @@ namespace NailongFNAF.UI
                 ? Quaternion.Euler(0f, -90f, 0f)
                 : Quaternion.Euler(0f, 90f, 0f);
 
-            // 光斑比门洞大一圈（宽 2.4m、高 3.2m），让光晕透出走廊
-            sr.transform.localScale = new Vector3(2.4f, 3.2f, 1f);
+            sr.transform.localScale = new Vector3(DoorLightWidth, DoorLightHeight, 1f);
 
             sr.gameObject.SetActive(false);
             return sr;
