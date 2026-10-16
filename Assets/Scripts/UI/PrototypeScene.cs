@@ -908,14 +908,12 @@ namespace NailongFNAF.UI
             light.gameObject.SetActive(on);
 
             Color color = light.color;
-            color.a = on ? 0.5f * breathe : 0f;
+            color.a = on ? 0.55f * breathe : 0f;
             light.color = color;
 
-            if (on)
-            {
-                light.transform.localScale = new Vector3(
-                    DoorLightWidth * breathe, DoorLightHeight * breathe, 1f);
-            }
+            // ⚠️ **不要跟着 breathe 改 scale** —— 光斑要始终正好铺满门框，
+            // 缩放会让它缩进门洞（露出暗边）或溢到门框外的墙上。
+            // 呼吸只作用在亮度上。
         }
 
         /// <summary>
@@ -1802,19 +1800,13 @@ namespace NailongFNAF.UI
         private static readonly Vector3 DoorWorldCenterRight = new Vector3(2.6f, 1.025f, -1.2f);
 
         /// <summary>
-        /// 门口那盏灯的光心 —— 放在门洞**上沿**（门洞顶 2.05m）。
-        /// 光晕往下洒进门洞，门洞里就是「上亮下暗」，像门外上方挂着一盏灯。
-        /// （原来放在门洞正中，看着像门洞中间悬了个发光球。）
+        /// 门灯光斑的尺寸（米）—— **正好是门洞大小**。
+        /// 光只落在门框里，不会在门框外的墙上留一块亮斑。
+        /// 光斑贴图本身是「上亮下暗」的渐变（见 <see cref="MakeDoorLightSprite"/>），
+        /// 所以虽然光心在门框正中，亮部是偏上的，像门外的灯从上面照进来。
         /// </summary>
-        private static readonly Vector3 DoorLightCenterLeft = new Vector3(-2.6f, 2.05f, -1.2f);
-        private static readonly Vector3 DoorLightCenterRight = new Vector3(2.6f, 2.05f, -1.2f);
-
-        /// <summary>
-        /// 门灯光斑的尺寸（米）。比门洞（1.2 × 2.05）大一圈，光晕能溢出到门框外。
-        /// <see cref="MakeDoorLight"/> 和 <see cref="ApplyDoorLight"/> 共用，别各写一份。
-        /// </summary>
-        private const float DoorLightWidth = 2.2f;
-        private const float DoorLightHeight = 2.8f;
+        private const float DoorLightWidth = 1.2f;
+        private const float DoorLightHeight = 2.05f;
 
         private void BuildWorldObjects()
         {
@@ -1826,8 +1818,8 @@ namespace NailongFNAF.UI
             _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
 
             // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
-            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorLightCenterLeft, SpriteSortDoor - 1);
-            _doorLightRight = MakeDoorLight("DoorLightRight", DoorLightCenterRight, SpriteSortDoor - 1);
+            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
+            _doorLightRight = MakeDoorLight("DoorLightRight", DoorWorldCenterRight, SpriteSortDoor - 1);
 
             // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
             // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
@@ -1901,19 +1893,20 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 门口那盏灯：径向渐变光斑，Additive 叠加（只加亮不遮黑），
-        /// 灯亮时门口像真的亮了。默认隐藏，由 <see cref="ApplyWorldObjects"/> 按灯状态点亮。
+        /// 门口那盏灯：**上亮下暗**的渐变光斑，Additive 叠加（只加亮不遮黑），
+        /// 灯亮时门框里像真的被门外的灯照亮了。默认隐藏，
+        /// 由 <see cref="ApplyWorldObjects"/> 按灯状态点亮。
         /// 和门板一样在侧墙平面（绕 Y 转 ±90° 朝房间中心）。
         ///
-        /// 光心在门洞**上沿**而不是正中（见 <see cref="DoorLightCenterRight"/>）——
-        /// 这样门洞里是上亮下暗，看着像门外上方挂了盏灯。
+        /// 光斑**正好和门洞一样大**（见 <see cref="DoorLightWidth"/>）——
+        /// 光只落在门框里，不会在门框外的墙上留一块亮斑。
         /// </summary>
         private static SpriteRenderer MakeDoorLight(string name, Vector3 pivotPoint,
             int sortingOrder)
         {
             var sr = MakeWorldSprite(name, pivotPoint, sortingOrder);
 
-            sr.sprite = MakeRadialSprite();
+            sr.sprite = MakeDoorLightSprite();
             sr.color = new Color(0.35f, 0.55f, 0.30f, 0f);   // 绿光，alpha 0 = 关
 
             // Additive：纯加亮，不产生「遮黑」的边
@@ -1932,7 +1925,12 @@ namespace NailongFNAF.UI
                 ? Quaternion.Euler(0f, -90f, 0f)
                 : Quaternion.Euler(0f, 90f, 0f);
 
-            sr.transform.localScale = new Vector3(DoorLightWidth, DoorLightHeight, 1f);
+            // ⚠️ localScale 是乘在 sprite **自然尺寸**（像素 ÷ PPU）上的，不是米。
+            // 直接写 1.2 / 2.05 会得到 1.54 × 5.25 米的光斑，溢出到门框外 ——
+            // 按「目标米数 ÷ 自然尺寸」折算才正好铺满门洞。
+            sr.transform.localScale = new Vector3(
+                DoorLightWidth / sr.sprite.bounds.size.x,
+                DoorLightHeight / sr.sprite.bounds.size.y, 1f);
 
             sr.gameObject.SetActive(false);
             return sr;
@@ -2700,6 +2698,59 @@ namespace NailongFNAF.UI
             texture.Apply();
 
             return Sprite.Create(texture, new Rect(0f, 0f, size, size),
+                new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
+        }
+
+        /// <summary>
+        /// 门灯的光斑：**上亮下暗的垂直渐变**（不是径向）。
+        /// 贴上去正好和门洞一样大，光只落在门框里。
+        ///
+        /// 为什么不用径向：径向的光心在正中，看着像门洞里悬了个发光球；
+        /// 垂直渐变让亮部偏上，像门外的灯从上方照进来。
+        /// 顶部和两侧都做了柔化，免得出现硬边。
+        /// </summary>
+        private static Sprite MakeDoorLightSprite()
+        {
+            const int w = 128, h = 256;
+
+            var texture = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            texture.name = "prototype_door_light";
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+
+            var pixels = new Color32[w * h];
+
+            for (int y = 0; y < h; y++)
+            {
+                // 纹理 y 向上：v = 0 是底、1 是顶
+                float v = y / (float)(h - 1);
+
+                float vert;
+                if (v <= 0.82f)
+                {
+                    vert = v / 0.82f;
+                    vert *= vert;                       // 往上加速变亮，亮部更靠上
+                }
+                else
+                {
+                    vert = 1f - (v - 0.82f) / 0.18f;    // 顶部 18% 收掉，别顶出一条硬边
+                }
+
+                for (int x = 0; x < w; x++)
+                {
+                    float u = x / (float)(w - 1) * 2f - 1f;
+                    float side = Mathf.Clamp01(1f - Mathf.Abs(u));
+                    side *= side;                       // 两侧收得快一点
+
+                    float alpha = Mathf.Clamp01(vert) * side;
+                    pixels[y * w + x] = new Color32(255, 247, 219, (byte)(alpha * 255f));
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+
+            return Sprite.Create(texture, new Rect(0f, 0f, w, h),
                 new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
         }
 
