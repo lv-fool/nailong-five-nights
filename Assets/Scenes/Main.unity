@@ -472,17 +472,17 @@ MonoBehaviour:
   _doorFaceLeft: {fileID: 21300000, guid: 03e7ec0489be9a443949c73bd21e9f8d, type: 3}
   _doorFaceRight: {fileID: 21300000, guid: 025f08a30232fd1408fda31c6e2e03f1, type: 3}
   _monitorFrames:
+  - {fileID: 21300000, guid: 0c69708341777f747864739024a305a3, type: 3}
+  - {fileID: 21300000, guid: 66cf04411d0b13d4fa0e359ea02ebdab, type: 3}
+  - {fileID: 21300000, guid: 4457aa2d54da3bf448bddb2987bf1413, type: 3}
+  - {fileID: 21300000, guid: c4c2e17669013c14f9fa58fbca20ce8f, type: 3}
+  - {fileID: 21300000, guid: e0d9a63f1a254554a973819cbc9c9080, type: 3}
+  - {fileID: 21300000, guid: 70665a9c24ea62f429c56890005e93c8, type: 3}
+  - {fileID: 21300000, guid: 442857dcaaff76a4786ea6c778522026, type: 3}
+  - {fileID: 21300000, guid: 91d0a86dc0a625e4abf4b84f0393dae9, type: 3}
+  - {fileID: 21300000, guid: 83897991432156e488592e212da924af, type: 3}
   - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
+  - {fileID: 21300000, guid: 95dd10446e2408849973195e4a1f1204, type: 3}
   _characters:
   - Id: 0
     Idle: {fileID: 21300000, guid: f0a9188eee41a1844a1eb3b68d566345, type: 3}
