@@ -65,3 +65,4 @@ Packages/MCPForUnity/
 # Python 脚本跑完留下的字节码缓存
 __pycache__/
 *.pyc
+/build_logs/
