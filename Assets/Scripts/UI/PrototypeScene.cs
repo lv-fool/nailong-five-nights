@@ -439,7 +439,12 @@ namespace NailongFNAF.UI
         private Image _flashlightGlow;
         private float _flashlightGlowAlpha;
         private Image _monitorOverlay;
-        private Image _monitorCharacter;
+        /// <summary>
+        /// 监控画面里叠的敌人立绘槽位（最多三个）。
+        /// 同一机位可能站着不止一个（比如舞台上的袋鼠 + 牛来），
+        /// 所以用数组横排，而不是单个 Image。
+        /// </summary>
+        private Image[] _monitorCharacters;
         private CanvasGroup _monitorMapGroup;
         private Text _monitorLabel;
         private Image[] _camBoxes;
@@ -1164,7 +1169,24 @@ namespace NailongFNAF.UI
                 _enemySideRight.gameObject.SetActive(false);
             }
 
-            _monitorCharacter.gameObject.SetActive(false);
+            HideMonitorCharacters();
+        }
+
+        /// <summary>把所有监控角色槽位收起来。</summary>
+        private void HideMonitorCharacters()
+        {
+            if (_monitorCharacters == null)
+            {
+                return;
+            }
+
+            foreach (var img in _monitorCharacters)
+            {
+                if (img != null)
+                {
+                    img.gameObject.SetActive(false);
+                }
+            }
         }
 
         /// <summary>
@@ -1320,7 +1342,7 @@ namespace NailongFNAF.UI
                 _monitorOverlay.sprite = _solidSprite;
                 _monitorOverlay.color = Color.black;
                 _monitorLabel.text = CameraName(index) + "    (AUDIO ONLY)";
-                _monitorCharacter.gameObject.SetActive(false);
+                HideMonitorCharacters();
                 UpdateCameraBoxes(index);
                 return;
             }
@@ -1351,33 +1373,36 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 监控画面里叠谁。同一机位最多只会画一个：奶龙优先（它蹲在机位偷电，正对镜头所以用 stare），
-        /// 其次袋鼠、牛来（照 FNAF 1，邦尼/奇卡沿机位路径逐房间推进，在监控里是站姿）。
-        /// **敌人一离开机位就拍不到它了** —— 尤其站到门口后它不再是「蹲机位」的状态，
-        /// 属于门口的威胁，玩家得转头看门灯、而不是在监控里找它。
+        /// 监控画面里叠谁。**同一机位可以站多个**（FNAF 1 的舞台上就有三只），
+        /// 横排摆开；只有一个时居中。
+        ///
+        /// 奶龙的贴图按状态分：偷电态 stare（正对镜头）、进攻态 idle（侧身）。
+        /// 袋鼠 / 牛来照 FNAF 1 沿机位路径推进，在监控里是站姿。
+        /// **敌人站到门口后就拍不到它了** —— 那时它是门口的威胁，得转头看门灯。
         /// </summary>
         private void ApplyMonitorCharacter(GameManager gm)
         {
-            if (_enemyDirector == null)
+            if (_enemyDirector == null || _monitorCharacters == null)
             {
-                _monitorCharacter.gameObject.SetActive(false);
                 return;
             }
 
             int cam = gm.CurrentCameraIndex;
 
-            // 奶龙优先 —— **两个状态用不同贴图**（绿子 2026-10-17 要求）：
-            //   偷电态：stare（正对镜头，它蹲在机位上盯着你偷电）
-            //   进攻态：idle（侧身站着，跟袋鼠/牛来在机位上一样）
+            // 收集这一机位上能拍到的敌人（最多三个槽位）
+            var ids = new EnemyId[_monitorCharacters.Length];
+            var poses = new CharacterPose[_monitorCharacters.Length];
+            int count = 0;
+
             var nailong = _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain;
             if (nailong != null && !nailong.IsAttacking
                 && nailong.Stage < nailong.MaxStage
-                && nailong.CameraIndex == cam)
+                && nailong.CameraIndex == cam
+                && count < ids.Length)
             {
-                var pose = nailong.IsApproaching ? CharacterPose.Idle : CharacterPose.Stare;
-                ShowCharacter(_monitorCharacter, EnemyId.Nailong, pose,
-                    MonitorCharacterHeight);
-                return;
+                ids[count] = EnemyId.Nailong;
+                poses[count] = nailong.IsApproaching ? CharacterPose.Idle : CharacterPose.Stare;
+                count++;
             }
 
             // 门类敌人（袋鼠 / 牛来）：停在某个机位时才现形
@@ -1389,16 +1414,34 @@ namespace NailongFNAF.UI
                     continue;
                 }
 
-                if (door.PathCameraIndex == cam)
+                if (door.PathCameraIndex == cam && count < ids.Length)
                 {
-                    ShowCharacter(_monitorCharacter, door.Id, CharacterPose.Idle,
-                        MonitorCharacterHeight);
-                    return;
+                    ids[count] = door.Id;
+                    poses[count] = CharacterPose.Idle;
+                    count++;
                 }
             }
 
-            // 噜噜改走正门了，不再出现在任何机位里
-            _monitorCharacter.gameObject.SetActive(false);
+            // 横排摆开：一个居中，两个左右分开，三个均分
+            for (int i = 0; i < _monitorCharacters.Length; i++)
+            {
+                var img = _monitorCharacters[i];
+
+                if (i >= count)
+                {
+                    img.gameObject.SetActive(false);
+                    continue;
+                }
+
+                ShowCharacter(img, ids[i], poses[i], MonitorCharacterHeight);
+
+                float step = count <= 1 ? 0f : (count == 2 ? 260f : 230f);
+                float offsetX = (i - (count - 1) * 0.5f) * step;
+
+                var rect = img.rectTransform;
+                rect.anchoredPosition = new Vector2(offsetX, 46f);
+                rect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
+            }
         }
 
         private static string CameraName(int index)
@@ -2119,23 +2162,31 @@ namespace NailongFNAF.UI
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
 
-            // 监控画面里的敌人立绘（奶龙蹲在机位里）
-            var charGo = new GameObject("MonitorCharacter", typeof(RectTransform), typeof(Image));
-            charGo.transform.SetParent(_monitorOverlay.transform, false);
+            // 监控画面里的敌人立绘 —— 三个槽位，同一机位可以站多个
+            _monitorCharacters = new Image[3];
 
-            var charRect = charGo.GetComponent<RectTransform>();
-            charRect.anchorMin = new Vector2(0.5f, 0f);
-            charRect.anchorMax = new Vector2(0.5f, 0f);
-            charRect.pivot = new Vector2(0.5f, 0f);
-            charRect.anchoredPosition = new Vector2(0f, 46f);
-            charRect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
+            for (int i = 0; i < _monitorCharacters.Length; i++)
+            {
+                var charGo = new GameObject("MonitorCharacter" + i,
+                    typeof(RectTransform), typeof(Image));
+                charGo.transform.SetParent(_monitorOverlay.transform, false);
 
-            _monitorCharacter = charGo.GetComponent<Image>();
-            _monitorCharacter.sprite = _solidSprite;
-            _monitorCharacter.preserveAspect = true;
-            _monitorCharacter.raycastTarget = false;
-            _monitorCharacter.color = Color.white;
-            charGo.SetActive(false);
+                var charRect = charGo.GetComponent<RectTransform>();
+                charRect.anchorMin = new Vector2(0.5f, 0f);
+                charRect.anchorMax = new Vector2(0.5f, 0f);
+                charRect.pivot = new Vector2(0.5f, 0f);
+                charRect.anchoredPosition = new Vector2(0f, 46f);
+                charRect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
+
+                var img = charGo.GetComponent<Image>();
+                img.sprite = _solidSprite;
+                img.preserveAspect = true;
+                img.raycastTarget = false;
+                img.color = Color.white;
+
+                _monitorCharacters[i] = img;
+                charGo.SetActive(false);
+            }
 
             // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));

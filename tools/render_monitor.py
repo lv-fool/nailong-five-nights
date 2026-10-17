@@ -50,6 +50,7 @@ CABINET_TINT = gpa.CABINET_TINT                          # 金属柜 / 架子
 FRAME_TINT = gpa.FRAME_TINT                              # 镜面 / 亮金属
 DOOR_TINT = np.array([0.26, 0.22, 0.20], np.float32)     # 转角那扇门
 MIRROR_TINT = np.array([0.62, 0.66, 0.74], np.float32)   # 镜子（比墙略亮，别过曝）
+CARTON_TINT = np.array([0.46, 0.36, 0.24], np.float32)   # 纸箱
 
 
 def box(bmin, bmax, default, faces=None, band=False):
@@ -165,15 +166,15 @@ def boxes_1b():
     parts = [
         box((-6.0, 0.0, -5.0), (6.0, 3.2, 5.0),
             ("wall", WALL, 2.4, 0.12), band=True),
-        # 长桌
-        box((-2.6, 0.0, -0.55), (2.6, 0.76, 0.55),
+        # 长桌（往房间深处挪 —— 贴着镜头摆会被透视压扁成一条边）
+        box((-2.6, 0.0, -2.05), (2.6, 0.76, -0.95),
             ("wall", DESK_TOP_TINT, 1.4, 0.10)),
     ]
 
     # 两侧椅子（座 + 靠背），简化的派对椅
-    for i, x in enumerate((-1.8, 0.0, 1.8)):
+    for x in (-1.8, 0.0, 1.8):
         for side in (-1.0, 1.0):
-            z0 = 0.55 if side > 0 else -0.55 - 0.5
+            z0 = -0.95 if side > 0 else -2.55
             parts.append(box((x - 0.24, 0.0, z0), (x + 0.24, 0.45, z0 + 0.5),
                              ("wall", CHAIR_TINT, 1.2, 0.08)))
             zb = z0 + (0.42 if side > 0 else 0.0)
@@ -208,6 +209,12 @@ def boxes_corner(sign=-1):
         # 通往办公室的那扇门（深色门板，贴在尽头墙上）
         box((-0.55, 0.0, -1.50), (0.55, 2.05, -1.45),
             ("metal", DOOR_TINT, 1.4, 0.10)),
+        # 墙角的柜子（别让转角只有一堵空墙）
+        box((-1.45, 0.0, -1.45), (-0.85, 1.30, -0.95),
+            ("metal", CABINET_TINT, 1.0, 0.12)),
+        # 地上的纸箱
+        box((0.85, 0.0, -1.40), (1.40, 0.62, -0.85),
+            ("paper", CARTON_TINT, 1.1, 0.14)),
     ]
 
 
@@ -226,6 +233,12 @@ def boxes_3():
         # 架子
         box((0.30, 0.0, -2.05), (1.25, 1.70, -1.30),
             ("metal", CABINET_TINT, 1.0, 0.14)),
+        # 架子上堆的纸箱
+        box((0.40, 1.70, -1.95), (0.95, 2.10, -1.45),
+            ("paper", CARTON_TINT, 1.1, 0.12)),
+        # 地上的水桶
+        box((-1.20, 0.0, -0.55), (-0.75, 0.50, -0.10),
+            ("metal", CABINET_TINT, 0.7, 0.10)),
     ]
 
 
@@ -364,8 +377,8 @@ def render_shot(name):
     else:
         gpa.DECALS = []
 
-    # 画别比墙亮太多（监控画面里纸不会发白光）
-    gpa.POSTER_GAIN = 0.52
+    # 画别比墙亮太多，但也不能暗到看不见
+    gpa.POSTER_GAIN = 0.68
 
     dirs = gpa.look_rays(cam, yaw)
     proj = lambda pt: gpa.project(pt, cam, yaw)
@@ -376,6 +389,13 @@ def render_shot(name):
 
     # ⚠️ 舞台**不放静态角色** —— 监控里的敌人是运行时按位置叠上去的
     # （见 PrototypeScene.ApplyMonitorCharacter）。背景再画一遍就重复了。
+    # 但**后台架子上的玩偶头套是道具**，不是活敌人，可以画进背景。
+    if name == "5":
+        for x, code in ((-1.45, "nailong"), (0.0, "daishu"), (1.45, "niulai")):
+            img = paste_billboard(img, cam, yaw,
+                                  gpa.load_character(code, "stare"),
+                                  x, 0.98, -1.62, 0.80, dim=0.68)
+
     return img
 
 

@@ -32,11 +32,14 @@ namespace NailongFNAF.Gameplay
 
         [Header("门类敌人的机位路径（照 FNAF 1 逐房间推进）")]
         [Tooltip("袋鼠（左门，照邦尼）沿路停留的机位下标。走到路径尽头就是左门口。"
-            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 5=3储藏室 3=2A西走廊 4=2B西走廊转角…")]
-        [SerializeField] private int[] _daishuPath = { 0, 1, 8, 3, 4 };
+            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 5=3储藏室 3=2A西走廊 4=2B西走廊转角。"
+            + "**起点放 0（1A 舞台）是有意的** —— 照 FNAF 1，舞台本来就该站着玩偶；"
+            + "没出动 / 被挡回来的敌人回舞台待命，玩家看 1A 能知道谁还没出发。")]
+        [SerializeField] private int[] _daishuPath = { 0, 1, 5, 3, 4 };
 
         [Tooltip("牛来（右门，照奇卡）沿路停留的机位下标。走到路径尽头就是右门口。"
-            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 10=7厕所 6=4A东走廊 7=4B东走廊转角…")]
+            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 10=7厕所 6=4A东走廊 7=4B东走廊转角。"
+            + "同样从舞台出发 —— 见上。")]
         [SerializeField] private int[] _niulaiPath = { 0, 1, 10, 6, 7 };
 
         [Tooltip("奶龙（右门，照弗莱迪）沿路停留的机位下标。走到路径尽头就是右门口。"
