@@ -1,16 +1,31 @@
 namespace NailongFNAF.Gameplay
 {
     /// <summary>
+    /// 奶龙的两个状态 —— 绿子 2026-10-17 定：
+    /// **偷到电就转化成门类敌人进攻，被防御后再回去偷电**。
+    /// </summary>
+    public enum NailongMode
+    {
+        /// <summary>蹲在某个机位偷电。看监控即止，被看到就换位。</summary>
+        Stealing = 0,
+
+        /// <summary>已经偷到电、转化成门类敌人 —— 沿右门路径进攻，只能关门挡。</summary>
+        Approaching = 1
+    }
+
+    /// <summary>
     /// 奶龙：一边偷电，一边摸右门。
     ///
-    /// 它平时蹲在某个监控机位偷电。**每偷到一次电，就沿右门那条路尝试推进一格**
-    /// （同 FNAF 的掷骰：不超过活动度才算数）。所以它偷得越勤，来得越快。
+    /// **两个状态来回切**（2026-10-17 绿子定）：
+    ///   1. <see cref="NailongMode.Stealing"/> —— 蹲在某个机位偷电。
+    ///      切到它所在的机位看它一眼，它就停手并换位。
+    ///   2. **偷到电就转化成门类敌人**（<see cref="NailongMode.Approaching"/>）——
+    ///      从路径起点开始沿右门一路推进，跟袋鼠 / 牛来一个待遇：
+    ///      到门口门关着就被挡回起点，**被挡回来就回去重新偷电**；
+    ///      门开着撑过宽限就动手。
     ///
-    /// 应对方式还是看监控：把监控切到它所在的机位，它就停手并换位 ——
-    /// 既不偷电、也不推进。这是四个敌人里唯一需要「看监控」才能按住的。
-    ///
-    /// **右门是它和牛来共用的通道**：门口已经站着对方时，它留在走廊等（先来后到）。
-    /// 到了门口，门关着就被挡回起点，门开着撑过宽限时间就动手。
+    /// 两个状态**贴图不一样**（见 <c>PrototypeScene.ApplyMonitorCharacter</c>）：
+    /// 偷电时用 stare（正对镜头），进攻时用 idle（侧身站在机位上）。
     ///
     /// 它**只在「能去的机位表」里换位** —— 不去的机位（比如只有声音、没有画面的厨房）
     /// 在构造时从表里剔掉即可，见 <see cref="NailongBrain(int, IRandomSource, int[])"/>。
@@ -38,6 +53,15 @@ namespace NailongFNAF.Gameplay
 
         /// <summary>它现在蹲在第几个机位（0 起）。</summary>
         public int CameraIndex { get; private set; }
+
+        /// <summary>当前状态：偷电 / 已转化成门类敌人进攻。</summary>
+        public NailongMode Mode { get; private set; }
+
+        /// <summary>当前状态对应的贴图姿态代号 —— 监控画面按它挑图。</summary>
+        public bool IsApproaching
+        {
+            get { return Mode == NailongMode.Approaching; }
+        }
 
         /// <summary>它**可以去**的机位个数 —— 它不去的机位（比如只有声音的厨房）不算在内。</summary>
         public int CameraCount { get; private set; }
@@ -73,6 +97,13 @@ namespace NailongFNAF.Gameplay
 
         private float _stealTimer;
         private float _pendingDrain;
+
+        /// <summary>
+        /// 本帧刚从偷电态转化成进攻态。
+        /// 偷电间隔（6 秒）比移动间隔（5 秒）长 —— 不加这道闸门，
+        /// 转化的同一帧就会立刻掷骰推进一步，玩家看到它「一步跨两格」。
+        /// </summary>
+        private bool _justConverted;
 
         /// <summary>它能蹲的机位（升序）—— 不去的机位不在这张表里。</summary>
         private readonly int[] _cameras;
@@ -152,59 +183,67 @@ namespace NailongFNAF.Gameplay
 
         protected override void OnTick(float dt, EnemyContext ctx)
         {
-            // 监控正停在它这一格 → 现形、停手（不偷电也不推进）
-            //
-            // ⚠️ 只有**还没站到门口**时才算数。到了门口它就是堵在门上的威胁，
-            // 不再是「蹲机位」的状态了 —— 这时监控里看不到它（见 PrototypeScene），
-            // 换位也就无从谈起；应对手段只剩关门。
-            // 不加这个判断的话，它会一边换机位一边还占着右门口，
-            // 「监控里在 3 号机位」和「右门口站着它」同时成立，自相矛盾。
-            if (Stage < MaxStage && ctx.MonitorUp && ctx.CameraIndex == CameraIndex)
-            {
-                IsBeingWatched = true;
-                RevealTimer += dt;
+            // 每帧开头先清「刚转化」闸门 —— 它只挡转化当帧那一次推进
+            _justConverted = false;
 
-                if (RevealTimer >= RevealSeconds)
+            // ---- 状态一：蹲机位偷电 ----
+            if (Mode == NailongMode.Stealing)
+            {
+                // 监控正停在它这一格 → 现形、停手（不偷电）
+                if (ctx.MonitorUp && ctx.CameraIndex == CameraIndex)
                 {
-                    IsBeingWatched = false;
-                    RevealTimer = 0f;
-                    Relocate();
+                    IsBeingWatched = true;
+                    RevealTimer += dt;
+
+                    if (RevealTimer >= RevealSeconds)
+                    {
+                        IsBeingWatched = false;
+                        RevealTimer = 0f;
+                        Relocate();
+                    }
+
+                    return;
                 }
 
+                IsBeingWatched = false;
+                RevealTimer = 0f;
+
+                Steal(dt);
                 return;
             }
 
-            IsBeingWatched = false;
-            RevealTimer = 0f;
-
-            int stageBefore = Stage;
-            StealAndPush(dt, ctx);
-
-            // 本帧刚踏进门口 —— 宽限计时从下一帧才开始算。
-            // 不然「偷电间隔」那一下大步长会直接灌满门口计时，玩家连关门的机会都没有。
-            if (Stage >= MaxStage && stageBefore < MaxStage)
-            {
-                return;
-            }
-
-            // 到了门口之后的宽限：门关着挡回起点、门开着撑够就动手
+            // ---- 状态二：已转化成门类敌人，沿右门推进 ----
+            // 这一段完全走父类的门口逻辑：门关着 → Retreat（退回偷电态），门开着撑够 → 动手。
             base.OnTick(dt, ctx);
         }
 
         /// <summary>
-        /// 奶龙不参与通用的「每 5 秒掷骰」推进 —— 它的每一步都必须由偷到电换来。
-        /// 覆盖成 false 把通用推进关掉，真正的前进判断在 <see cref="TryAdvance"/> 里，
-        /// 那里调的是 <c>base.CanAdvance</c>（门口占用检查照旧生效）。
+        /// 通用「每 5 秒掷骰」推进只在**进攻态**打开。
+        /// 偷电态关掉（它那会儿不动，只在原地偷电）。
         /// </summary>
         protected override bool CanAdvance(EnemyContext ctx)
         {
-            return false;
+            if (Mode != NailongMode.Approaching)
+            {
+                return false;
+            }
+
+            // 转化的那一帧不许推进（见 _justConverted）
+            if (_justConverted)
+            {
+                return false;
+            }
+
+            return base.CanAdvance(ctx);
         }
 
-        /// <summary>偷电。每偷到一次，就沿右门这条路尝试推进一步。</summary>
-        private void StealAndPush(float dt, EnemyContext ctx)
+        /// <summary>
+        /// 偷电。**偷到一次电就转化成门类敌人**（绿子 2026-10-17 定）：
+        /// 从路径起点开始沿右门进攻，被门挡回来再回去偷电。
+        /// </summary>
+        private void Steal(float dt)
         {
-            // 活动度 0 = 整夜不偷电，也就不推进
+            // 活动度 0 = 整夜不偷电，也就永远不会转化成门类敌人
             if (ActivityLevel <= 0)
             {
                 return;
@@ -218,34 +257,68 @@ namespace NailongFNAF.Gameplay
                 _stealTimer -= interval;
                 _pendingDrain += StealPercentPerTick;
 
-                TryAdvance(ctx);
+                // 偷到电 → 转化。一次就够，不用再掷骰（掷骰交给进攻态的通用推进）
+                BeginApproach();
+                return;
             }
         }
 
-        /// <summary>偷到电 → 掷一次骰，不超过活动度就前进一格。</summary>
-        private void TryAdvance(EnemyContext ctx)
+        /// <summary>偷到电了 —— 从偷电态切成门类敌人，从路径起点开始进攻。</summary>
+        private void BeginApproach()
         {
-            // 已经到门口、或门口站着别人 —— 原地等着
-            // （这里绕开自己覆盖的 CanAdvance，走父类那套「门口占用」判断）
-            if (!base.CanAdvance(ctx))
+            Mode = NailongMode.Approaching;
+            Stage = 0;
+            DoorTimer = 0f;
+            IsBeingWatched = false;
+            RevealTimer = 0f;
+
+            // 转化当帧不许再推进 —— 偷电间隔比移动间隔长，
+            // 不挡这一下就会「刚偷到电就跨一格」。
+            _justConverted = true;
+
+            // 站到路径起点那个机位上，玩家切过去能看见它开始往门口走
+            int pathCam = PathCameraIndex;
+            if (pathCam >= 0)
             {
-                return;
+                CameraIndex = pathCam;
             }
+        }
 
-            if (Rng.Range(1, MaxActivityLevel + 1) <= ActivityLevel)
+        /// <summary>
+        /// 沿路径推进一格 —— 同时把「可见机位」同步到路径对应位置，
+        /// 让玩家在监控里能看着它一步步逼近右门（照弗莱迪）。
+        /// </summary>
+        protected override void Advance(EnemyContext ctx)
+        {
+            base.Advance(ctx);
+            AdvanceCount++;
+
+            // 到路径尽头（= 门口）时 PathCameraIndex 返回 -1 —— 那时它属于门口威胁，
+            // 监控里看不到，只能靠门灯现形。
+            int pathCam = PathCameraIndex;
+            if (pathCam >= 0)
             {
-                Advance(ctx);
-                AdvanceCount++;
+                CameraIndex = pathCam;
+            }
+        }
 
-                // 推进时把「蹲点机位」同步到路径上对应的位置 ——
-                // 让玩家在监控里能看见它在逼近（照弗莱迪沿右门路线）。
-                // 到路径尽头（= 门口）之后就不属于任何机位，监控里看不见它，
-                // 这时威胁已经在门口，应对手段只剩关门。
-                int pathCam = PathCameraIndex;
-                if (pathCam >= 0)
-                {
-                    CameraIndex = pathCam;
-                }
+        /// <summary>
+        /// 被门挡回 / 到门口被赶走 —— 退回**偷电态**，重新蹲机位偷电。
+        /// （父类的 Retreat 会把 Stage 归零，这里再补状态切换。）
+        /// </summary>
+        public override void Retreat()
+        {
+            base.Retreat();
+
+            Mode = NailongMode.Stealing;
+            _stealTimer = 0f;
+            IsBeingWatched = false;
+            RevealTimer = 0f;
+
+            // 回到某个能去的机位继续偷电
+            if (CameraCount > 0)
+            {
+                CameraIndex = _cameras[Rng.Range(0, CameraCount)];
             }
         }
 

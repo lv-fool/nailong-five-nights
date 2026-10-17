@@ -484,38 +484,68 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 奶龙_偷到电就沿右门推进一步()
+        public void 奶龙_偷到电就转化成门类敌人()
         {
+            // 绿子 2026-10-17：偷到电以后转化成门类敌人（不是偷一次推一格）
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var ctx = EnemyContext.Idle();
+
+            Assert.AreEqual(NailongMode.Stealing, brain.Mode);
 
             brain.Tick(brain.StealIntervalSeconds, ctx);
 
             Assert.AreEqual(1f, brain.ConsumePendingDrain(), Tolerance);
-            Assert.AreEqual(1, brain.Stage);
-            Assert.AreEqual(1, brain.AdvanceCount);
+            Assert.AreEqual(NailongMode.Approaching, brain.Mode, "偷到电就该转成门类敌人");
+            Assert.AreEqual(0, brain.Stage, "刚转化时还在路径起点");
         }
 
         [Test]
-        public void 奶龙_配了推进路径时出现在路径机位()
+        public void 奶龙_进攻时沿路径机位逐步逼近()
         {
-            // 绿子：进攻环节在监控里看不见奶龙 —— 配了路径后，
-            // 每推进一格 CameraIndex 要跳到路径对应机位。
+            // 绿子：进攻环节要在监控里看得见 —— 转化后沿路径推进，
+            // 每一步都停在对应机位上。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             brain.SetCameraPath(new[] { 1, 6, 7 });   // 餐厅 → 东走廊 → 东转角
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(brain.StealIntervalSeconds, ctx);   // 推进到路径第 1 格
+            brain.Tick(brain.StealIntervalSeconds, ctx);   // 偷到电 → 转化
+            Assert.AreEqual(NailongMode.Approaching, brain.Mode);
+            Assert.AreEqual(1, brain.CameraIndex, "转化后应站在路径起点（餐厅 1）");
+
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            brain.Tick(step, ctx);                          // 掷骰推进一格
             Assert.AreEqual(1, brain.Stage);
             Assert.AreEqual(6, brain.CameraIndex, "第一步之后应停到东走廊（6）");
 
-            brain.Tick(brain.StealIntervalSeconds, ctx);   // 推进到路径第 2 格
+            brain.Tick(step, ctx);
             Assert.AreEqual(2, brain.Stage);
             Assert.AreEqual(7, brain.CameraIndex, "第二步之后应停到东转角（7）");
 
-            brain.Tick(brain.StealIntervalSeconds, ctx);   // 推进到门口
+            brain.Tick(step, ctx);
             Assert.AreEqual(3, brain.Stage);
             Assert.AreEqual(-1, brain.PathCameraIndex, "到门口后不再属于任何机位");
+        }
+
+        [Test]
+        public void 奶龙_被门挡回后退回偷电状态()
+        {
+            // 绿子：被防御后再次尝试偷电
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            var idle = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, idle);
+            Assert.AreEqual(NailongMode.Approaching, brain.Mode);
+
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            brain.Tick(step, idle);
+            brain.Tick(step, idle);          // 无路径 → MaxStage=2 → 两步到门口
+            Assert.AreEqual(2, brain.Stage);
+
+            var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
+            brain.Tick(0.1f, closed);
+
+            Assert.AreEqual(0, brain.Stage);
+            Assert.AreEqual(NailongMode.Stealing, brain.Mode, "被挡回后要回去偷电");
         }
 
         [Test]
@@ -525,9 +555,11 @@ namespace NailongFNAF.Tests
             var brain = new NailongBrain(1, new FixedRandom(EnemyBrain.MaxActivityLevel), 3);
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(brain.StealIntervalSeconds, ctx);
+            brain.Tick(brain.StealIntervalSeconds, ctx);   // 偷到电 → 转进攻态
+            Assert.AreEqual(NailongMode.Approaching, brain.Mode);
 
-            Assert.AreEqual(1f, brain.ConsumePendingDrain(), Tolerance);
+            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);   // 掷骰没过
+
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(0, brain.AdvanceCount);
         }
@@ -541,11 +573,13 @@ namespace NailongFNAF.Tests
             var taken = new EnemyContext(false, false, false, false, false,
                 ViewSide.Front, 0, EnemyId.Niulai);
 
-            brain.Tick(brain.StealIntervalSeconds, taken);
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            brain.Tick(brain.StealIntervalSeconds, taken);   // 偷到电 → 转进攻态
+            brain.Tick(step, taken);                          // 走廊
             Assert.AreEqual(1, brain.Stage);
 
-            // 再偷一次：走廊 → 门口这一步被挡住，停在走廊
-            brain.Tick(brain.StealIntervalSeconds, taken);
+            // 再走一步：走廊 → 门口这一步被挡住，停在走廊
+            brain.Tick(step, taken);
             Assert.AreEqual(1, brain.Stage);
         }
 
@@ -557,8 +591,10 @@ namespace NailongFNAF.Tests
             var mine = new EnemyContext(false, false, false, false, false,
                 ViewSide.Front, 0, EnemyId.Nailong);
 
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
             brain.Tick(brain.StealIntervalSeconds, mine);
-            brain.Tick(brain.StealIntervalSeconds, mine);
+            brain.Tick(step, mine);
+            brain.Tick(step, mine);
 
             Assert.AreEqual(2, brain.Stage);
         }
@@ -568,15 +604,18 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
 
-            brain.Tick(brain.StealIntervalSeconds, idle);
-            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(brain.StealIntervalSeconds, idle);   // 转进攻态
+            brain.Tick(step, idle);
+            brain.Tick(step, idle);
             Assert.AreEqual(2, brain.Stage);
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
             brain.Tick(0.1f, closed);
 
             Assert.AreEqual(0, brain.Stage);
+            Assert.AreEqual(NailongMode.Stealing, brain.Mode, "被挡回后回去偷电");
         }
 
         [Test]
@@ -584,9 +623,11 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
 
-            brain.Tick(brain.StealIntervalSeconds, idle);
-            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(brain.StealIntervalSeconds, idle);   // 转进攻态
+            brain.Tick(step, idle);
+            brain.Tick(step, idle);
             Assert.AreEqual(2, brain.Stage);
 
             brain.Tick(NailongBrain.DefaultDoorGraceSeconds, idle);
@@ -599,12 +640,13 @@ namespace NailongFNAF.Tests
         {
             // 站到门口之后它就不再是「蹲机位偷电」的状态 —— 监控里看不到它，
             // 换位也就无从谈起；这时的应对手段只剩关门。
-            // 不加这个限制的话，它会一边换机位一边还占着右门口，自相矛盾。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
 
             brain.Tick(brain.StealIntervalSeconds, idle);
-            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(step, idle);
+            brain.Tick(step, idle);
             Assert.AreEqual(2, brain.Stage);
 
             int original = brain.CameraIndex;
@@ -624,9 +666,11 @@ namespace NailongFNAF.Tests
             // 反过来说：到门口之后宽限计时照常走，看监控拦不住它。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
+            float step = EnemyBrain.DefaultMoveIntervalSeconds;
 
             brain.Tick(brain.StealIntervalSeconds, idle);
-            brain.Tick(brain.StealIntervalSeconds, idle);
+            brain.Tick(step, idle);
+            brain.Tick(step, idle);
             Assert.AreEqual(2, brain.Stage);
 
             var watching = new EnemyContext(false, false, false, false, true, ViewSide.Front,

@@ -1361,13 +1361,16 @@ namespace NailongFNAF.UI
 
             int cam = gm.CurrentCameraIndex;
 
-            // 奶龙优先
+            // 奶龙优先 —— **两个状态用不同贴图**（绿子 2026-10-17 要求）：
+            //   偷电态：stare（正对镜头，它蹲在机位上盯着你偷电）
+            //   进攻态：idle（侧身站着，跟袋鼠/牛来在机位上一样）
             var nailong = _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain;
             if (nailong != null && !nailong.IsAttacking
                 && nailong.Stage < nailong.MaxStage
                 && nailong.CameraIndex == cam)
             {
-                ShowCharacter(_monitorCharacter, EnemyId.Nailong, CharacterPose.Stare,
+                var pose = nailong.IsApproaching ? CharacterPose.Idle : CharacterPose.Stare;
+                ShowCharacter(_monitorCharacter, EnemyId.Nailong, pose,
                     MonitorCharacterHeight);
                 return;
             }
