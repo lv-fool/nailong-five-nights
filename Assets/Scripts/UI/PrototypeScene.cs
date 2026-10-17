@@ -105,7 +105,12 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>监控画面里立绘的高度。</summary>
-        private const float MonitorCharacterHeight = 660f;
+        /// <summary>
+        /// 监控画面里叠的敌人立绘高度（像素）。
+        /// 别设太大 —— 660 时占画面 71%，整个人糊在镜头上把房间全挡了；
+        /// 380 约占 41%，跟 FNAF 里敌人在监控画面中的比例接近。
+        /// </summary>
+        private const float MonitorCharacterHeight = 380f;
 
         // 3D 世界物体的排序层。门板在敌人后面一层（敌人站门里，门关上门板挡住它）；
         // 都比相机近，不会和全景内壁交叠闪烁（Sprite 渲染走 sortingOrder，同相机深度）。
@@ -2123,7 +2128,7 @@ namespace NailongFNAF.UI
             charRect.anchorMax = new Vector2(0.5f, 0f);
             charRect.pivot = new Vector2(0.5f, 0f);
             charRect.anchoredPosition = new Vector2(0f, 46f);
-            charRect.sizeDelta = new Vector2(420f, MonitorCharacterHeight);
+            charRect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
 
             _monitorCharacter = charGo.GetComponent<Image>();
             _monitorCharacter.sprite = _solidSprite;

@@ -106,6 +106,11 @@ def boxes_1a():
         # 后墙幕布（贴在舞台后面的一层）
         box((-3.6, 0.45, -3.0), (3.6, 2.75, -2.92),
             ("wall", CURTAIN, 1.1, 0.18)),
+        # 台口两侧的音箱（舞台常驻装饰；角色由代码动态叠加，不画进背景）
+        box((-3.55, 0.45, -2.60), (-2.95, 1.10, -2.05),
+            ("metal", CABINET_TINT, 0.8, 0.10)),
+        box((2.95, 0.45, -2.60), (3.55, 1.10, -2.05),
+            ("metal", CABINET_TINT, 0.8, 0.10)),
     ]
 
 
@@ -369,15 +374,8 @@ def render_shot(name):
                           exposure=1.0, w=gpa.W, h=gpa.H, proj=proj,
                           vig=True, props=False)
 
-    # 舞台上的三只玩偶：直接贴角色立绘（billboard）
-    if name == "1a":
-        img = paste_billboard(img, cam, yaw, gpa.load_character("daishu"),
-                              -2.30, 0.45, -2.55, 1.70)
-        img = paste_billboard(img, cam, yaw, gpa.load_character("nailong"),
-                              0.0, 0.45, -2.55, 1.95)
-        img = paste_billboard(img, cam, yaw, gpa.load_character("niulai"),
-                              2.30, 0.45, -2.55, 1.85)
-
+    # ⚠️ 舞台**不放静态角色** —— 监控里的敌人是运行时按位置叠上去的
+    # （见 PrototypeScene.ApplyMonitorCharacter）。背景再画一遍就重复了。
     return img
 
 
