@@ -82,15 +82,18 @@ namespace NailongFNAF.UI
             _titleView = MakeFullScreenPanel("TitleView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
 
             MakeLabel(_titleView.transform, "奶龙的五夜后宫", 72, new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.5f, 0.62f), new Vector2(0.5f, 0.62f), new Vector2(0f, 0f), new Vector2(1100f, 120f));
+                new Vector2(0.5f, 0.72f), new Vector2(0.5f, 0.72f), new Vector2(0f, 0f), new Vector2(1100f, 120f));
             MakeLabel(_titleView.transform, "NAILONG · FIVE NIGHTS", 26, new Color(0.7f, 0.7f, 0.75f),
-                new Vector2(0.5f, 0.55f), new Vector2(0.5f, 0.55f), new Vector2(0f, 0f), new Vector2(1100f, 50f));
+                new Vector2(0.5f, 0.62f), new Vector2(0.5f, 0.62f), new Vector2(0f, 0f), new Vector2(1100f, 50f));
 
-            // 标题下方的分隔装饰线
-            MakeDivider(_titleView.transform, new Vector2(0.5f, 0.50f));
+            // 分隔装饰线：放在副标题与按钮之间（0.55），别让它压到按钮
+            MakeDivider(_titleView.transform, new Vector2(0.5f, 0.55f));
 
-            MakeMenuButton(_titleView.transform, "开始游戏", new Vector2(0f, 30f), OnStartClicked);
-            MakeMenuButton(_titleView.transform, "退出", new Vector2(0f, -70f), OnQuitClicked);
+            // ⚠️ 按钮 84px 高 ≈ 画布 9%，间距必须留够，否则会和分隔线/彼此重叠
+            MakeMenuButton(_titleView.transform, "开始游戏", Vector2.zero,
+                new Vector2(0.5f, 0.48f), OnStartClicked);
+            MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
+                new Vector2(0.5f, 0.36f), OnQuitClicked);
 
             MakeLabel(_titleView.transform, "撑过 12 点到 6 点。鼠标看左右、升起监控、关门开灯、按手电筒。",
                 20, new Color(0.55f, 0.55f, 0.6f),
@@ -126,25 +129,27 @@ namespace NailongFNAF.UI
             MakeLabel(_levelView.transform, "选择夜晚", 52, new Color(0.95f, 0.85f, 0.3f),
                 new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 90f));
 
-            // 6 个夜晚按钮排两行
+            // 6 个夜晚按钮排两行，anchor 直接按画布比例给（按钮 84px ≈ 画布 9%，行距 0.14 才不叠）
             for (int i = 0; i < NightCount; i++)
             {
                 int night = i;
                 int col = i % 3;
                 int row = i / 3;
-                float x = (col - 1) * 380f;
-                float y = 40f - row * 130f;
+                float x = (col - 1) * 0.16f;
+                float y = 0.58f - row * 0.14f;
 
                 bool unlocked = i <= UnlockedNight;
                 // ⚠️ 别用 emoji（🔒）—— 中文字体/内置字体都没有 emoji 字形，显示成方块。
                 string label = unlocked ? NightName(i) : NightName(i) + " · 未解锁";
 
-                var btn = MakeMenuButton(_levelView.transform, label, new Vector2(x, y),
+                var btn = MakeMenuButton(_levelView.transform, label, Vector2.zero,
+                    new Vector2(0.5f + x, y),
                     unlocked ? (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)) : null);
                 btn.interactable = unlocked;
             }
 
-            MakeMenuButton(_levelView.transform, "返回", new Vector2(0f, -300f), OpenTitle);
+            MakeMenuButton(_levelView.transform, "返回", Vector2.zero,
+                new Vector2(0.5f, 0.16f), OpenTitle);
         }
 
         private void BuildEndView()
@@ -152,15 +157,17 @@ namespace NailongFNAF.UI
             _endView = MakeFullScreenPanel("EndView", new Color(0.02f, 0.02f, 0.03f, 0.96f), _menuRoot.transform);
 
             _endTitleText = MakeLabel(_endView.transform, "", 60, new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.5f, 0.66f), new Vector2(0.5f, 0.66f), new Vector2(0f, 0f), new Vector2(1100f, 100f));
+                new Vector2(0.5f, 0.72f), new Vector2(0.5f, 0.72f), new Vector2(0f, 0f), new Vector2(1100f, 100f));
 
             _endBodyText = MakeLabel(_endView.transform, "", 26, new Color(0.7f, 0.7f, 0.75f),
-                new Vector2(0.5f, 0.52f), new Vector2(0.5f, 0.52f), new Vector2(0f, 0f), new Vector2(1100f, 80f));
+                new Vector2(0.5f, 0.58f), new Vector2(0.5f, 0.58f), new Vector2(0f, 0f), new Vector2(1100f, 80f));
 
-            _endPrimaryButton = MakeMenuButton(_endView.transform, "继续", new Vector2(0f, -30f), OnEndPrimaryClicked);
+            _endPrimaryButton = MakeMenuButton(_endView.transform, "继续", Vector2.zero,
+                new Vector2(0.5f, 0.42f), OnEndPrimaryClicked);
             _endPrimaryLabel = _endPrimaryButton.GetComponentInChildren<Text>();
 
-            MakeMenuButton(_endView.transform, "返回标题", new Vector2(0f, -140f), OpenTitle);
+            MakeMenuButton(_endView.transform, "返回标题", Vector2.zero,
+                new Vector2(0.5f, 0.30f), OpenTitle);
         }
 
         // ---------------------------------------------------------------
@@ -384,13 +391,16 @@ namespace NailongFNAF.UI
             return text;
         }
 
-        private Button MakeMenuButton(Transform parent, string label, Vector2 offset,
+        /// <summary>
+        /// 菜单按钮。锚点由 <paramref name="anchor"/> 定（画布比例），offset 是相对锚点的偏移。
+        /// </summary>
+        private Button MakeMenuButton(Transform parent, string label, Vector2 offset, Vector2 anchor,
             UnityEngine.Events.UnityAction onClick)
         {
             var go = new GameObject("Button", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
             go.transform.SetParent(parent, false);
             var rect = (RectTransform)go.transform;
-            PlaceRect(rect, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), offset, new Vector2(320f, 84f));
+            PlaceRect(rect, anchor, new Vector2(0.5f, 0.5f), offset, new Vector2(320f, 84f));
 
             var image = go.GetComponent<Image>();
             image.sprite = MakeRoundedSprite();
