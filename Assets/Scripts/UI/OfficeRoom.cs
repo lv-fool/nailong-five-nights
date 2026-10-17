@@ -161,10 +161,19 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            var material = new Material(Shader.Find("Unlit/Texture"))
+            // 用 Resources 里的材质（PanoMaterial.mat）—— 材质引用的 shader 和贴图
+            // 必然进包，绕开「内置 shader 被剔除 / Shader.Find 返回 null」的老问题。
+            // 材质由工具脚本生成：Assets/Resources/PanoMaterial.mat（引用项目自带
+            // NailongFNAF/UnlitTexture + office_pano.png）。
+            var material = Resources.Load<Material>("PanoMaterial");
+
+            if (material == null)
             {
-                mainTexture = texture
-            };
+                Debug.LogWarning("[奶龙] 缺材质 Assets/Resources/PanoMaterial.mat，" +
+                                 "检查生成脚本（Editor 菜单）是否跑过");
+                _shell.SetActive(false);
+                return;
+            }
 
             _shell.GetComponent<MeshRenderer>().sharedMaterial = material;
         }
