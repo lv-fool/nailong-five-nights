@@ -497,6 +497,28 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
+        public void 奶龙_配了推进路径时出现在路径机位()
+        {
+            // 绿子：进攻环节在监控里看不见奶龙 —— 配了路径后，
+            // 每推进一格 CameraIndex 要跳到路径对应机位。
+            var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
+            brain.SetCameraPath(new[] { 1, 6, 7 });   // 餐厅 → 东走廊 → 东转角
+            var ctx = EnemyContext.Idle();
+
+            brain.Tick(brain.StealIntervalSeconds, ctx);   // 推进到路径第 1 格
+            Assert.AreEqual(1, brain.Stage);
+            Assert.AreEqual(6, brain.CameraIndex, "第一步之后应停到东走廊（6）");
+
+            brain.Tick(brain.StealIntervalSeconds, ctx);   // 推进到路径第 2 格
+            Assert.AreEqual(2, brain.Stage);
+            Assert.AreEqual(7, brain.CameraIndex, "第二步之后应停到东转角（7）");
+
+            brain.Tick(brain.StealIntervalSeconds, ctx);   // 推进到门口
+            Assert.AreEqual(3, brain.Stage);
+            Assert.AreEqual(-1, brain.PathCameraIndex, "到门口后不再属于任何机位");
+        }
+
+        [Test]
         public void 奶龙_掷骰没过就不推进()
         {
             // 活动度 1，骰子固定掷 20 —— 过不了

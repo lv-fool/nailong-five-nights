@@ -39,6 +39,14 @@ namespace NailongFNAF.Gameplay
             + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 10=7厕所 6=4A东走廊 7=4B东走廊转角…")]
         [SerializeField] private int[] _niulaiPath = { 0, 1, 10, 6, 7 };
 
+        [Tooltip("奶龙（右门，照弗莱迪）沿路停留的机位下标。走到路径尽头就是右门口。"
+            + "弗莱迪 FNAF 1 里从舞台 → 餐厅 → 东走廊 → 东转角逼近右门："
+            + "下标照 PrototypeScene.CameraNames：1=1B餐厅 6=4A东走廊 7=4B东走廊转角。"
+            + "⚠️ 奶龙不是靠「每走一步停留一个机位」的方式偷电的 —— 它有自己的 "
+            + "CameraIndex（蹲点偷电）。这条路只是让它的推进在监控里可见："
+            + "它沿路径前进时，对应机位能看到它。")]
+        [SerializeField] private int[] _nailongPath = { 1, 6, 7 };
+
         [Header("门类敌人动手前的反应窗口（照原版 FNAF 1 的移动机会间隔）")]
         [Tooltip("袋鼠（照邦尼）到门口后，门开着撑多久就动手。原版邦尼移动机会 4.97s。")]
         [SerializeField] private float _daishuDoorGraceSeconds = DoorEnemyBrain.BonnieDoorWindowSeconds;
@@ -205,6 +213,7 @@ namespace NailongFNAF.Gameplay
                 _nailongStealPercent,
                 _nailongRevealSeconds,
                 _nailongDoorGraceSeconds);
+            _nailong.SetCameraPath(_nailongPath);
             _brains[EnemyId.Nailong] = _nailong;
 
             ApplyDifficulty();

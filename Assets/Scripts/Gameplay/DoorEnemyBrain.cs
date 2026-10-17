@@ -46,13 +46,24 @@ namespace NailongFNAF.Gameplay
         /// <summary>
         /// 沿路停留的监控机位（下标）—— 照 FNAF 1 的房间顺序。
         /// 空表表示没配路径，走默认三档。
+        /// ⚠️ 不是 readonly：奶龙是构造之后再调 <see cref="SetCameraPath"/> 补上的。
         /// </summary>
-        private readonly int[] _cameraPath;
+        private int[] _cameraPath;
 
         /// <summary>是否配了机位路径（配了就按机位逐房间推进，否则走默认三档）。</summary>
         public bool HasCameraPath
         {
             get { return _cameraPath != null && _cameraPath.Length > 0; }
+        }
+
+        /// <summary>
+        /// 运行时配置推进路径（奶龙用）。
+        /// 奶龙构造时还不知道路径（要先算它蹲点偷电的机位表），
+        /// 建完再调这个方法把「弗里迪路线」补上 —— 之后 MaxStage = 路径长度。
+        /// </summary>
+        public void SetCameraPath(int[] path)
+        {
+            _cameraPath = (path != null && path.Length > 0) ? (int[])path.Clone() : null;
         }
 
         /// <summary>

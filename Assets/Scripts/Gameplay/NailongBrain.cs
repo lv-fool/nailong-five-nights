@@ -236,6 +236,16 @@ namespace NailongFNAF.Gameplay
             {
                 Advance(ctx);
                 AdvanceCount++;
+
+                // 推进时把「蹲点机位」同步到路径上对应的位置 ——
+                // 让玩家在监控里能看见它在逼近（照弗莱迪沿右门路线）。
+                // 到路径尽头（= 门口）之后就不属于任何机位，监控里看不见它，
+                // 这时威胁已经在门口，应对手段只剩关门。
+                int pathCam = PathCameraIndex;
+                if (pathCam >= 0)
+                {
+                    CameraIndex = pathCam;
+                }
             }
         }
 
