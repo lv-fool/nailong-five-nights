@@ -1422,6 +1422,18 @@ namespace NailongFNAF.UI
                 }
             }
 
+            // 噜噜（照 FNAF 1 的狐狸）：出生在海盗湾，往正门走时在路径机位**探头**
+            var lulu = _enemyDirector.GetBrain(EnemyId.Lulu) as LuluBrain;
+            if (lulu != null && !lulu.IsAttacking
+                && lulu.Stage < lulu.MaxStage
+                && lulu.PathCameraIndex == cam
+                && count < ids.Length)
+            {
+                ids[count] = EnemyId.Lulu;
+                poses[count] = CharacterPose.Peek;
+                count++;
+            }
+
             // 横排摆开：一个居中，两个左右分开，三个均分
             for (int i = 0; i < _monitorCharacters.Length; i++)
             {

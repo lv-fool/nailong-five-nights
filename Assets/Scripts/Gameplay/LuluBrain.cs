@@ -27,6 +27,41 @@ namespace NailongFNAF.Gameplay
         /// <summary>活动度满级时的门外宽限（秒）—— 最紧。默认值，可被覆盖。</summary>
         public const float GraceAtMaxActivity = 7.5f;
 
+        /// <summary>
+        /// 沿路停留的监控机位（下标）—— 绿子 2026-10-17 要求：
+        /// **出生地是海盗湾（1C）**，路线要在监控里看得见。
+        /// 空表 = 没配路径，监控里看不到它（旧行为）。
+        /// </summary>
+        private int[] _cameraPath;
+
+        /// <summary>配它的推进路径（海盗湾 → 餐厅 → 正门）。</summary>
+        public void SetCameraPath(int[] path)
+        {
+            _cameraPath = (path != null && path.Length > 0) ? (int[])path.Clone() : null;
+        }
+
+        /// <summary>
+        /// 当前停在哪个监控机位（下标）。**站在正门口**（<see cref="Stage"/> 到顶）、
+        /// 或没配路径时返回 -1 —— 两者都不属于任何机位。
+        /// </summary>
+        public int PathCameraIndex
+        {
+            get
+            {
+                if (_cameraPath == null || _cameraPath.Length == 0)
+                {
+                    return -1;
+                }
+
+                if (Stage < 0 || Stage >= _cameraPath.Length)
+                {
+                    return -1;
+                }
+
+                return _cameraPath[Stage];
+            }
+        }
+
         /// <summary>闪够几次它就退走。</summary>
         public int FlashesToRetreat { get; private set; }
 

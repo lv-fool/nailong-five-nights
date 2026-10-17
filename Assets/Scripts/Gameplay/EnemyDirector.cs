@@ -58,6 +58,11 @@ namespace NailongFNAF.Gameplay
         [SerializeField] private float _niulaiDoorGraceSeconds = DoorEnemyBrain.ChicaDoorWindowSeconds;
 
         [Header("噜噜（照 FNAF 2 的狐狸：不停地按手电筒闪它）")]
+        [Tooltip("噜噜的出生地与推进路径（下标）。照 FNAF 1 的狐狸住在海盗湾，"
+            + "2=1C海盗湾 1=1B餐厅，走完就堵到正门口。"
+            + "配了路径之后它推进时会在这些机位现形（用 peek 探头贴图）。")]
+        [SerializeField] private int[] _luluPath = { 2, 1 };
+
         [Tooltip("闪够几次它就退走。**按次数算** —— 按住不放只算一次，得松手再按。")]
         [SerializeField] private int _luluFlashesToRetreat = LuluBrain.DefaultFlashesToRetreat;
 
@@ -208,6 +213,7 @@ namespace NailongFNAF.Gameplay
                 EnemyBrain.DefaultMoveIntervalSeconds,
                 _luluFlashesToRetreat, 0f);
             lulu.SetGraceRange(_luluGraceAtZeroActivity, _luluGraceAtMaxActivity);
+            lulu.SetCameraPath(_luluPath);
             _brains[EnemyId.Lulu] = lulu;
 
             _nailong = new NailongBrain(0, _rng, NailongCameras(),

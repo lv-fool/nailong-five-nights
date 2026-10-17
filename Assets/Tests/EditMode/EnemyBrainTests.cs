@@ -412,6 +412,26 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
+        public void 噜噜_出生在海盗湾并沿路径逼近正门()
+        {
+            // 绿子 2026-10-17：噜噜的路线也要在监控里看到，出生地是海盗湾
+            var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            brain.SetCameraPath(new[] { 2, 1 });   // 1C 海盗湾 → 1B 餐厅
+            var ctx = EnemyContext.Idle();
+
+            Assert.AreEqual(0, brain.Stage);
+            Assert.AreEqual(2, brain.PathCameraIndex, "出生地应该是海盗湾（2）");
+
+            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+            Assert.AreEqual(1, brain.Stage);
+            Assert.AreEqual(1, brain.PathCameraIndex, "推进一格到餐厅（1）");
+
+            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+            Assert.AreEqual(2, brain.Stage);
+            Assert.AreEqual(-1, brain.PathCameraIndex, "到正门口后不再属于任何机位");
+        }
+
+        [Test]
         public void 噜噜_低活动度给的时间足够把手电筒按起来闪完()
         {
             // 第 1 夜：活动度 1 → 15.6 秒。按 4 次手电筒不到 1 秒，
