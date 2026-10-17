@@ -520,7 +520,7 @@ def render(cam, yaw, tex, seed, dark=0.64, exposure=1.0):
                        W, H, lambda pt: project(pt, cam, yaw))
 
 
-def render_dirs(dirs, tex, seed, dark, exposure, w, h, proj, vig=True):
+def render_dirs(dirs, tex, seed, dark, exposure, w, h, proj, vig=True, props=True):
     """按**调用方给的方向数组**渲染。
 
     这是原来 `render()` 的身体，只是把「针孔射线 + 透视投影」换成了参数。
@@ -674,15 +674,24 @@ def render_dirs(dirs, tex, seed, dark, exposure, w, h, proj, vig=True):
         gain = light_at(p[sel], nm) * POSTER_GAIN
         col = texel(dec, du, dv) * gain
         edge = ((du < 0.015) | (du > 0.985) | (dv < 0.015) | (dv > 0.985))[:, None]
-        color[sel] = np.where(edge, col * 0.42, col)
+        col = np.where(edge, col * 0.42, col)
+
+        # 带 alpha 的贴片（角色立绘）—— 透明处保留墙面，别糊成黑块
+        if col.ndim == 2 and col.shape[1] == 4:
+            a = col[:, 3:4]
+            color[sel] = color[sel] * (1.0 - a) + col[:, :3] * a
+        else:
+            color[sel] = col
 
     # ---- 桌面上的零碎 + 吊灯 + 蛛网（投影成 2D 画上去）
-    prop_img = Image.new("RGB", (w, h), (0, 0, 0))
-    prop_mask = Image.new("L", (w, h), 0)
-    draw_props(prop_img, prop_mask, CAM, 0.0, proj=proj, draw_flat=vig)
-    pm = (np.asarray(prop_mask).astype(np.float32) / 255.0)[..., None]
-    pc = np.asarray(prop_img).astype(np.float32) / 255.0
-    color = color * (1.0 - pm) + pc * pm
+    # 监控房间不画这些（它们是办公室专属的），由调用方传 props=False 跳过。
+    if props:
+        prop_img = Image.new("RGB", (w, h), (0, 0, 0))
+        prop_mask = Image.new("L", (w, h), 0)
+        draw_props(prop_img, prop_mask, CAM, 0.0, proj=proj, draw_flat=vig)
+        pm = (np.asarray(prop_mask).astype(np.float32) / 255.0)[..., None]
+        pc = np.asarray(prop_img).astype(np.float32) / 255.0
+        color = color * (1.0 - pm) + pc * pm
 
     color = post(color, seed, dark, exposure, w, h, vig=vig)
     return Image.fromarray((color * 255).astype(np.uint8), "RGB") \
