@@ -1068,7 +1068,7 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            if (lulu == null || lulu.IsAttacking || lulu.Stage < 1)
+            if (lulu == null || lulu.IsAttacking || lulu.Stage < lulu.MaxStage)
             {
                 _enemyFront.gameObject.SetActive(false);
                 return;
@@ -1080,7 +1080,7 @@ namespace NailongFNAF.UI
             // ⚠️ **只算它已经堵到正门口的时候** —— 还在逼近（侧身那张）时照它没用，
             // 立绘当然也不该有反应，不然玩家会以为「闪了但它不走」。
             // 判定跟 LuluBrain 那边保持一致：手电筒亮着 + 视角在正前方 + 没在看监控。
-            bool atDoor = lulu.Stage >= lulu.MaxStage;
+            bool atDoor = true;   // 到这儿必然是 Stage >= MaxStage = 堵在正门口
             bool shiningAtIt = atDoor && gm.FlashlightOn && !gm.MonitorUp
                 && gm.CurrentView == ViewSide.Front;
 
@@ -1088,15 +1088,10 @@ namespace NailongFNAF.UI
             {
                 pose = CharacterPose.Startled;
             }
-            else if (atDoor)
+            else
             {
                 // 堵到正门口 → 正对镜头
                 pose = CharacterPose.Stare;
-            }
-            else
-            {
-                // 还在逼近 → 站姿
-                pose = CharacterPose.Idle;
             }
 
             // 噜噜站正门口（前墙门洞 z=3.0）。素材朝左画，正前方直接面朝玩家，不用镜像。
