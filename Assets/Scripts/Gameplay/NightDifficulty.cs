@@ -50,13 +50,21 @@ namespace NailongFNAF.Gameplay
         {
             var difficulty = new NightDifficulty();
 
+            // 走门的三条照 **FNAF 1 原版 AI 表**（technicalfnaf 核实）：
+            //   袋鼠 = 邦尼：  夜1=0 夜2=3 夜3=0 夜4=2 夜5=5 夜6=10
+            //   牛来 = 奇卡：  夜1=0 夜2=1 夜3=5 夜4=4 夜5=7 夜6=12
+            //   奶龙 = 弗莱迪：夜1=0 夜2=0 夜3=1 夜4=2 夜5=3 夜6=4
+            // ⚠️ 原版是有回落的（邦尼夜3=0 < 夜2=3），不是每夜递增 ——
+            //   改测试时别想当然地要求单调。
+            // 噜噜走手电筒（不是门类），保留我们的曲线：1/2/4/7/10/16。
+            //
             //        夜   牛来 袋鼠 噜噜 奶龙
-            SetRow(difficulty, 0, 2, 1, 1, 3);
-            SetRow(difficulty, 1, 3, 3, 2, 5);
-            SetRow(difficulty, 2, 5, 5, 4, 7);
-            SetRow(difficulty, 3, 8, 8, 7, 10);
-            SetRow(difficulty, 4, 12, 12, 10, 14);
-            SetRow(difficulty, 5, 18, 18, 16, 18);
+            SetRow(difficulty, 0, 0, 0, 1, 0);
+            SetRow(difficulty, 1, 1, 3, 2, 0);
+            SetRow(difficulty, 2, 5, 0, 4, 1);
+            SetRow(difficulty, 3, 4, 2, 7, 2);
+            SetRow(difficulty, 4, 7, 5, 10, 3);
+            SetRow(difficulty, 5, 12, 10, 16, 4);
 
             return difficulty;
         }

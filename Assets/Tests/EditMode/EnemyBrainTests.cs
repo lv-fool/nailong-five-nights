@@ -899,21 +899,47 @@ namespace NailongFNAF.Tests
         // 难度表
         // ---------------------------------------------------------------
 
+        /// <summary>
+        /// 门类敌人（袋鼠/牛来/奶龙）的活动度照 **FNAF 1 原版 AI 表**，
+        /// 原版是有回落的（邦尼夜 3=0 < 夜 2=3），所以不能要求逐夜递增。
+        /// 校验改成：前三夜总和 ≤ 后三夜总和（整体是变难的）。
+        /// </summary>
         [Test]
-        public void 默认难度表_夜数越靠后活动度越高()
+        public void 默认难度表_门类敌人整体变难()
+        {
+            var difficulty = NightDifficulty.CreateDefault();
+
+            EnemyId[] doorEnemies = { EnemyId.Niulai, EnemyId.Daishu, EnemyId.Nailong };
+            foreach (var enemy in doorEnemies)
+            {
+                int firstHalf = 0;
+                int secondHalf = 0;
+                for (int night = 0; night < 3; night++)
+                {
+                    firstHalf += difficulty.GetLevel(night, enemy);
+                }
+                for (int night = 3; night < 6; night++)
+                {
+                    secondHalf += difficulty.GetLevel(night, enemy);
+                }
+
+                Assert.Greater(secondHalf, firstHalf,
+                    enemy.Code() + " 后三夜总和应该大于前三夜（整体变难）");
+            }
+        }
+
+        /// <summary>噜噜走手电筒线（不是门类），它仍要求逐夜递增。</summary>
+        [Test]
+        public void 默认难度表_噜噜逐夜递增()
         {
             var difficulty = NightDifficulty.CreateDefault();
 
             for (int night = 0; night < NightDifficulty.NightCount - 1; night++)
             {
-                foreach (var enemy in EnemyIds.All)
-                {
-                    int current = difficulty.GetLevel(night, enemy);
-                    int next = difficulty.GetLevel(night + 1, enemy);
-
-                    Assert.GreaterOrEqual(next, current,
-                        enemy.Code() + " 在第 " + (night + 2) + " 夜的活动度不该低于前一夜");
-                }
+                int current = difficulty.GetLevel(night, EnemyId.Lulu);
+                int next = difficulty.GetLevel(night + 1, EnemyId.Lulu);
+                Assert.GreaterOrEqual(next, current,
+                    "噜噜 在第 " + (night + 2) + " 夜的活动度不该低于前一夜");
             }
         }
 
