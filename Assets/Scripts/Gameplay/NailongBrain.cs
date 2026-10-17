@@ -80,7 +80,7 @@ namespace NailongFNAF.Gameplay
         public NailongBrain(int activityLevel, IRandomSource rng, int cameraCount)
             : this(activityLevel, rng, cameraCount,
                 DefaultSlowStealIntervalSeconds, DefaultFastStealIntervalSeconds,
-                DefaultStealPercentPerTick, DefaultRevealSeconds, DefaultDoorGraceSeconds)
+                DefaultStealPercentPerTick, DefaultRevealSeconds, FreddyDoorWindowSeconds)
         {
         }
 
@@ -96,7 +96,7 @@ namespace NailongFNAF.Gameplay
         public NailongBrain(int activityLevel, IRandomSource rng, int[] allowedCameras)
             : this(activityLevel, rng, allowedCameras,
                 DefaultSlowStealIntervalSeconds, DefaultFastStealIntervalSeconds,
-                DefaultStealPercentPerTick, DefaultRevealSeconds, DefaultDoorGraceSeconds)
+                DefaultStealPercentPerTick, DefaultRevealSeconds, FreddyDoorWindowSeconds)
         {
         }
 

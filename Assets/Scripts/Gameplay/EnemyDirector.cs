@@ -30,6 +30,22 @@ namespace NailongFNAF.Gameplay
             + "奶龙不走那里。留空表示 11 个机位它都去。")]
         [SerializeField] private int[] _nailongSkipCameras = { 9 };
 
+        [Header("门类敌人的机位路径（照 FNAF 1 逐房间推进）")]
+        [Tooltip("袋鼠（左门，照邦尼）沿路停留的机位下标。走到路径尽头就是左门口。"
+            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 5=3储藏室 3=2A西走廊 4=2B西走廊转角…")]
+        [SerializeField] private int[] _daishuPath = { 0, 1, 8, 3, 4 };
+
+        [Tooltip("牛来（右门，照奇卡）沿路停留的机位下标。走到路径尽头就是右门口。"
+            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 10=7厕所 6=4A东走廊 7=4B东走廊转角…")]
+        [SerializeField] private int[] _niulaiPath = { 0, 1, 10, 6, 7 };
+
+        [Header("门类敌人动手前的反应窗口（照原版 FNAF 1 的移动机会间隔）")]
+        [Tooltip("袋鼠（照邦尼）到门口后，门开着撑多久就动手。原版邦尼移动机会 4.97s。")]
+        [SerializeField] private float _daishuDoorGraceSeconds = DoorEnemyBrain.BonnieDoorWindowSeconds;
+
+        [Tooltip("牛来（照奇卡）到门口后，门开着撑多久就动手。原版奇卡移动机会 4.98s。")]
+        [SerializeField] private float _niulaiDoorGraceSeconds = DoorEnemyBrain.ChicaDoorWindowSeconds;
+
         [Header("噜噜（照 FNAF 2 的狐狸：不停地按手电筒闪它）")]
         [Tooltip("闪够几次它就退走。**按次数算** —— 按住不放只算一次，得松手再按。")]
         [SerializeField] private int _luluFlashesToRetreat = LuluBrain.DefaultFlashesToRetreat;
@@ -54,7 +70,7 @@ namespace NailongFNAF.Gameplay
         [SerializeField] private float _nailongRevealSeconds = NailongBrain.DefaultRevealSeconds;
 
         [Tooltip("奶龙摸到右门后，门开着撑多久就动手（秒）。")]
-        [SerializeField] private float _nailongDoorGraceSeconds = NailongBrain.DefaultDoorGraceSeconds;
+        [SerializeField] private float _nailongDoorGraceSeconds = NailongBrain.FreddyDoorWindowSeconds;
 
         [Header("断电（照原版分三段走）")]
         [Tooltip("断电到它现身之间的静默（秒）—— 一片漆黑，什么也看不见。")]
@@ -166,8 +182,16 @@ namespace NailongFNAF.Gameplay
 
             // 边的分配照 FNAF 1：邦尼走左门、奇卡走右门、弗莱迪也从右门来。
             // 对应到我们这四个 —— 袋鼠 = 邦尼（左）、牛来 = 奇卡（右）、奶龙 = 弗莱迪（右）。
-            _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Left, 0, _rng);
-            _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 0, _rng);
+            // 照 FNAF 1：邦尼/奇卡不是三档跳，而是沿固定机位路径逐房间推进。
+            // 路径在 Inspector 上配（_daishuPath / _niulaiPath），走到尽头就是门口。
+            _brains[EnemyId.Daishu] = new DoorEnemyBrain(EnemyId.Daishu, Side.Left, 0, _rng,
+                EnemyBrain.DefaultMoveIntervalSeconds,
+                _daishuDoorGraceSeconds,
+                _daishuPath);
+            _brains[EnemyId.Niulai] = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 0, _rng,
+                EnemyBrain.DefaultMoveIntervalSeconds,
+                _niulaiDoorGraceSeconds,
+                _niulaiPath);
 
             var lulu = new LuluBrain(EnemyId.Lulu, 0, _rng,
                 EnemyBrain.DefaultMoveIntervalSeconds,

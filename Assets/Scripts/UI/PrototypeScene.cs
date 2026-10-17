@@ -21,7 +21,7 @@ namespace NailongFNAF.UI
     /// 调试快捷键（官方没有，留着方便调参）：
     ///   · 1~9 / 0 / - 直接跳机位　· R 重开一夜　· [ / ] 换夜　· F1 显示 / 隐藏调试面板
     /// </summary>
-    public class PrototypeScene : MonoBehaviour
+    public partial class PrototypeScene : MonoBehaviour
     {
         /// <summary>立绘姿态。缺哪张按兜底链退，见 <see cref="CharacterArt.Get"/>。</summary>
         public enum CharacterPose
@@ -480,15 +480,24 @@ namespace NailongFNAF.UI
             EnsureAudioManager();
             EnsureRoom();
 
-            _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _font = Resources.Load<Font>("Fonts/simhei");
             if (_font == null)
             {
-                Debug.LogWarning("[奶龙] 没取到内置字体，HUD 上的文字不会显示（功能不受影响）。");
+                // 兜底：内置拉丁字体。中文会显示成方块/空白（功能不受影响）。
+                // 想显示中文，放一个中文字体到 Assets/Resources/Fonts/ 下，命名 simhei。
+                _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            }
+            if (_font == null)
+            {
+                Debug.LogWarning("[奶龙] 没取到任何字体，UI 文字不会显示（功能不受影响）。");
             }
 
             SyncPowerOutMusicLength();
 
             BuildUi();
+
+            // 开始界面 / 关卡选择（见 PrototypeScene.Menu.cs）
+            BuildMenu();
         }
 
         /// <summary>断电演出的音乐段有多长，由音频素材决定 —— 换素材不用改代码。</summary>
@@ -521,6 +530,13 @@ namespace NailongFNAF.UI
         {
             var gm = GameManager.Instance;
             if (gm == null)
+            {
+                return;
+            }
+
+            // 菜单开着 / 出现结算面板时，冻住这一夜，等玩家选择
+            HandleMenu(gm);
+            if (_menuOpen)
             {
                 return;
             }
@@ -1015,8 +1031,8 @@ namespace NailongFNAF.UI
                     continue;
                 }
 
-                // Stage 2 = 站在门口
-                if (door.Stage >= 2)
+                // 站到门口 = Stage 到顶（门类敌人配了机位路径，MaxStage 不再是固定的 2）
+                if (door.Stage >= door.MaxStage)
                 {
                     id = door.Id;
                     return true;
@@ -1330,23 +1346,47 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 监控画面里叠谁。奶龙优先（它蹲在机位偷电，正对镜头所以用 stare）。
-        /// **它一离开机位就不在监控里了** —— 到了右门口它就不再是「蹲机位」的状态，
-        /// 这时它属于门口的威胁，玩家得转头看右门、而不是在监控里找它。
+        /// 监控画面里叠谁。同一机位最多只会画一个：奶龙优先（它蹲在机位偷电，正对镜头所以用 stare），
+        /// 其次袋鼠、牛来（照 FNAF 1，邦尼/奇卡沿机位路径逐房间推进，在监控里是站姿）。
+        /// **敌人一离开机位就拍不到它了** —— 尤其站到门口后它不再是「蹲机位」的状态，
+        /// 属于门口的威胁，玩家得转头看门灯、而不是在监控里找它。
         /// </summary>
         private void ApplyMonitorCharacter(GameManager gm)
         {
-            var nailong = _enemyDirector != null
-                ? _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain
-                : null;
+            if (_enemyDirector == null)
+            {
+                _monitorCharacter.gameObject.SetActive(false);
+                return;
+            }
 
+            int cam = gm.CurrentCameraIndex;
+
+            // 奶龙优先
+            var nailong = _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain;
             if (nailong != null && !nailong.IsAttacking
                 && nailong.Stage < nailong.MaxStage
-                && nailong.CameraIndex == gm.CurrentCameraIndex)
+                && nailong.CameraIndex == cam)
             {
                 ShowCharacter(_monitorCharacter, EnemyId.Nailong, CharacterPose.Stare,
                     MonitorCharacterHeight);
                 return;
+            }
+
+            // 门类敌人（袋鼠 / 牛来）：停在某个机位时才现形
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                var door = brain as DoorEnemyBrain;
+                if (door == null || door is NailongBrain || door.IsAttacking)
+                {
+                    continue;
+                }
+
+                if (door.PathCameraIndex == cam)
+                {
+                    ShowCharacter(_monitorCharacter, door.Id, CharacterPose.Idle,
+                        MonitorCharacterHeight);
+                    return;
+                }
             }
 
             // 噜噜改走正门了，不再出现在任何机位里
@@ -1695,6 +1735,21 @@ namespace NailongFNAF.UI
             var door = brain as DoorEnemyBrain;
             if (door != null)
             {
+                // 配了机位路径（袋鼠 / 牛来）：照 FNAF 1 逐房间推进 ——
+                // 没到门口就报当前机位，到了门口就报 AT DOOR。
+                if (door.HasCameraPath)
+                {
+                    if (door.Stage >= door.MaxStage)
+                    {
+                        return "AT DOOR";
+                    }
+
+                    int cam = door.PathCameraIndex;
+                    return cam >= 0 && cam < CameraNames.Length
+                        ? "CAM " + (cam + 1) + " " + CameraNames[cam].Substring(4).Trim()
+                        : StageName(door.Stage);
+                }
+
                 return StageName(door.Stage);
             }
 
