@@ -60,10 +60,31 @@ namespace NailongFNAF.Core
         /// <summary>是否已经被敌人抓到（走跳杀流程，时间与电量停止推进）。</summary>
         public bool HasBeenCaught { get; private set; }
 
+        /// <summary>
+        /// 敌人从哪一侧突破了防御。Null = 还没突破。
+        /// 突破后该侧的门和灯**立刻失效**（照 FNAF 1 原作：玩家已经来不及反应了）。
+        /// </summary>
+        public Side? BreachedSide { get; private set; }
+
         /// <summary>被敌人抓到，冻结本夜。</summary>
         public void MarkCaught()
         {
             HasBeenCaught = true;
+        }
+
+        /// <summary>
+        /// 记录「哪一侧被突破了」。照 FNAF 1：突破的瞬间该侧门与灯就废了，
+        /// 玩家按了也没用 —— 只是还没跳杀而已（要等监控放下才动手）。
+        /// </summary>
+        public void MarkBreached(Side side)
+        {
+            BreachedSide = side;
+        }
+
+        /// <summary>该侧的门还能不能操作（被突破的那侧就废了）。</summary>
+        public bool IsSideDisabled(Side side)
+        {
+            return BreachedSide.HasValue && BreachedSide.Value == side;
         }
 
         private void Awake()
@@ -149,6 +170,7 @@ namespace NailongFNAF.Core
             CurrentView = ViewSide.Front;
             CurrentCameraIndex = 0;
             HasBeenCaught = false;
+            BreachedSide = null;
 
             if (Restarted != null)
             {
@@ -187,7 +209,7 @@ namespace NailongFNAF.Core
 
         public void ToggleLeftDoor()
         {
-            if (CanOperate())
+            if (CanOperate() && !IsSideDisabled(Side.Left))
             {
                 LeftDoorClosed = !LeftDoorClosed;
             }
@@ -195,7 +217,7 @@ namespace NailongFNAF.Core
 
         public void ToggleRightDoor()
         {
-            if (CanOperate())
+            if (CanOperate() && !IsSideDisabled(Side.Right))
             {
                 RightDoorClosed = !RightDoorClosed;
             }
@@ -203,7 +225,7 @@ namespace NailongFNAF.Core
 
         public void ToggleLeftLight()
         {
-            if (CanOperate())
+            if (CanOperate() && !IsSideDisabled(Side.Left))
             {
                 LeftLightOn = !LeftLightOn;
             }
@@ -211,7 +233,7 @@ namespace NailongFNAF.Core
 
         public void ToggleRightLight()
         {
-            if (CanOperate())
+            if (CanOperate() && !IsSideDisabled(Side.Right))
             {
                 RightLightOn = !RightLightOn;
             }

@@ -1049,5 +1049,58 @@ namespace NailongFNAF.Tests
             difficulty.SetLevel(0, EnemyId.Niulai, -3);
             Assert.AreEqual(0, difficulty.GetLevel(0, EnemyId.Niulai));
         }
+
+        // ---------------------------------------------------------------
+        // 突破后该侧门灯失效（照 FNAF 1：防御失败时本侧先废，再等监控放下跳杀）
+        // ---------------------------------------------------------------
+
+        [Test]
+        public void 突破_标记的那侧门灯失效_另一侧不受影响()
+        {
+            var gm = new UnityEngine.GameObject("gm-test").AddComponent<NailongFNAF.Core.GameManager>();
+            try
+            {
+                gm.Restart();
+                Assert.IsFalse(gm.IsSideDisabled(Side.Left), "还没被突破时两侧都能用");
+
+                gm.MarkBreached(Side.Left);
+
+                Assert.IsTrue(gm.IsSideDisabled(Side.Left), "被突破的左侧应当失效");
+                Assert.IsFalse(gm.IsSideDisabled(Side.Right), "右侧不该被牵连");
+
+                // 左侧门按不动
+                bool leftBefore = gm.LeftDoorClosed;
+                gm.ToggleLeftDoor();
+                Assert.AreEqual(leftBefore, gm.LeftDoorClosed, "左侧门应当按不动");
+
+                // 右侧门照常
+                bool rightBefore = gm.RightDoorClosed;
+                gm.ToggleRightDoor();
+                Assert.AreNotEqual(rightBefore, gm.RightDoorClosed, "右侧门应当照常可用");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gm.gameObject);
+            }
+        }
+
+        [Test]
+        public void 突破_重开一夜后恢复()
+        {
+            var gm = new UnityEngine.GameObject("gm-test2").AddComponent<NailongFNAF.Core.GameManager>();
+            try
+            {
+                gm.MarkBreached(Side.Right);
+                Assert.IsTrue(gm.IsSideDisabled(Side.Right));
+
+                gm.Restart();
+                Assert.IsNull(gm.BreachedSide, "重开一夜后突破状态要清掉");
+                Assert.IsFalse(gm.IsSideDisabled(Side.Right));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gm.gameObject);
+            }
+        }
     }
 }

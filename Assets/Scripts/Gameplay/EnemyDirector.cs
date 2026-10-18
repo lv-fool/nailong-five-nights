@@ -111,6 +111,13 @@ namespace NailongFNAF.Gameplay
         private GameManager _game;
         private bool _attackFired;
 
+        /// <summary>
+        /// 已突破但还没动手的敌人。照 FNAF 1：门被突破后该侧门灯立刻失效，
+        /// **要等玩家放下监控才跳杀** —— 给玩家一瞬间的「完了」的绝望感，
+        /// 而不是当场黑屏。
+        /// </summary>
+        private EnemyId? _breachingEnemy;
+
         /// <summary>断电之后的那一段（奶龙收电费）。</summary>
         public BlackoutSequence Blackout
         {
@@ -289,6 +296,26 @@ namespace NailongFNAF.Gameplay
             }
         }
 
+        /// <summary>
+        /// 某个敌人是从哪一侧摸过来的。噜噜走正门、不属于任何一侧，
+        /// 这里给它 Left 只是为了让「门灯失效」有个落点 —— 正门没有门灯，
+        /// 见 <see cref="BreachDisablesSide"/> 的判断。
+        /// </summary>
+        private Side BreachSideOf(EnemyId id)
+        {
+            EnemyBrain brain;
+            if (_brains.TryGetValue(id, out brain))
+            {
+                var door = brain as DoorEnemyBrain;
+                if (door != null)
+                {
+                    return door.Side;
+                }
+            }
+
+            return Side.Left;
+        }
+
         /// <summary>右门口现在站着谁（没人就 null）。</summary>
         private EnemyId? FindRightDoorHolder()
         {
@@ -374,21 +401,45 @@ namespace NailongFNAF.Gameplay
                 game.Power.DrainAmount(drain);
             }
 
-            // 有人动手 → 冻结本夜，抛事件（一次只抛一个）
-            foreach (var pair in _brains)
+            // 有人突破防御 → 先标记「这侧门灯废了」，**暂不跳杀**
+            if (!_breachingEnemy.HasValue)
             {
-                if (pair.Value.IsAttacking)
+                foreach (var pair in _brains)
                 {
-                    _attackFired = true;
-                    game.MarkCaught();
-
-                    if (Attacked != null)
+                    if (!pair.Value.IsAttacking)
                     {
-                        Attacked(pair.Key);
+                        continue;
+                    }
+
+                    _breachingEnemy = pair.Key;
+
+                    // ⚠️ 这里**不能** MarkCaught()：那会让 UI 的 CanOperate() 变 false，
+                    // 监控就再也放不下来，而跳杀正等着「监控放下」—— 会死锁。
+                    // 突破只是锁住**门和灯**（MarkBreached），监控还要留给玩家放。
+
+                    // 突破的那一侧：门和灯立刻失效（照 FNAF 1）。
+                    // 噜噜走**正门**，两侧门灯都不该锁 —— 它没有门。
+                    if (!(pair.Value is LuluBrain))
+                    {
+                        game.MarkBreached(BreachSideOf(pair.Key));
                     }
 
                     break;
                 }
+            }
+
+            // 已经突破了：等监控放下（或本来就没升起）才真正动手
+            if (_breachingEnemy.HasValue && !game.MonitorUp)
+            {
+                _attackFired = true;
+                game.MarkCaught();
+
+                if (Attacked != null)
+                {
+                    Attacked(_breachingEnemy.Value);
+                }
+
+                _breachingEnemy = null;
             }
         }
     }

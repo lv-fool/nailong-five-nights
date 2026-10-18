@@ -46,6 +46,12 @@ namespace NailongFNAF.UI
         // 结算面板文案
         private Text _endTitleText;
         private Text _endBodyText;
+
+        /// <summary>跳杀后那个敌人说的一句话（每只各有自己的台词）。</summary>
+        private Text _endQuoteText;
+
+        /// <summary>念那句台词的语音轨（素材可选，没有就只显示字幕）。</summary>
+        private AudioSource _endQuoteAudio;
         private Button _endPrimaryButton;
         private Text _endPrimaryLabel;
 
@@ -162,12 +168,31 @@ namespace NailongFNAF.UI
             _endBodyText = MakeLabel(_endView.transform, "", 26, new Color(0.7f, 0.7f, 0.75f),
                 new Vector2(0.5f, 0.58f), new Vector2(0.5f, 0.58f), new Vector2(0f, 0f), new Vector2(1100f, 80f));
 
+            // 跳杀那只敌人说的台词 —— 斜体感靠颜色区分（Unity 内置字体没有真斜体）
+            _endQuoteText = MakeLabel(_endView.transform, "", 30, new Color(0.85f, 0.78f, 0.55f),
+                new Vector2(0.5f, 0.50f), new Vector2(0.5f, 0.50f), new Vector2(0f, 0f), new Vector2(1100f, 70f));
+            _endQuoteText.fontStyle = FontStyle.Italic;
+
+            if (_endQuoteText != null)
+            {
+                _endQuoteText.raycastTarget = false;
+            }
+
             _endPrimaryButton = MakeMenuButton(_endView.transform, "继续", Vector2.zero,
                 new Vector2(0.5f, 0.42f), OnEndPrimaryClicked);
             _endPrimaryLabel = _endPrimaryButton.GetComponentInChildren<Text>();
 
             MakeMenuButton(_endView.transform, "返回标题", Vector2.zero,
                 new Vector2(0.5f, 0.30f), OpenTitle);
+
+            // 台词语音轨：素材缺失时静默，不影响任何流程
+            var voiceGo = new GameObject("EndQuoteVoice");
+            voiceGo.transform.SetParent(_endView.transform, false);
+            _endQuoteAudio = voiceGo.AddComponent<AudioSource>();
+            _endQuoteAudio.playOnAwake = false;
+            _endQuoteAudio.loop = false;
+            _endQuoteAudio.spatialBlend = 0f;
+            _endQuoteAudio.volume = 0.95f;
         }
 
         // ---------------------------------------------------------------
@@ -310,6 +335,12 @@ namespace NailongFNAF.UI
 
             _endPrimaryLabel.text = wasLast ? "返回标题" : "下一夜";
             _endPrimaryButton.interactable = !wasLast;
+
+            // 通关没有「谁说了句话」，清掉上一局残留的台词
+            if (_endQuoteText != null)
+            {
+                _endQuoteText.text = string.Empty;
+            }
         }
 
         private void ShowLoseEnd()
@@ -328,12 +359,74 @@ namespace NailongFNAF.UI
             _endBodyText.text = NightName(current) + " 失败 —— 再来一次。";
             _endPrimaryLabel.text = "重试本夜";
             _endPrimaryButton.interactable = true;
+
+            // 跳杀完，那只敌人说一句话
+            _endQuoteText.text = QuoteFor(_jumpscareEnemy);
+            PlayEndQuoteVoice(_jumpscareEnemy);
+        }
+
+        /// <summary>
+        /// 播「被谁抓到就放谁的语音」。
+        /// 素材放 <c>Assets/Resources/Audio/voice_&lt;代号&gt;</c>
+        /// （如 <c>voice_nailong.mp3</c>），没有就**只显示字幕**，不报错、不影响流程。
+        /// 所以做语音可以一条一条慢慢补，缺哪条就用哪条的文字版。
+        /// </summary>
+        private void PlayEndQuoteVoice(EnemyId id)
+        {
+            if (_endQuoteAudio == null)
+            {
+                return;
+            }
+
+            _endQuoteAudio.Stop();
+
+            string path = "Audio/voice_" + id.Code();
+            AudioClip clip = Resources.Load<AudioClip>(path);
+            if (clip == null)
+            {
+                // 还没做语音 —— 静默跳过，字幕照常显示
+                return;
+            }
+
+            _endQuoteAudio.clip = clip;
+            _endQuoteAudio.Play();
+        }
+
+        /// <summary>
+        /// 每只敌人被抓到后的台词。
+        /// 调子跟美术一样是「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。
+        /// 改台词只动这张表。
+        /// </summary>
+        private static string QuoteFor(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Nailong:
+                    return "「电量我收下啦～下次记得省着点用哦。」";
+
+                case EnemyId.Niulai:
+                    return "「门关得挺快嘛……可惜我比门快。」";
+
+                case EnemyId.Daishu:
+                    return "「你刚才没开灯吧？那你怎么知道门外是谁呢。」";
+
+                case EnemyId.Lulu:
+                    return "「手电筒呢？这次好像闪得不够亮呀。」";
+
+                default:
+                    return string.Empty;
+            }
         }
 
         private void OnEndPrimaryClicked()
         {
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
             bool wasLast = current >= NightCount - 1;
+
+            if (_endQuoteAudio != null)
+            {
+                _endQuoteAudio.Stop();
+            }
 
             if (_endTitleText.text == "你被抓住了")
             {

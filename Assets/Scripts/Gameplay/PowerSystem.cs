@@ -55,6 +55,15 @@ namespace NailongFNAF.Gameplay
             UsageLevel = MinUsageLevel;
         }
 
+        /// <summary>
+        /// 直接把电量设成某个值（0 ~ 100）。
+        /// **只给调试面板用** —— 正常玩法里电量只减不增。
+        /// </summary>
+        public void SetLevel(float level)
+        {
+            Level = Clamp(level, 0f, MaxLevel);
+        }
+
         /// <summary>设置当前使用等级，超出 1 ~ 5 会被夹回来。</summary>
         public void SetUsageLevel(int level)
         {

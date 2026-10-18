@@ -1,8 +1,10 @@
+using System.IO;
 using System.Text;
 using NailongFNAF.Audio;
 using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
+using UnityEngine.Video;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
@@ -170,6 +172,69 @@ namespace NailongFNAF.UI
 
         /// <summary>跳杀立绘按这个宽度铺满屏幕（UI 参考分辨率）。</summary>
         private const float JumpscareWidth = 1920f;
+
+        /// <summary>
+        /// 跳杀视频在 StreamingAssets 下的目录（相对路径）。
+        /// StreamingAssets 是**不压缩、保持原格式**进包体的，适合 mp4 ——
+        /// Resources 也能放，但那会把视频塞进序列化资源里，白白多占一份体积。
+        /// </summary>
+        private const string JumpscareVideoFolder = "Video/Jumpscares";
+
+        /// <summary>
+        /// 视频倍速。素材 5.16 秒，**只播前半段**（约 2.58 秒）再乘这个倍速，
+        /// 实际 0.74 秒就播完 —— 原作也是一闪而过。
+        /// </summary>
+        private const float JumpscareVideoSpeed = 3.5f;
+
+        /// <summary>
+        /// 跳杀视频播多久（秒）= 前半段时长 ÷ 倍速。
+        /// 素材 5.16 秒 → 前半段 2.58 秒 → ÷ 3.5 ≈ 0.74 秒。
+        /// </summary>
+        private const float JumpscareVideoSeconds = 2.58f / JumpscareVideoSpeed;
+
+        /// <summary>
+        /// 水印遮挡块在 1920×1080 视频里的位置（**左下角为原点**，x 向右、y 向上）。
+        ///
+        /// 生成的素材右下角烧着「千问AI生成」，实测水印占 x 1722~1884、y 41~69，
+        /// 四周是纯黑（平均亮度 0.002），所以直接盖一块黑色就抹平了，不用重编码视频。
+        /// 这里比实测范围各留一圈余量，防止边缘残留。
+        /// </summary>
+        private static readonly Rect JumpscareWatermarkRect =
+            new Rect(1680f, 20f, 240f, 80f);
+
+        /// <summary>
+        /// 跳杀音效在 Resources 下的路径（不含扩展名）。
+        /// 用 **mp3 放 Resources** 而不是丢 StreamingAssets 自己解析 ——
+        /// Unity 原生支持 mp3 导入，直接 Resources.Load 就是 AudioClip，
+        /// 省掉手写解码器（试过 WAV 手写读取，换成 mp3 后没必要了）。
+        /// </summary>
+        private const string JumpscareSfxPath = "Audio/sfx_jumpscare";
+
+        /// <summary>门口立绘的目标高度（米）。门洞 2.05m，留一点头顶余量。</summary>
+        private const float TargetHeightMeters = 1.8f;
+
+        /// <summary>
+        /// 正门噜噜往下沉多少米 —— 让桌子挡住它下半身。
+        ///
+        /// ⚠️ **sprite 的 pivot 在正中间**（立绘 955x1176，pivot 477.5/588），
+        /// 所以 transform.position 是**中心点**、不是脚底。踩过这个坑：
+        /// 按脚底推算沉了 0.78m，结果只剩头皮露在外面（可见 12.9%）。
+        ///
+        /// 正确推导（桌子顶 0.80m、立绘高 1.293m、锚点原在 y=1.1）：
+        ///   目标：露出顶部 62.8%（对齐旧 UGUI 版裁到的位置）
+        ///   顶部 = 0.80 + 1.293 x 0.628 = 1.612m
+        ///   中心 = 1.612 - 1.293/2 = 0.966m
+        ///   sink = 1.1 - 0.966 = 0.134m
+        ///
+        /// 换立绘（高度变了）要重算：sink = 1.1 - (0.80 + H*0.628 - H/2)。
+        /// </summary>
+        private const float LuluSinkMeters = 0.134f;
+
+        /// <summary>
+        /// 门口立绘的目标宽度上限（米）。门洞 1.2m，留一点边 ——
+        /// 超出就会被门框挡住 / 比门还宽（袋鼠、牛来踩过）。
+        /// </summary>
+        private const float TargetWidthMeters = 1.05f;
 
         /// <summary>
         /// 中文字体在 Resources 下的路径（不含扩展名）。
@@ -366,6 +431,9 @@ namespace NailongFNAF.UI
         private static readonly Color LightOn = new Color(0.32f, 0.72f, 0.30f);
         private static readonly Color LightOff = new Color(0.13f, 0.32f, 0.14f);
 
+        /// <summary>被敌人突破后，该侧门灯按钮的颜色（几乎全黑，看得出按不动）。</summary>
+        private static readonly Color Disabled = new Color(0.06f, 0.06f, 0.06f);
+
         // 手电筒按钮：亮着是暖黄，松开是灰
         private static readonly Color FlashlightOn = new Color(0.92f, 0.80f, 0.36f);
         private static readonly Color FlashlightOff = new Color(0.24f, 0.23f, 0.20f);
@@ -465,9 +533,23 @@ namespace NailongFNAF.UI
 
         private CanvasGroup _debugGroup;
         private Text _debugText;
+
+        /// <summary>小地图上的敌人头像（4 个敌人各一个）。调试时随时显示。</summary>
+        private Image[] _debugMapPins;
+
+        /// <summary>电量调试用的显示文本。</summary>
+        private Text _debugPowerText;
         private Image _jumpscareOverlay;
         private Image _jumpscareImage;
         private Text _jumpscareText;
+        private RawImage _jumpscareVideoImage;
+        private VideoPlayer _jumpscareVideo;
+        private RenderTexture _jumpscareVideoTarget;
+        private bool _jumpscareVideoPlaying;
+        private float _jumpscareVideoTimer;
+        private Image _jumpscareWatermarkMask;
+        private AudioSource _jumpscareAudio;
+        private AudioClip _jumpscareSfx;
         private Image _blackoutCharacter;
         private Font _font;
         private Sprite _solidSprite;
@@ -537,6 +619,8 @@ namespace NailongFNAF.UI
 
         private void OnDestroy()
         {
+            ReleaseJumpscareVideoTarget();
+
             if (_enemyDirector != null)
             {
                 _enemyDirector.Attacked -= OnEnemyAttacked;
@@ -575,6 +659,7 @@ namespace NailongFNAF.UI
             UpdateHud(gm);
             UpdateJumpscareShake();
             UpdateAudio(gm);
+            UpdateJumpscareVideo();
         }
 
         private static void EnsureGameManager()
@@ -774,6 +859,10 @@ namespace NailongFNAF.UI
 
             _debugVisible = !_debugVisible;
             _debugGroup.alpha = _debugVisible ? 1f : 0f;
+
+            // 面板上有按钮，打开时才接收点击
+            _debugGroup.blocksRaycasts = _debugVisible;
+            _debugGroup.interactable = _debugVisible;
         }
 
         // ---------------------------------------------------------------
@@ -979,12 +1068,22 @@ namespace NailongFNAF.UI
             sr.gameObject.SetActive(true);
             sr.sprite = sprite;
 
-            // 高度定 1.8m（人站门洞里，头顶低于门洞顶 2.05m）。
-            // 按「目标米高 / (rect.height / PPU)」算缩放 —— Simple 模式下
-            // 世界尺寸 = 像素 ÷ PPU × scale，所以 scale = 目标米高 ÷ (像素 ÷ PPU)。
-            const float TargetHeightMeters = 1.8f;
+            // 尺寸按**高度和宽度双约束**算，取小的那个缩放系数 ——
+            // 只卡高度的话，宽高比大的角色（袋鼠 _idle 0.899、牛来 _stare 1.056）
+            // 横向会撑出 1.6~1.9m，比 1.2m 的门洞还宽（2026-10-18 修）。
+            //
+            // Simple 模式下世界尺寸 = 像素 ÷ PPU × scale，
+            // 所以 scale = min(目标高 ÷ 自然高, 目标宽 ÷ 自然宽)。
             float worldH = sprite.rect.height / sprite.pixelsPerUnit;
-            float s = worldH > 0.001f ? TargetHeightMeters / worldH : 1f;
+            float worldW = sprite.rect.width / sprite.pixelsPerUnit;
+            if (worldH <= 0.001f || worldW <= 0.001f)
+            {
+                sr.gameObject.SetActive(false);
+                return;
+            }
+
+            float s = Mathf.Min(TargetHeightMeters / worldH, TargetWidthMeters / worldW);
+
             sr.drawMode = SpriteDrawMode.Simple;
             sr.transform.localScale = new Vector3(side == Side.Left ? -s : s, s, 1f);
         }
@@ -1103,6 +1202,12 @@ namespace NailongFNAF.UI
 
             // 噜噜站正门口（前墙门洞 z=3.0）。素材朝左画，正前方直接面朝玩家，不用镜像。
             ShowWorldCharacter(_enemyFront, true, EnemyId.Lulu, pose, Side.Right);
+
+            // **桌子挡住下半身**：以前靠 UI 层的 RectMask2D 裁，
+            // 改成 3D 世界物体后遮罩失效，只能用「把立绘往下沉」来模拟。
+            // 沉多少见 LuluSinkMeters 的推导（保持露出约 62.8%）。
+            _enemyFront.transform.position =
+                FrontDoorCenter + new Vector3(0f, -LuluSinkMeters, 0f);
         }
 
         private void HideFrontCharacter()
@@ -1436,7 +1541,11 @@ namespace NailongFNAF.UI
                 count++;
             }
 
-            // 横排摆开：一个居中，两个左右分开，三个均分
+            // ⚠️ **位置和角色绑定，不按「当前有几个」重排**。
+            // 以前是按 count 均分（1 个居中 / 2 个 ±130 / 3 个 ±230）——
+            // 结果同一间屋里走了一个人，剩下的人会**整个挪一下**，看着像画面在动。
+            // 现在每个敌人有固定的站位（按机位号做种子，同一机位永远同一处），
+            // 谁走谁留都不影响别人。
             for (int i = 0; i < _monitorCharacters.Length; i++)
             {
                 var img = _monitorCharacters[i];
@@ -1449,12 +1558,71 @@ namespace NailongFNAF.UI
 
                 ShowCharacter(img, ids[i], poses[i], MonitorCharacterHeight);
 
-                float step = count <= 1 ? 0f : (count == 2 ? 260f : 230f);
-                float offsetX = (i - (count - 1) * 0.5f) * step;
-
                 var rect = img.rectTransform;
-                rect.anchoredPosition = new Vector2(offsetX, 46f);
+
+                // 横排：按**在场人数**定间距，但每个人的**相对次序固定**（按代号排序）。
+                // 这样同屋走掉一个人，剩下的只会重新均分、不会互相换位；
+                // 走掉的那个腾出的空档由剩下的人均摊 —— 观感上像「本来就没那么挤」。
+                float step = count <= 1 ? 0f : (count == 2 ? 300f : 250f);
+                float slotX = (i - (count - 1) * 0.5f) * step;
+
+                // 每人再带一点固定的横向/纵向扰动（按敌人+机位确定性），
+                // 免得站成一排像列队；扰动幅度小于间距的一半，不会撞上。
+                Vector2 jitter = MonitorSlotPosition(ids[i], cam);
+                float smallJitter = Mathf.Clamp(jitter.x, -52f, 52f) * 0.42f;
+
+                rect.anchoredPosition = new Vector2(slotX + smallJitter, jitter.y);
                 rect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
+
+                float scale = MonitorSlotScale(ids[i], cam);
+                rect.localScale = new Vector3(scale, scale, 1f);
+            }
+        }
+
+        /// <summary>
+        /// 某个敌人在某个机位上的固定站位。
+        /// **用「敌人 + 机位」做种子**，所以同一台摄像机同一个敌人永远站同一处 ——
+        /// 同屋其他人走掉也不会带着它挪。不同机位位置不同，避免每间屋都一个样。
+        /// </summary>
+        private static Vector2 MonitorSlotPosition(EnemyId id, int cameraIndex)
+        {
+            // 站位的**顺序**固定（按敌人代号），但**间距**按这间屋子有几个人动态算。
+            //
+            // 为什么不能给每个敌人一个固定 x：四只排开要 -330..330 共 660px，
+            // 平均 220px 一个 —— 但同屋通常只有 1~2 只，按 4 只分会让它们
+            // 散到画面最边上、看着很空。所以：
+            //   · 顺序不变 → 甲永远在乙左边，走人不改变相对次序
+            //   · 间距按在场人数 → 两个人时自然分开，一个人时居中
+            //
+            // slot = 这个敌人在「本次在场名单」里排第几（0 起）。
+            // 由调用方传进来，这里只管摆放。
+            int seed = ((int)id * 7919) ^ (cameraIndex * 104729);
+            float dy = Mathf.Lerp(28f, 62f, Hash01(seed ^ 0x5bf03635));
+
+            // 单只时的轻微横偏（避免永远正中，也别太偏）
+            float soloBias = Mathf.Lerp(-52f, 52f, Hash01(seed));
+            return new Vector2(soloBias, dy);
+        }
+
+        /// <summary>某个敌人在某机位上的固定大小系数（0.88~1.06，确定性）。</summary>
+        private static float MonitorSlotScale(EnemyId id, int cameraIndex)
+        {
+            int seed = ((int)id * 31337) ^ (cameraIndex * 48611) ^ 0x2f1b3c5d;
+            return Mathf.Lerp(0.88f, 1.06f, Hash01(seed));
+        }
+
+        /// <summary>整数种子 → [0,1) 的确定性伪随机（不用 Unity 的 Random，避免污染全局状态）。</summary>
+        private static float Hash01(int seed)
+        {
+            unchecked
+            {
+                uint x = (uint)seed;
+                x ^= x >> 16;
+                x *= 0x7feb352du;
+                x ^= x >> 15;
+                x *= 0x846ca68bu;
+                x ^= x >> 16;
+                return (x & 0xFFFFFF) / 16777216f;
             }
         }
 
@@ -1470,16 +1638,21 @@ namespace NailongFNAF.UI
 
         private void UpdateWallButtonColors(GameManager gm)
         {
-            _doorLeftButton.color = gm.LeftDoorClosed ? DoorOn : DoorOff;
-            _doorRightButton.color = gm.RightDoorClosed ? DoorOn : DoorOff;
-            _lightLeftButton.color = gm.LeftLightOn ? LightOn : LightOff;
-            _lightRightButton.color = gm.RightLightOn ? LightOn : LightOff;
+            // 被敌人突破的那一侧：门灯按钮变暗、失效 —— 照 FNAF 1 的绝望感，
+            // 玩家看着按钮但按不动。
+            bool leftDead = gm.IsSideDisabled(Side.Left);
+            bool rightDead = gm.IsSideDisabled(Side.Right);
+
+            _doorLeftButton.color = leftDead ? Disabled : (gm.LeftDoorClosed ? DoorOn : DoorOff);
+            _doorRightButton.color = rightDead ? Disabled : (gm.RightDoorClosed ? DoorOn : DoorOff);
+            _lightLeftButton.color = leftDead ? Disabled : (gm.LeftLightOn ? LightOn : LightOff);
+            _lightRightButton.color = rightDead ? Disabled : (gm.RightLightOn ? LightOn : LightOff);
 
             // LIGHT 光晕：灯亮 → 亮绿呼吸（径向渐变淡入淡出），灯灭 → 熄灭。
             // 呼吸只动 alpha 和 scale，不动颜色。
             float breathe = 0.82f + Mathf.Sin(Time.time * 2.4f) * 0.18f;
-            ApplyLightGlow(_lightLeftGlow, gm.LeftLightOn, breathe);
-            ApplyLightGlow(_lightRightGlow, gm.RightLightOn, breathe);
+            ApplyLightGlow(_lightLeftGlow, gm.LeftLightOn && !leftDead, breathe);
+            ApplyLightGlow(_lightRightGlow, gm.RightLightOn && !rightDead, breathe);
         }
 
         private static void ApplyLightGlow(Image glow, bool on, float breathe)
@@ -1500,7 +1673,8 @@ namespace NailongFNAF.UI
         }
 
         // ---------------------------------------------------------------
-        // 跳杀（占位：全屏红 + 大字抖动。等 mp4 就绪后换成 VideoPlayer）
+        // 跳杀：优先播 StreamingAssets 里的 mp4（3.5 倍速、只播前半段），
+        // 起不来就退静态惊吓图 —— 永远不会黑屏。
         // ---------------------------------------------------------------
 
         private void OnEnemyAttacked(EnemyId id)
@@ -1512,10 +1686,27 @@ namespace NailongFNAF.UI
             _jumpscareOverlay.gameObject.SetActive(true);
             _jumpscareOverlay.color = Color.black;
 
+            // 优先播视频；起不来（缺素材 / 解码失败）就走静态图兜底
+            if (TryPlayJumpscareVideo(id))
+            {
+                return;
+            }
+
+            ShowStaticJumpscare(id);
+        }
+
+        /// <summary>
+        /// 静态跳杀图兜底。视频缺失、解码失败、平台不支持时都走这条 ——
+        /// **跳杀永远不会变成黑屏**。
+        /// </summary>
+        private void ShowStaticJumpscare(EnemyId id)
+        {
+            StopJumpscareVideo();
+
             var art = FindCharacter(id);
 
             // 走兜底链：没有专属跳杀图就退到 Stare（正面那张）——
-            // 比全屏红 + 大字强，也免得项目作者给的正脸图白放着用不上
+            // 比全屏红 + 大字强，也免得给的正脸图白放着用不上
             Sprite scare = art != null ? art.Get(CharacterPose.Jumpscare) : null;
 
             if (scare != null)
@@ -1544,7 +1735,269 @@ namespace NailongFNAF.UI
         private void ClearJumpscare()
         {
             _hasJumpscare = false;
+            StopJumpscareVideo();
+            StopJumpscareSfx();
             _jumpscareOverlay.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// 掐掉跳杀音效。
+        /// ⚠️ 音效有 3 秒，比视频（0.74 秒）长得多 —— 跳杀结束、重开一夜、
+        /// 退回菜单这些时候必须主动停，否则会拖到下一局还在响。
+        /// </summary>
+        private void StopJumpscareSfx()
+        {
+            if (_jumpscareAudio != null && _jumpscareAudio.isPlaying)
+            {
+                _jumpscareAudio.Stop();
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // 跳杀视频
+        //
+        // 素材在 Assets/Video/Jumpscares/char_<代号>_jumpscare.mp4（StreamingAssets）。
+        // **视频缺失、解码失败、平台不支持 —— 一律静默退回静态跳杀图**，
+        // 所以这一层永远不会把跳杀变成黑屏。
+        // ---------------------------------------------------------------
+
+        /// <summary>跳杀视频的 StreamingAssets 相对路径。代号见 <see cref="EnemyIds.Code"/>。</summary>
+        private static string JumpscareVideoPath(EnemyId id)
+        {
+            return JumpscareVideoFolder + "/char_" + id.Code() + "_jumpscare.mp4";
+        }
+
+        /// <summary>
+        /// 尝试起播跳杀视频。成功返回 true（并已铺好视频层）；
+        /// 素材缺失 / 起不来返回 false，交给调用方走静态图兜底。
+        /// </summary>
+        private bool TryPlayJumpscareVideo(EnemyId id)
+        {
+            string path = Path.Combine(Application.streamingAssetsPath, JumpscareVideoPath(id));
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            EnsureJumpscareVideo();
+            if (_jumpscareVideo == null || _jumpscareVideoTarget == null)
+            {
+                return false;
+            }
+
+            _jumpscareVideoImage.gameObject.SetActive(true);
+            _jumpscareImage.gameObject.SetActive(false);
+            _jumpscareText.gameObject.SetActive(false);
+
+            // 起播前先占位成黑：视频第一帧解码出来之前别露出白色 RawImage
+            _jumpscareVideoImage.color = Color.black;
+
+            _jumpscareVideoPlaying = true;
+            _jumpscareVideoTimer = 0f;
+
+            // 视频里烧着水印 —— 用一块黑盖掉（四周本来就是纯黑，看不出来）
+            if (_jumpscareWatermarkMask != null)
+            {
+                _jumpscareWatermarkMask.gameObject.SetActive(true);
+            }
+
+            PlayJumpscareSfx();
+
+            // 异步准备：好了在 prepareCompleted 里 Play，坏了在 errorReceived 里退回静态图
+            _jumpscareVideo.url = path;
+            _jumpscareVideo.Prepare();
+
+            return true;
+        }
+
+        /// <summary>视频层 + VideoPlayer 只建一次，之后反复用。</summary>
+        private void EnsureJumpscareVideo()
+        {
+            if (_jumpscareVideo != null)
+            {
+                return;
+            }
+
+            // 播到一张 RenderTexture 上，再用 RawImage 铺满屏幕 ——
+            // 视频不能像 Sprite 那样直接塞进 UGUI。
+            var target = new RenderTexture(1920, 1080, 0, RenderTextureFormat.ARGB32);
+            target.Create();
+            _jumpscareVideoTarget = target;
+
+            var imageGo = new GameObject("JumpscareVideo", typeof(RectTransform), typeof(RawImage));
+            imageGo.transform.SetParent(_jumpscareOverlay.transform, false);
+
+            var rect = imageGo.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            // 按画布裁：视频是 16:9，画布不是的时候宁可切边也不留黑边
+            rect.sizeDelta = new Vector2(JumpscareWidth, CanvasHeight);
+
+            _jumpscareVideoImage = imageGo.GetComponent<RawImage>();
+            _jumpscareVideoImage.texture = target;
+            _jumpscareVideoImage.raycastTarget = false;
+            imageGo.SetActive(false);
+
+            // 水印遮挡块：纯黑，盖在视频右下角。
+            // 视频是 1920×1080，RawImage 按 sizeDelta 铺开 —— 这里按比例算位置，
+            // 画布不是 16:9 时也能跟住（视频被裁边，遮罩跟着一起裁）。
+            var maskGo = new GameObject("JumpscareWatermarkMask",
+                typeof(RectTransform), typeof(Image));
+            maskGo.transform.SetParent(imageGo.transform, false);
+
+            var maskRect = maskGo.GetComponent<RectTransform>();
+            maskRect.anchorMin = new Vector2(
+                JumpscareWatermarkRect.x / 1920f,
+                JumpscareWatermarkRect.y / 1080f);
+            maskRect.anchorMax = new Vector2(
+                (JumpscareWatermarkRect.x + JumpscareWatermarkRect.width) / 1920f,
+                (JumpscareWatermarkRect.y + JumpscareWatermarkRect.height) / 1080f);
+            maskRect.offsetMin = Vector2.zero;
+            maskRect.offsetMax = Vector2.zero;
+
+            var mask = maskGo.GetComponent<Image>();
+            mask.sprite = _solidSprite;
+            mask.color = Color.black;
+            mask.raycastTarget = false;
+            _jumpscareWatermarkMask = mask;
+            maskGo.SetActive(false);
+
+            // 跳杀音效：单独一条轨，别占环境音 / 音效的 source
+            var audioGo = new GameObject("JumpscareAudio");
+            audioGo.transform.SetParent(transform, false);
+            var audio = audioGo.AddComponent<AudioSource>();
+            audio.playOnAwake = false;
+            audio.loop = false;
+            audio.spatialBlend = 0f;
+            audio.volume = 0.9f;
+            _jumpscareAudio = audio;
+
+            var player = gameObject.AddComponent<VideoPlayer>();
+            player.playOnAwake = false;
+            player.source = VideoSource.Url;
+            player.isLooping = false;
+            player.waitForFirstFrame = true;
+            player.skipOnDrop = true;
+            player.audioOutputMode = VideoAudioOutputMode.Direct;
+            player.targetTexture = target;
+            player.renderMode = VideoRenderMode.RenderTexture;
+            player.aspectRatio = VideoAspectRatio.Stretch;
+            // 起播回调：有画面了就把黑占位换掉
+            player.prepareCompleted += OnJumpscareVideoPrepared;
+            player.errorReceived += OnJumpscareVideoError;
+
+            _jumpscareVideo = player;
+        }
+
+        private void OnJumpscareVideoPrepared(VideoPlayer source)
+        {
+            if (_jumpscareVideoImage == null || !_jumpscareVideoPlaying)
+            {
+                return;
+            }
+
+            _jumpscareVideoImage.color = Color.white;
+            _jumpscareVideoTimer = 0f;
+
+            // 倍速 + 只播前半段：播到一半就掐掉
+            source.playbackSpeed = JumpscareVideoSpeed;
+            source.Play();
+        }
+
+        /// <summary>视频出问题（文件损坏 / 解码器不支持）→ 立刻退回静态图。</summary>
+        private void OnJumpscareVideoError(VideoPlayer source, string message)
+        {
+            if (!_jumpscareVideoPlaying)
+            {
+                return;
+            }
+
+            Debug.LogWarning("[奶龙] 跳杀视频起不来，退回静态图：" + message);
+            ShowStaticJumpscare(_jumpscareEnemy);
+        }
+
+        /// <summary>把视频停下来并清屏，免得下一次跳杀卡在上一帧。</summary>
+        private void StopJumpscareVideo()
+        {
+            _jumpscareVideoPlaying = false;
+            _jumpscareVideoTimer = 0f;
+
+            if (_jumpscareVideo != null && _jumpscareVideo.isPlaying)
+            {
+                _jumpscareVideo.Stop();
+            }
+
+            if (_jumpscareVideoImage != null)
+            {
+                _jumpscareVideoImage.gameObject.SetActive(false);
+            }
+
+            if (_jumpscareWatermarkMask != null)
+            {
+                _jumpscareWatermarkMask.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// 播跳杀音效。素材放在 <c>Resources/Audio/sfx_jumpscare</c>（mp3 / wav 都行，
+        /// Unity 会导入成 AudioClip）。缺失时静默跳过，不影响跳杀本身。
+        /// </summary>
+        private void PlayJumpscareSfx()
+        {
+            if (_jumpscareAudio == null)
+            {
+                return;
+            }
+
+            if (_jumpscareSfx == null)
+            {
+                // 只加载一次，之后缓存住
+                _jumpscareSfx = Resources.Load<AudioClip>(JumpscareSfxPath);
+                if (_jumpscareSfx == null)
+                {
+                    return;
+                }
+            }
+
+            _jumpscareAudio.Stop();
+            _jumpscareAudio.clip = _jumpscareSfx;
+            _jumpscareAudio.Play();
+        }
+
+        /// <summary>计时：播满 JumpscareVideoSeconds 就掐掉，然后接着抖。</summary>
+        private void UpdateJumpscareVideo()
+        {
+            if (!_jumpscareVideoPlaying)
+            {
+                return;
+            }
+
+            // 还没准备好（Prepare 未完成）不计时 —— 保证完整播满 2.5 秒
+            if (_jumpscareVideo == null || !_jumpscareVideo.isPlaying)
+            {
+                return;
+            }
+
+            _jumpscareVideoTimer += Time.deltaTime;
+            if (_jumpscareVideoTimer >= JumpscareVideoSeconds)
+            {
+                StopJumpscareVideo();
+            }
+        }
+
+        /// <summary>退出时把 RenderTexture 放掉，不然它会一直占着显存。</summary>
+        private void ReleaseJumpscareVideoTarget()
+        {
+            if (_jumpscareVideoTarget == null)
+            {
+                return;
+            }
+
+            _jumpscareVideoTarget.Release();
+            Destroy(_jumpscareVideoTarget);
+            _jumpscareVideoTarget = null;
         }
 
         /// <summary>跳杀：先是「冲脸」快速放大，然后一直抖。</summary>
@@ -1557,6 +2010,12 @@ namespace NailongFNAF.UI
 
             _jumpscareTime += Time.deltaTime;
             float t = Time.time;
+
+            // 视频在放的时候不再抖静态图 —— 让视频自己动（计时在 Update 里）
+            if (_jumpscareVideoPlaying)
+            {
+                return;
+            }
 
             float grow = Mathf.Lerp(0.80f, 1.02f, Mathf.Clamp01(_jumpscareTime / 0.18f));
             float x = Mathf.Sin(t * 46f) * 16f;
@@ -1700,6 +2159,171 @@ namespace NailongFNAF.UI
             _powerGroup.alpha = gm.HasPowerOut ? 0f : 1f;
 
             _debugText.text = BuildDebugInfo(gm);
+
+            if (_debugPowerText != null)
+            {
+                _debugPowerText.text = "当前 " + Mathf.CeilToInt(gm.Power.Level) + "%";
+            }
+
+            UpdateDebugMapPins();
+        }
+
+        /// <summary>
+        /// 把四个敌人的当前机位画到小地图上（调试用）。
+        /// 坐标直接复用 <see cref="MapCamButtons"/> 的像素框 —— 和玩家看到的地图完全对齐。
+        /// </summary>
+        private void UpdateDebugMapPins()
+        {
+            if (_debugMapPins == null || _enemyDirector == null)
+            {
+                return;
+            }
+
+            bool visible = _debugVisible;
+            for (int i = 0; i < _debugMapPins.Length; i++)
+            {
+                if (_debugMapPins[i] != null && _debugMapPins[i].transform.parent.gameObject.activeSelf != visible)
+                {
+                    _debugMapPins[i].transform.parent.gameObject.SetActive(visible);
+                }
+            }
+
+            if (!visible || _monitorMapGroup == null)
+            {
+                return;
+            }
+
+            foreach (EnemyId id in EnemyIds.All)
+            {
+                var brain = _enemyDirector.GetBrain(id);
+                if (brain == null)
+                {
+                    continue;
+                }
+
+                int pinIndex = PinIndexOf(id);
+                if (pinIndex < 0 || pinIndex >= _debugMapPins.Length)
+                {
+                    continue;
+                }
+
+                int cam = DebugCameraOf(brain);
+                Image pin = _debugMapPins[pinIndex];
+
+                if (cam < 0)
+                {
+                    // 不在任何机位（在门口 / 断电阶段）—— 收起来
+                    pin.gameObject.SetActive(false);
+                    continue;
+                }
+
+                Vector2 local;
+                if (!TryMapCameraLocal(cam, out local))
+                {
+                    pin.gameObject.SetActive(false);
+                    continue;
+                }
+
+                pin.gameObject.SetActive(true);
+
+                // 头像 = 该角色的**正脸立绘**（Stare），一眼认得出是谁
+                Sprite face = FaceSpriteOf(id);
+                if (face != null)
+                {
+                    pin.sprite = face;
+                    pin.preserveAspect = true;
+                }
+                else
+                {
+                    pin.sprite = _solidSprite;
+                    pin.color = PinColor(id);
+                }
+
+                // 同一机位站了多只时横向错开，不然叠成一个
+                int sameCamIndex = 0;
+                foreach (EnemyId other in EnemyIds.All)
+                {
+                    if (other == id)
+                    {
+                        break;
+                    }
+
+                    var ob = _enemyDirector.GetBrain(other);
+                    if (ob != null && DebugCameraOf(ob) == cam)
+                    {
+                        sameCamIndex++;
+                    }
+                }
+
+                float spread = sameCamIndex * 22f;
+                pin.rectTransform.sizeDelta = new Vector2(34f, 34f);
+                pin.rectTransform.anchoredPosition = local + new Vector2(spread, 0f);
+            }
+        }
+
+        /// <summary>小地图头像用的正脸立绘。缺图返回 null（退回色块）。</summary>
+        private Sprite FaceSpriteOf(EnemyId id)
+        {
+            var art = FindCharacter(id);
+            return art != null ? art.Get(CharacterPose.Stare) : null;
+        }
+
+        private static int PinIndexOf(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai: return 0;
+                case EnemyId.Daishu: return 1;
+                case EnemyId.Lulu: return 2;
+                case EnemyId.Nailong: return 3;
+                default: return -1;
+            }
+        }
+
+        /// <summary>这个敌人当前在哪个机位上（-1 = 不在任何机位）。</summary>
+        private static int DebugCameraOf(EnemyBrain brain)
+        {
+            var nailong = brain as NailongBrain;
+            if (nailong != null)
+            {
+                // 到门口就没机位了
+                if (nailong.IsAttacking || nailong.Stage >= nailong.MaxStage)
+                {
+                    return -1;
+                }
+
+                return nailong.IsApproaching ? nailong.PathCameraIndex : nailong.CameraIndex;
+            }
+
+            var door = brain as DoorEnemyBrain;
+            if (door != null)
+            {
+                return door.IsAttacking ? -1 : door.PathCameraIndex;
+            }
+
+            var lulu = brain as LuluBrain;
+            if (lulu != null)
+            {
+                return lulu.IsAttacking ? -1 : lulu.PathCameraIndex;
+            }
+
+            return -1;
+        }
+
+        /// <summary>机位号 → 小地图面板上的本地坐标（直接取 CAM 框的中心）。</summary>
+        private static bool TryMapCameraLocal(int cameraIndex, out Vector2 local)
+        {
+            for (int i = 0; i < MapCamButtons.Length; i++)
+            {
+                if (MapCamButtons[i].CameraIndex == cameraIndex)
+                {
+                    local = MapCamButtons[i].Center;
+                    return true;
+                }
+            }
+
+            local = Vector2.zero;
+            return false;
         }
 
         private void UpdateUsageBars(int usageLevel)
@@ -2369,7 +2993,186 @@ namespace NailongFNAF.UI
             _debugText = MakeText(go.transform, "DebugText", string.Empty,
                 TextAnchor.UpperLeft, 20, new Color(0.70f, 0.88f, 0.72f));
             PlaceRect(_debugText.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(40f, 210f), new Vector2(1500f, 300f));
+                new Vector2(40f, 300f), new Vector2(1500f, 200f));
+
+            BuildDebugControls(go.transform);
+            BuildDebugMapPins();
+        }
+
+        /// <summary>
+        /// 调试面板下半部分：一排「一键跳杀」按钮 + 电量调节。
+        /// 坐标全用画布比例锚点（画布尺寸是运行时定的，别写死像素）。
+        /// </summary>
+        private void BuildDebugControls(Transform parent)
+        {
+            var panel = new GameObject("DebugControls", typeof(RectTransform));
+            panel.transform.SetParent(parent, false);
+            var panelRect = (RectTransform)panel.transform;
+            PlaceRect(panelRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(40f, -260f), new Vector2(1100f, 200f));
+
+            // ── 一键跳杀 ──
+            Text jumpLabel = MakeLabel(panel.transform, "跳杀：", 18,
+                new Color(0.85f, 0.55f, 0.55f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(4f, 24f), new Vector2(64f, 40f));
+            jumpLabel.alignment = TextAnchor.MiddleLeft;
+
+            string[] names = { "牛来", "袋鼠", "噜噜", "奶龙" };
+            EnemyId[] order =
+            {
+                EnemyId.Niulai, EnemyId.Daishu, EnemyId.Lulu, EnemyId.Nailong
+            };
+
+            for (int i = 0; i < order.Length; i++)
+            {
+                EnemyId id = order[i];
+                var btnGo = new GameObject("JumpBtn" + i,
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                btnGo.transform.SetParent(panel.transform, false);
+
+                var btnRect = (RectTransform)btnGo.transform;
+                PlaceRect(btnRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(80f + i * 118f, 24f), new Vector2(110f, 40f));
+
+                var img = btnGo.GetComponent<Image>();
+                img.sprite = _buttonSprite;
+                img.color = new Color(0.45f, 0.13f, 0.13f, 0.95f);
+
+                var btn = btnGo.GetComponent<Button>();
+                btn.targetGraphic = img;
+                EnemyId captured = id;
+                btn.onClick.AddListener(delegate { DebugTriggerJumpscare(captured); });
+
+                Text t = MakeLabel(btnGo.transform, names[i], 17, Color.white,
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                    Vector2.zero, new Vector2(110f, 40f));
+                t.raycastTarget = false;
+            }
+
+            // ── 电量一键设定 ──
+            Text powerLabel = MakeLabel(panel.transform, "电量：", 18,
+                new Color(0.65f, 0.85f, 0.65f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(4f, -38f), new Vector2(64f, 36f));
+            powerLabel.alignment = TextAnchor.MiddleLeft;
+
+            int[] levels = { 100, 75, 50, 25, 5, 0 };
+            for (int i = 0; i < levels.Length; i++)
+            {
+                int lv = levels[i];
+                var btnGo = new GameObject("PowerBtn" + i,
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                btnGo.transform.SetParent(panel.transform, false);
+
+                var btnRect = (RectTransform)btnGo.transform;
+                PlaceRect(btnRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(80f + i * 78f, -38f), new Vector2(70f, 36f));
+
+                var img = btnGo.GetComponent<Image>();
+                img.sprite = _buttonSprite;
+                // 电量越低越红
+                float k = lv / 100f;
+                img.color = new Color(0.55f - k * 0.3f, 0.28f + k * 0.35f, 0.24f, 0.95f);
+
+                var btn = btnGo.GetComponent<Button>();
+                btn.targetGraphic = img;
+                int captured = lv;
+                btn.onClick.AddListener(delegate { DebugSetPower(captured); });
+
+                Text t = MakeLabel(btnGo.transform, lv + "%", 16, Color.white,
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                    Vector2.zero, new Vector2(70f, 36f));
+                t.raycastTarget = false;
+            }
+
+            _debugPowerText = MakeLabel(panel.transform, string.Empty, 18,
+                new Color(0.85f, 0.85f, 0.6f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(560f, -38f), new Vector2(260f, 36f));
+            _debugPowerText.alignment = TextAnchor.MiddleLeft;
+        }
+
+        /// <summary>
+        /// 小地图上的敌人头像：调试时四个敌人的当前位置一眼可见。
+        /// 独立一层，不依赖监控是否升起 —— 调试就是要随时能看到。
+        /// </summary>
+        private void BuildDebugMapPins()
+        {
+            _debugMapPins = new Image[4];
+
+            // 挂在**小地图**下面 —— 头像坐标用的是小地图本地坐标
+            var layer = new GameObject("DebugMapPins", typeof(RectTransform));
+            layer.transform.SetParent(_monitorMapGroup.transform, false);
+            var layerRect = (RectTransform)layer.transform;
+
+            // ⚠️ 必须和 mapGroup 用**同一个 pivot**，否则 spec.Center 会对不齐：
+            // mapGroup 的 pivot 是 (1,0)（右下角），UI 的本地原点就在那儿。
+            // 默认 StretchToParent 会把 pivot 留在 (0.5,0.5)，头像整体偏半屏。
+            var mapRect = (RectTransform)_monitorMapGroup.transform;
+            layerRect.anchorMin = Vector2.zero;
+            layerRect.anchorMax = Vector2.one;
+            layerRect.offsetMin = Vector2.zero;
+            layerRect.offsetMax = Vector2.zero;
+            layerRect.pivot = mapRect.pivot;
+            layerRect.SetAsLastSibling();
+
+            for (int i = 0; i < _debugMapPins.Length; i++)
+            {
+                var go = new GameObject("Pin" + i,
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                go.transform.SetParent(layer.transform, false);
+
+                var rect = (RectTransform)go.transform;
+                PlaceRect(rect, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                    Vector2.zero, new Vector2(26f, 26f));
+
+                var img = go.GetComponent<Image>();
+                img.raycastTarget = false;
+                img.color = Color.white;
+                _debugMapPins[i] = img;
+            }
+
+            layer.SetActive(false);
+        }
+
+        private static Color PinColor(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai:
+                    return new Color(1f, 0.55f, 0.15f);   // 橙
+                case EnemyId.Daishu:
+                    return new Color(1f, 0.92f, 0.25f);   // 黄
+                case EnemyId.Lulu:
+                    return new Color(0.45f, 0.9f, 0.45f); // 绿
+                case EnemyId.Nailong:
+                    return new Color(0.95f, 0.35f, 0.85f); // 粉紫
+                default:
+                    return Color.white;
+            }
+        }
+
+        private void DebugTriggerJumpscare(EnemyId id)
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            ClearJumpscare();
+            gm.MarkCaught();
+            OnEnemyAttacked(id);
+        }
+
+        private void DebugSetPower(int percent)
+        {
+            var gm = GameManager.Instance;
+            if (gm != null && gm.Power != null)
+            {
+                gm.Power.SetLevel(percent);
+            }
         }
 
         private void BuildJumpscareLayer()
@@ -2899,5 +3702,6 @@ namespace NailongFNAF.UI
             rect.anchoredPosition = offset;
             rect.sizeDelta = size;
         }
+
     }
 }

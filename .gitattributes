@@ -28,6 +28,9 @@
 *.wav     binary
 *.mp3     binary
 *.ogg     binary
+*.mp4     binary
+*.m4v     binary
+*.webm    binary
 *.ttf     binary
 *.otf     binary
 *.fbx     binary
