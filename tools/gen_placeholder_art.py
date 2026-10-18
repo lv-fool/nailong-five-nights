@@ -20,7 +20,7 @@
 - `tools/cc0/` —— 照片写实风，来自 ambientCG（CC0，可商用、无需署名）
 
 运行：
-    C:/Users/DELL/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe tools/gen_placeholder_art.py
+    python tools/gen_placeholder_art.py
 """
 
 import math
@@ -36,7 +36,7 @@ CHAR_DIR = os.path.join(ROOT, "Assets", "Art", "Characters")
 OUT = os.path.join(ROOT, "Assets", "Art", "Backgrounds")
 DOOR_OUT = os.path.join(ROOT, "Assets", "Art", "UI")
 
-# 墙上那张「CELEBRATE!」海报和儿童画里站的是谁 —— 用绿子画好的立绘，
+# 墙上那张「CELEBRATE!」海报和儿童画里站的是谁 —— 用项目作者画好的立绘，
 # 不另找素材：现成的就是最准的，还不用担心版权。
 CAST = ("niulai", "nailong", "lulu", "daishu")
 
@@ -305,7 +305,7 @@ def make_celebrate_poster(paper, cast):
     """后墙上的「CELEBRATE!」海报 —— 用我们自己的吉祥物拼。
 
     占位版：砖底 + 一排等高、底对齐的角色 + 顶上一行大字。
-    绿子画真的时覆盖同名文件即可。
+    项目作者画真的时覆盖同名文件即可。
     """
     im = Image.new("RGB", (512, 640), (74, 44, 40))
     d = ImageDraw.Draw(im)
@@ -869,7 +869,7 @@ def build_door_face(hole, tex, seed, dark=0.95, exposure=1.0):
     ⚠️ **dark 别用 0.64**：那是「叠层门片」时代的参数 —— 门片贴在全景上
     再叠背景所以敢压暗。门板是独立世界物体，自己就得有正确亮度，
     dark 用 0.95，亮度才接近墙（墙 ~0.23，门板 ~0.18）。用 0.64 门板几乎全黑，
-    关上门像没关（2026-10-15 踩过，绿子说「关门看不见门」）。
+    关上门像没关（2026-10-15 踩过，项目作者说「关门看不见门」）。
     """
     w, h = 1200, 2050                      # 毫米：1.2m × 2.05m（贴图高度是灰长向）
     u = np.linspace(0.08, 0.92, w, dtype=np.float32)          # 门板横向（宽）

@@ -28,7 +28,7 @@ python tools/fetch_cc0_textures.py
 改上面那张表对应的文件名，或者直接覆盖同名文件，然后重跑：
 
 ```bash
-C:/Users/DELL/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe tools/gen_placeholder_art.py
+python tools/gen_placeholder_art.py
 ```
 
 贴图本身是**可平铺**的（ambientCG 的图都是无缝的），所以随便换别的资产也不会出接缝。

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """合成占位环境音（开发阶段用）。
 
-绿子有真素材后，同名覆盖 Assets/Audio/Ambient/ 即可，代码不用改。
+项目作者有真素材后，同名覆盖 Assets/Audio/Ambient/ 即可，代码不用改。
 全部是 44.1kHz / 16-bit / 单声道 WAV，并且做了首尾交叉淡化，能无缝循环。
 
 运行：
-    C:/Users/DELL/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe tools/gen_placeholder_audio.py
+    python tools/gen_placeholder_audio.py
 """
 
 import os

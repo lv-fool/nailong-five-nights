@@ -24,7 +24,7 @@ JOBS = [
     (r"D:/QQmm/com.ss.android.ugc.aweme_20261012204701_edit_3695.png", "char_nailong_idle"),
     (r"D:/QQmm/retouch_2026101220485848.png", "char_nailong_stare"),
 
-    # 噜噜（水豚）—— 2026-10-12 绿子提供
+    # 噜噜（水豚）—— 2026-10-12 项目作者提供
     (r"D:/QQmm/retouch_2026101222275753.png", "char_lulu_idle"),
     (r"D:/QQmm/com.ss.android.ugc.aweme_20261012222321_edit_3750.png", "char_lulu_stare"),
     (r"D:/QQmm/retouch_2026101222295201.png", "char_lulu_peek"),
@@ -33,12 +33,12 @@ JOBS = [
     (r"D:/QQmm/lulu_startled.png", "char_lulu_startled"),
     (r"D:/QQmm/lulu_angry.png", "char_lulu_angry"),
 
-    # 袋鼠（2026-10-13 绿子提供）—— 目前两张：
+    # 袋鼠（2026-10-13 项目作者提供）—— 目前两张：
     # 四足站姿那张当 idle（出现在监控 / 门口），正面坐姿那张当 stare（直视镜头）
     (r"D:/QQmm/retouch_2026101320041711.png", "char_daishu_idle"),
     (r"D:/QQmm/retouch_2026101320035719.png", "char_daishu_stare"),
 
-    # 牛来（2026-10-13 绿子提供）—— 目前两张：
+    # 牛来（2026-10-13 项目作者提供）—— 目前两张：
     # 全身站立那张当 idle（门口显示），牛头特写那张当 stare（直视镜头 / 跳杀兜底）
     (r"D:/QQmm/retouch_2026101320082315.png", "char_niulai_idle"),
     (r"D:/QQmm/retouch_2026101320141297_edit_409844947479749.png", "char_niulai_stare"),

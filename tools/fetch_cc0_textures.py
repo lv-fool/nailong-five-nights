@@ -8,7 +8,7 @@
 所以下面所有请求都显式加了 UA 头。（curl 默认带，所以用 curl 试的时候看不出来。）
 
 运行：
-    C:/Users/DELL/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe tools/fetch_cc0_textures.py
+    python tools/fetch_cc0_textures.py
 """
 
 import io

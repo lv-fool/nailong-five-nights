@@ -28,7 +28,7 @@ namespace NailongFNAF.Gameplay
         public const float GraceAtMaxActivity = 7.5f;
 
         /// <summary>
-        /// 沿路停留的监控机位（下标）—— 绿子 2026-10-17 要求：
+        /// 沿路停留的监控机位（下标）—— 项目作者 2026-10-17 要求：
         /// **出生地是海盗湾（1C）**，路线要在监控里看得见。
         /// 空表 = 没配路径，监控里看不到它（旧行为）。
         /// </summary>

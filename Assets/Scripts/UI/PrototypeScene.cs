@@ -172,6 +172,13 @@ namespace NailongFNAF.UI
         private const float JumpscareWidth = 1920f;
 
         /// <summary>
+        /// 中文字体在 Resources 下的路径（不含扩展名）。
+        /// 思源黑体（Source Han Sans CN），SIL OFL 1.1，可随包分发。
+        /// 换字体：把同族字体丢进 Assets/Resources/Fonts/，改成同名即可 —— 代码只认这个名字。
+        /// </summary>
+        private const string FontResourcePath = "Fonts/SourceHanSansCN-Normal";
+
+        /// <summary>
         /// 镜头**直接跟鼠标**：鼠标在屏幕哪儿，镜头就朝哪儿。
         ///
         /// 这个值只是跟手的缓动时间（秒），用来吃掉鼠标的微小抖动，别调大 ——
@@ -490,11 +497,11 @@ namespace NailongFNAF.UI
             EnsureAudioManager();
             EnsureRoom();
 
-            _font = Resources.Load<Font>("Fonts/simhei");
+            _font = Resources.Load<Font>(FontResourcePath);
             if (_font == null)
             {
                 // 兜底：内置拉丁字体。中文会显示成方块/空白（功能不受影响）。
-                // 想显示中文，放一个中文字体到 Assets/Resources/Fonts/ 下，命名 simhei。
+                // 想显示中文，放一个中文字体到 Assets/Resources/Fonts/ 下，命名见上面的常量。
                 _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             }
             if (_font == null)
@@ -1508,7 +1515,7 @@ namespace NailongFNAF.UI
             var art = FindCharacter(id);
 
             // 走兜底链：没有专属跳杀图就退到 Stare（正面那张）——
-            // 比全屏红 + 大字强，也免得绿子给的正脸图白放着用不上
+            // 比全屏红 + 大字强，也免得项目作者给的正脸图白放着用不上
             Sprite scare = art != null ? art.Get(CharacterPose.Jumpscare) : null;
 
             if (scare != null)

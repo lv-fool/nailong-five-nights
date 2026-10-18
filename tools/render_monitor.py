@@ -29,7 +29,7 @@ import gen_placeholder_art as gpa
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ⚠️ 预览目录，不直接覆盖 Assets/Art/Monitoring/（那里是绿子给的 AI 图）。
+# ⚠️ 预览目录，不直接覆盖 Assets/Art/Monitoring/（那里是项目作者给的 AI 图）。
 # 确认风格 OK 之后，把确认过的机位拷进 Assets 再走「接入素材」。
 OUT_DIR = os.path.join(ROOT, ".workbuddy-ai", "style", "mon_render")
 
@@ -66,7 +66,7 @@ def box(bmin, bmax, default, faces=None, band=False):
 # 主厅北侧。房间 8m 宽、6m 深、3m 高；舞台台面抬高 0.45m，
 # 后墙挂暗红幕布，台上有三只玩偶的位置（这一版先留空，只看空间和光）。
 def plush(cx, z0, z1, height, width, tint):
-    """一只玩偶的占位：身体 + 头 + 两只耳朵（真素材等绿子给）。"""
+    """一只玩偶的占位：身体 + 头 + 两只耳朵（真素材等项目作者给）。"""
     base = 0.45                      # 站在舞台台面上
     body_h = height * 0.60
     head_w = width * 0.80

@@ -414,7 +414,7 @@ namespace NailongFNAF.Tests
         [Test]
         public void 噜噜_出生在海盗湾并沿路径逼近正门()
         {
-            // 绿子 2026-10-17：噜噜的路线也要在监控里看到，出生地是海盗湾
+            // 项目作者 2026-10-17：噜噜的路线也要在监控里看到，出生地是海盗湾
             var brain = new LuluBrain(EnemyId.Lulu, EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             brain.SetCameraPath(new[] { 2, 1 });   // 1C 海盗湾 → 1B 餐厅
             var ctx = EnemyContext.Idle();
@@ -506,7 +506,7 @@ namespace NailongFNAF.Tests
         [Test]
         public void 奶龙_偷到电就转化成门类敌人()
         {
-            // 绿子 2026-10-17：偷到电以后转化成门类敌人（不是偷一次推一格）
+            // 项目作者 2026-10-17：偷到电以后转化成门类敌人（不是偷一次推一格）
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var ctx = EnemyContext.Idle();
 
@@ -522,7 +522,7 @@ namespace NailongFNAF.Tests
         [Test]
         public void 奶龙_进攻时沿路径机位逐步逼近()
         {
-            // 绿子：进攻环节要在监控里看得见 —— 转化后沿路径推进，
+            // 项目作者：进攻环节要在监控里看得见 —— 转化后沿路径推进，
             // 每一步都停在对应机位上。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             brain.SetCameraPath(new[] { 1, 6, 7 });   // 餐厅 → 东走廊 → 东转角
@@ -549,7 +549,7 @@ namespace NailongFNAF.Tests
         [Test]
         public void 奶龙_被门挡回后退回偷电状态()
         {
-            // 绿子：被防御后再次尝试偷电
+            // 项目作者：被防御后再次尝试偷电
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
 

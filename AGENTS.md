@@ -1,7 +1,11 @@
 # AGENTS.md · 项目约定
 
 > 给 AI 助手和协作者看的开工须知。每次动这个项目之前先读一遍。
-> 最后更新：2026-10-11
+> 最后更新：2026-10-18
+>
+> ⚠️ **本文档在 2026-10-11 之后长期没跟上代码，2026-10-18 已按实际代码纠偏。**
+> 最大的偏差：画面方案早就不是「2D 静态图 + 热点」，而是**程序渲的 3D 圆柱全景 + 相机真转**。
+> 遇到冲突以 **代码 + `.workbuddy-ai/memory/MEMORY.md`** 为准。
 
 ---
 
@@ -29,7 +33,8 @@
 | 引擎 | **Unity 2022.3 LTS**（`2022.3.62f3c1`） | 版本记录在 `ProjectSettings/ProjectVersion.txt` |
 | 语言 | C# | 不引入第三方游戏框架 |
 | 渲染管线 | **Built-in** | 见下方说明 |
-| 画面方案 | **2D 静态场景 + 热点交互** | 最贴近 FNAF 原作 |
+| 画面方案 | **程序渲 3D 圆柱全景 + 相机真转** | 不是静态图切换，见第五节 |
+| 交互方案 | 2D 热点（按钮 / 小地图 / 手电筒） | 门与敌人是 3D 世界物体 |
 | 美术来源 | 用户自行提供 | 规格见 `docs/03-素材规格.md` |
 | 版本控制 | Git，主分支 `main` | 已初始化 |
 
@@ -39,7 +44,7 @@
 
 **为什么是 2022.3 而不是 Unity 6**：本机装的是**中国版 Unity Hub 3.3.6**，
 它的版本接口拿不到 Unity 6 的列表（实测只返回 3 条记录），要装 Unity 6 得手动下
-3.9 GB 安装包绕过 Hub。而 2022.3 LTS 做 2D 静态图 + 热点没有任何短板，中文教程也最多。
+3.9 GB 安装包绕过 Hub。而 2022.3 LTS 做「程序渲静态图 + 热点交互」没有任何短板，中文教程也最多。
 完整来龙去脉见 `docs/01-环境搭建.md`。
 
 ## 三、目录规范
@@ -57,13 +62,13 @@
 | `Assets/Editor/` | 编辑器扩展脚本（打包后不进入游戏） |
 | `Assets/Tests/EditMode/` | 纯逻辑的单元测试，在 Test Runner 里跑 |
 | `Assets/Prefabs/` | 预制体 |
-| `Assets/Resources/` | 需要运行时按字符串加载的资源（慎用，会全量打进包体） |
+| `Assets/Resources/` | 运行时按字符串加载的资源（会全量打进包体）：`office_pano.png`、`PanoMaterial.mat`、`Fonts/SourceHanSansCN-Normal.ttf` |
 | `Assets/Scenes/` | 场景文件 |
 | `Assets/Scripts/Core/` | 游戏状态机、时间推进、存档、全局管理器 |
 | `Assets/Scripts/Gameplay/` | 电量、门、监控、敌人 AI |
 | `Assets/Scripts/UI/` | HUD、菜单、界面交互 |
 | `Assets/Scripts/Audio/` | 音频调度 |
-| `Assets/Shaders/` | 噪点、暗角、扫描线等视觉效果 |
+| `Assets/Shaders/` | `UnlitTexture.shader`（内置 `Unlit/Texture` 的项目内副本，防发行版被剔除）+ 以后的噪点/暗角 |
 | `docs/` | 设计文档、规格说明 |
 
 **新文件一律归位，不要往 `Assets/` 根目录随手丢。**
@@ -77,41 +82,77 @@
 - 命名空间：`NailongFNAF.<模块>`，例如 `NailongFNAF.Gameplay`
 - 场景：`Assets/Scenes/` 下，PascalCase，如 `Main.unity`
 - 美术素材：`snake_case` + 类型前缀
-  - `office_pano.png`（背景，一条圆柱全景：`Assets/Resources/`，运行时 `Resources.Load`）
+  - `office_pano.png`（办公室背景，一条圆柱全景；放 `Assets/Resources/`，运行时 `Resources.Load`。
+    **导入必须 `maxTextureSize = 8192`** —— 默认 2048 会把它压回 2048 而糊掉）
   - `mon_1a.png`（监控画面，编号照官方 CAM：`mon_1a` ~ `mon_7`）
   - `char_nailong_idle.png`
   - `ui_btn_door_close.png`
 - 音频：`sfx_door_close.ogg` / `amb_fan_loop.ogg` / `bgm_menu.ogg`
 - 视频：`char_<角色名>_jumpscare.mp4`（如 `char_nailong_jumpscare.mp4`）
+- 字体：`Fonts/SourceHanSansCN-Normal.ttf`（**思源黑体**，SIL OFL 1.1，可随包分发）。
+  代码里只认 `PrototypeScene.FontResourcePath` 这一个名字，换字体丢同名文件进去即可
 - **四个角色的代号固定为**：`nailong`（奶龙）/ `niulai`（牛来）/ `daishu`（袋鼠）/ `lulu`（噜噜）。
   文件名和代码里的枚举名都用这套，别用别的拼法
 
-## 五、架构模式：静态场景 + 热点
+## 五、架构模式：圆柱全景 + 3D 世界物体 + UGUI 热点
 
-FNAF 不是 3D 游戏，是一组**静态图 + 可点击区域 + 状态切换**。实现上：
+⚠️ **这一节 2026-10-18 重写过。** 旧版写的是「2D 静态场景 + 热点交互」，
+代码早在 2026-10-14 就改成了程序渲 3D —— 照旧版理解会走错路。
 
-- 每个"视角"是一个全屏 `Image`（或 `SpriteRenderer`），切换视角 = 切换显示的图
-- 门、灯、监控按钮 = `Button` 或带 `EventTrigger` 的 `Image`
-- 视角切换加**渐变/抖动/闪烁**过渡，避免生硬跳变（这是恐怖感的关键）
-- 敌人逼近靠**音频先兆**（脚步声、金属摩擦）+ 画面细节变化暗示，而不是直接显示
-- 全局状态由一个 `GameManager` 单例持有：当前时间、电量、门/灯开关、各敌人位置
+**办公室（背景）**
+- 一条 5120×1296 的**圆柱全景** `Assets/Resources/office_pano.png`（`tools/render_pano.py` 渲的），
+  Unity 侧由 `Assets/Scripts/UI/OfficeRoom.cs` 程序化生成圆柱内壁贴上它
+- **转头 = 相机真的绕中轴转**（`MaxYaw = 70°`），连续且有视差。
+  **不是**若干张视角帧交叉淡化 —— 那版中间帧是复制的，看着就是转场，已作废
+- 材质走 `Resources.Load<Material>("PanoMaterial")`（**不是** `Shader.Find`）：
+  发行版会把没人引用的内置 shader 剔除掉，`Shader.Find` 返回 null 会让办公室整个崩
+- ⚠️ 投影约定在 `render_pano.py` 与 `OfficeRoom.cs` **两边必须一致**（θ=0 正前、覆盖 ±145°、
+  斜率 ±0.72、相机 (0, 1.30, -1.20)）。改一边不改另一边 = 全景和门洞对不上
+- ⚠️ 圆柱内壁三角面**绕序必须顺时针**，反了整屏全黑（内置 `Unlit/Texture` 没有 `_Cull` 可救）
 
-**过渡动画比画面精度更重要。** 同一张图，加上手电筒式的抖动和噪点，
-比一张精致但静止的图吓人得多。
+**门与敌人（3D 世界物体）**
+- 门板、敌人立绘都是挂 `SpriteRenderer` 的**世界物体**，由 `Camera.main` 透视，真实米数（门 1.2×2.05m、敌人约 1.8m）
+- ⚠️ `SpriteRenderer` 默认平面是 XY（法线 +z）：贴侧墙（x=±2.6）必须 `rotation = Euler(0, ±90, 0)`，
+  否则相机侧看它成一根竖线，门洞面前渲不出东西
+- ⚠️ `localScale` 是**倍数**不是米，要给米数得算 `目标 / sprite.bounds.size`
+
+**界面与热点（UGUI）**
+- 墙上 DOOR / LIGHT 按钮**贴墙投影**：锚在固定世界点，每帧 `WorldToScreenPoint` 摆过去，
+  **必须在 `_room.SetPan(_pan)` 之后调**（相机朝向先定）
+- 监控小地图、电量条、手电筒（`HoldButton`，按住才亮）都是 UGUI
+- ⚠️ 按钮淡入必须很快满（`WallButtonFadeStart/End = 0.06/0.26`），
+  否则鼠标停在按钮上时 `_pan` 只有 0.28、`blocksRaycasts` 永远为假、**按钮点不着**
+
+**全局状态**
+- `GameManager`（时间/电量/门灯/断电流程）+ `EnemyDirector`（四个敌人）+ `PrototypeScene`（表现层）
+- ⚠️ **`Main.unity` 里只有 `PrototypeScene` 一个组件**，`GameManager` 与 `EnemyDirector`
+  是它运行时 `AddComponent` 造出来的 —— 所以这两类上 `[SerializeField]` 的默认值永远生效
+- 核心逻辑（`PowerSystem` / `NightClock` / 敌人 AI / `BlackoutSequence`）是**纯 C#、不引用 UnityEngine**，
+  为的是能脱离 Unity 做单元测试。新增核心逻辑请保持这个习惯
+
+**过渡与氛围**：恐怖感来自音效 + 抖动/噪点/闪烁 + 突然逼近，不在画面精度。
+敌人逼近靠音频先兆和细节变化暗示，不直接显示。
 
 ## 六、协作工作流（关键，别忘）
 
-**AI 无法运行 Unity 编辑器。** 因此：
+**AI 已经能直接驱动 Unity 编辑器（MCP for Unity，2026-10-18 起）。** 流程变了：
 
-1. AI 负责写代码、资产文件、文档
-2. 用户在 Unity 里打开、编译、运行、**截图反馈**
-3. 凡是需要在编辑器里点很多次的活（拖引用、建 Prefab、连事件），
-   优先写成 `Assets/Editor/` 下的菜单工具一键完成，而不是丢给用户手工操作
+1. ⚠️ **改代码前先退出 Play 模式** —— Play 期间脚本一重编译就 domain reload，
+   `GameManager.Instance` 这类静态字段被清空但 `Awake` 不会重跑，会刷一屏 `NullReferenceException`
+2. 改完代码 → 跑 **EditMode 测试** → 读 Console 确认 0 报错
+3. 要验证画面 → 进 Play、反射操纵游戏状态、截图后**自己看图**
+4. 截图存 **`.workbuddy-ai/screenshots/`**（不进版本库）。
+   ⚠️ 别用默认输出目录：MCP 截图默认落到 `Assets/Screenshots/`，会污染仓库
+
+**MCP 用法**：资源 `mcpforunity://instances`（连到哪个 Unity）、`mcpforunity://editor/state`（是否 ready）；
+工具 `run_tests` + `get_test_job`、`read_console`、`manage_editor`（进出 Play）、
+`manage_build`（出构建）、`manage_camera`（截图）、`execute_code`（跑 C#）。
+⚠️ **编辑器开着时不要试图命令行 `-batchmode` 构建同一项目**（锁文件挡着），直接走 MCP。
 
 **每次改动要小而可验证。** 一次改一大坨，出错无法定位。
 
-**没有 .NET SDK，无法在外部做语法检查**，所以代码要写得保守：
-不用冷门 API、不炫技、不依赖不确定是否存在的包。
+⚠️ **本机没有 .NET SDK，无法在 Unity 之外做 C# 语法检查** —— 编译错误只能等 Unity 报，
+所以代码要写得保守：不用冷门 API、不炫技、不依赖不确定是否存在的包。
 
 **程序集划分（asmdef）**：`Assets/Scripts/` 下有一个 `NailongFNAF.asmdef`，
 把游戏代码编成独立程序集 `NailongFNAF`；`Assets/Tests/EditMode/` 下是
@@ -123,17 +164,24 @@ FNAF 不是 3D 游戏，是一组**静态图 + 可点击区域 + 状态切换**�
 
 ## 七、可用 skill 与使用时机
 
-| skill | 什么时候用 |
-|---|---|
-| `tdd` | 写核心逻辑（电量计算、AI 状态机、时间推进）时。纯逻辑类可以脱离 Unity 做 EditMode 测试 |
-| `research` | 查 Unity API、还原 FNAF 具体机制、找设计参考时。要求带出处 |
-| `grilling` | 需求含糊、该先问清楚再动手时 |
-| `teach` / `handoff` / `grill-me` | 只能由用户主动唤起，AI 不得自行启动 |
+视手头工具而定。要点是**别跳过验证**：
 
-`web-game-bot` 与本项目无关（那是浏览器游戏的自动化机器人）。
+| 场景 | 做法 |
+|---|---|
+| 写核心逻辑（电量 / 时钟 / AI 状态机） | 先写 EditMode 测试再实现 —— 这些类是纯 C#，测试很便宜 |
+| 查 Unity API / 还原 FNAF 机制 | 先查证再动手，别凭记忆写 API |
+| 需求含糊 | 先问清楚，别猜着写一大坨 |
+| 改完 | 跑测试 + 看 Console 有没有报错。**没有验证过的改动不算完成** |
 
 ## 八、其他
 
-- 项目路径含中文，相关风险与对策见 `docs/01-环境搭建.md` 第五节
-- **不要删除 `.workbuddy-ai` 目录**，那里存着项目记忆
-- 工程内的临时产物（`Library/`、`Temp/`、`obj/`）已在 `.gitignore` 排除
+- ✅ **项目路径已于 2026-10-11 从中文迁到 `D:\GitHub\nailong-five-nights`**（英文），
+  中文路径的坑不再适用；迁移记录见 `docs/01-环境搭建.md`。
+- **不要删除 `.workbuddy-ai/` 目录** —— 项目长期记忆与工作日志在 `memory/`，
+  排障与踩坑记录都在里面（`.gitignore` 排除，但绝不能删）
+- 已在 `.gitignore` 排除、**不入库**的本地目录：`Library/`、`Temp/`、`Logs/`、`Builds/`、
+  `UserSettings/`、`.workbuddy-ai/`、`Packages/MCPForUnity/`（本地嵌入的 MCP 包）、
+  `__pycache__/`。换机器要按 `docs/02-开发工具.md` 重建 MCP 包。
+- ⚠️ **构建产物在 `Builds/`**（Windows 版，约 320 MB），别误当源码删了；
+  它是可再生的，但重新构建要几分钟。
+- ⚠️ **本机没装 Windows Build Support / IL2CPP 模块**，打包（尤其 IL2CPP）前需要补装

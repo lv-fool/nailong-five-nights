@@ -1,7 +1,7 @@
 namespace NailongFNAF.Gameplay
 {
     /// <summary>
-    /// 奶龙的两个状态 —— 绿子 2026-10-17 定：
+    /// 奶龙的两个状态 —— 项目作者 2026-10-17 定：
     /// **偷到电就转化成门类敌人进攻，被防御后再回去偷电**。
     /// </summary>
     public enum NailongMode
@@ -16,7 +16,7 @@ namespace NailongFNAF.Gameplay
     /// <summary>
     /// 奶龙：一边偷电，一边摸右门。
     ///
-    /// **两个状态来回切**（2026-10-17 绿子定）：
+    /// **两个状态来回切**（2026-10-17 项目作者定）：
     ///   1. <see cref="NailongMode.Stealing"/> —— 蹲在某个机位偷电。
     ///      切到它所在的机位看它一眼，它就停手并换位。
     ///   2. **偷到电就转化成门类敌人**（<see cref="NailongMode.Approaching"/>）——
@@ -238,7 +238,7 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
-        /// 偷电。**偷到一次电就转化成门类敌人**（绿子 2026-10-17 定）：
+        /// 偷电。**偷到一次电就转化成门类敌人**（项目作者 2026-10-17 定）：
         /// 从路径起点开始沿右门进攻，被门挡回来再回去偷电。
         /// </summary>
         private void Steal(float dt)
