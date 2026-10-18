@@ -66,3 +66,16 @@ Packages/MCPForUnity/
 __pycache__/
 *.pyc
 /build_logs/
+
+# ===== 本地密钥（绝不能提交）=====
+.env
+.env.local
+.env.*.local
+*.token
+.ghtoken
+
+# ===== 发布/更新工具（本地用，不进版本库）=====
+tools/update_and_run.ps1
+tools/更新.bat
+tools/publish_dev.ps1
+Builds/_releases/
