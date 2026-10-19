@@ -101,23 +101,36 @@ namespace NailongFNAF.Diagnostics
                 Snap("03_endless_after_actions");
                 ReportEndless();
             }
-            else if (_step == 4 && elapsed > 8.5f)
+            else if (_step == 4 && elapsed > 7.0f)
             {
                 _step = 5;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Debug.Log("SMOKE: 直接走失败结算（无尽分支）= " +
+                          Invoke(scene, "ShowLoseEnd", null));
+            }
+            else if (_step == 5 && elapsed > 8.5f)
+            {
+                _step = 6;
+                Snap("05_endless_end");
+                ReportEndPanel();
+            }
+            else if (_step == 6 && elapsed > 9.5f)
+            {
+                _step = 7;
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "OnStartClicked", null);
                 Invoke(scene, "OnNightClicked", new object[] { 0 });
                 Debug.Log("SMOKE: 已切到普通夜晚 1");
             }
-            else if (_step == 5 && elapsed > 10.0f)
+            else if (_step == 7 && elapsed > 11.0f)
             {
-                _step = 6;
+                _step = 8;
                 Snap("04_normal_night");
                 ReportNormal();
             }
-            else if (_step == 6 && elapsed > 12.0f)
+            else if (_step == 8 && elapsed > 13.0f)
             {
-                _step = 7;
+                _step = 9;
                 Finish();
             }
         }
@@ -202,6 +215,15 @@ namespace NailongFNAF.Diagnostics
                       " 夜内点 = " + (clock != null ? Get(clock, "CurrentHour") : null) +
                       " 结束 = " + (clock != null ? Get(clock, "IsNightComplete") : null) +
                       " HUD 无尽行 active = " + (textGo != null ? Get(textGo, "activeSelf") : null));
+        }
+
+        private void ReportEndPanel()
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            Debug.Log("SMOKE: 结算标题 = [" + Get(scene, "_endTitleText") + "]");
+            Debug.Log("SMOKE: 结算标题文案 = [" + Get(Get(scene, "_endTitleText"), "text") + "]");
+            Debug.Log("SMOKE: 结算正文 = [" + Get(Get(scene, "_endBodyText"), "text") + "]");
+            Debug.Log("SMOKE: 结算主按钮 = [" + Get(Get(scene, "_endPrimaryLabel"), "text") + "]");
         }
 
         private void Finish()
