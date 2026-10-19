@@ -25,6 +25,18 @@ namespace NailongFNAF.UI
         /// <summary>解锁进度存档键：存「已解锁到第几夜」，0 起。</summary>
         public const string UnlockKey = "nailong.unlockedNight";
 
+        /// <summary>无尽模式的纪录存档键：存「撑过的真实秒数」，越大越好。</summary>
+        public const string EndlessBestKey = "nailong.endlessBest";
+
+        /// <summary>无尽模式开局用的难度夜（0 起）—— 从第 3 夜那种强度开始，别太软。</summary>
+        public const int EndlessStartNight = 2;
+
+        /// <summary>无尽模式每撑过这么多小时，难度往上加一档。</summary>
+        public const int EndlessHoursPerStage = 2;
+
+        /// <summary>无尽模式当前难度档对应的夜（0 起）。</summary>
+        private int _endlessStage = EndlessStartNight;
+
         /// <summary>菜单是否开着（开着就冻住这一夜）。</summary>
         private bool _menuOpen;
 
@@ -96,10 +108,13 @@ namespace NailongFNAF.UI
             MakeDivider(_titleView.transform, new Vector2(0.5f, 0.55f));
 
             // ⚠️ 按钮 84px 高 ≈ 画布 9%，间距必须留够，否则会和分隔线/彼此重叠
+            // 三个按钮现在依次排开：开始游戏（选夜） / 无尽模式 / 退出
             MakeMenuButton(_titleView.transform, "开始游戏", Vector2.zero,
-                new Vector2(0.5f, 0.48f), OnStartClicked);
+                new Vector2(0.5f, 0.47f), OnStartClicked);
+            MakeMenuButton(_titleView.transform, "无尽模式", Vector2.zero,
+                new Vector2(0.5f, 0.37f), OnEndlessClicked);
             MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
-                new Vector2(0.5f, 0.36f), OnQuitClicked);
+                new Vector2(0.5f, 0.27f), OnQuitClicked);
 
             MakeLabel(_titleView.transform, "撑过 12 点到 6 点。鼠标看左右、升起监控、关门开灯、按手电筒。",
                 20, new Color(0.55f, 0.55f, 0.6f),
@@ -298,6 +313,10 @@ namespace NailongFNAF.UI
                 _enemyDirector.SetNight(night);
             }
 
+            // 走普通流程时把无尽模式关掉 —— 否则时钟还是「永远不到天亮」那一套
+            gm.SetEndless(false);
+            _endlessStage = EndlessStartNight;
+
             gm.Restart();
             ClearJumpscare();
 
@@ -305,6 +324,62 @@ namespace NailongFNAF.UI
             _menuOpen = false;
             _endShown = false;
             _caughtHoldTimer = 0f;
+        }
+
+        /// <summary>
+        /// 标题页「无尽模式」：撑不到天亮，敌人一轮轮来，靠玩家自己的操作换电。
+        /// 顺序很重要 —— <see cref="GameManager.SetEndless"/> 必须早于 <see cref="GameManager.Restart"/>，
+        /// 因为 Restart 是照着 EndlessMode 去建时钟和换电账本的。
+        /// </summary>
+        private void OnEndlessClicked()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            gm.SetEndless(true);
+
+            _endlessStage = EndlessStartNight;
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.SetNight(EndlessStartNight);
+            }
+
+            gm.Restart();
+            ClearJumpscare();
+
+            _menuRoot.SetActive(false);
+            _menuOpen = false;
+            _endShown = false;
+            _caughtHoldTimer = 0f;
+        }
+
+        /// <summary>
+        /// 无尽模式难度爬升：每撑过 <see cref="EndlessHoursPerStage"/> 个小时把敌人顶高一档。
+        /// 只有档位真的变了才调 SetNight —— 它会把整局活动度重设，不能每帧调。
+        /// </summary>
+        private void UpdateEndlessRamp(GameManager gm)
+        {
+            if (gm == null || !gm.EndlessMode || _enemyDirector == null || gm.Clock == null)
+            {
+                return;
+            }
+
+            int stage = EndlessStartNight + gm.Clock.CurrentHour / EndlessHoursPerStage;
+            if (stage > NightCount - 1)
+            {
+                stage = NightCount - 1;
+            }
+
+            if (stage == _endlessStage)
+            {
+                return;
+            }
+
+            _endlessStage = stage;
+            _enemyDirector.SetNight(stage);
         }
 
         private void ShowWinEnd()
@@ -353,6 +428,13 @@ namespace NailongFNAF.UI
             _levelView.SetActive(false);
             _endView.SetActive(true);
 
+            var gm = GameManager.Instance;
+            if (gm != null && gm.EndlessMode)
+            {
+                ShowEndlessLoseEnd(gm);
+                return;
+            }
+
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
 
             _endTitleText.text = "你被抓住了";
@@ -363,6 +445,70 @@ namespace NailongFNAF.UI
             // 跳杀完，那只敌人说一句话
             _endQuoteText.text = QuoteFor(_jumpscareEnemy);
             PlayEndQuoteVoice(_jumpscareEnemy);
+        }
+
+        /// <summary>
+        /// 无尽模式的结算：报「撑了多久 / 破没破纪录」，主按钮直接再来一局。
+        /// 纪录按游戏内时长（小时）算，用真实秒数存档，换节奏调参也不会作废旧纪录。
+        /// </summary>
+        private void ShowEndlessLoseEnd(GameManager gm)
+        {
+            float secondsPerHour = gm.Clock != null ? gm.Clock.SecondsPerHour : NightClock.DefaultSecondsPerHour;
+            int survived = gm.Clock != null ? Mathf.FloorToInt(gm.Clock.ElapsedSeconds) : 0;
+            int best = EndlessBestSeconds;
+
+            bool isRecord = survived > best;
+            if (isRecord)
+            {
+                PlayerPrefs.SetInt(EndlessBestKey, survived);
+                PlayerPrefs.Save();
+                best = survived;
+            }
+
+            _endTitleText.text = isRecord ? "新纪录！" : "无尽模式结束";
+            _endBodyText.text = "撑过 " + FormatSpan(survived, secondsPerHour)
+                + (isRecord ? " · 这是你的最好成绩" : " · 最佳 " + FormatSpan(best, secondsPerHour));
+            _endPrimaryLabel.text = "再来一局";
+            _endPrimaryButton.interactable = true;
+
+            // 无尽模式死法多半是被抓，台词照旧；没抓到就没台词
+            _endQuoteText.text = QuoteFor(_jumpscareEnemy);
+            PlayEndQuoteVoice(_jumpscareEnemy);
+        }
+
+        /// <summary>把「真实秒数」换算成游戏里的时长文案（每小时多少秒由时钟决定）。</summary>
+        private static string FormatSpan(int seconds, float secondsPerHour)
+        {
+            if (secondsPerHour <= 0f)
+            {
+                secondsPerHour = NightClock.DefaultSecondsPerHour;
+            }
+
+            if (seconds < 0)
+            {
+                seconds = 0;
+            }
+
+            float totalHours = seconds / secondsPerHour;
+            int hours = (int)totalHours;
+            int minutes = (int)((totalHours - hours) * 60f);
+
+            if (hours <= 0)
+            {
+                return minutes <= 0 ? "不到 1 分钟" : minutes + " 分钟";
+            }
+
+            return hours + " 小时 " + minutes + " 分";
+        }
+
+        /// <summary>无尽模式最好成绩（真实秒数），没打过就是 0。</summary>
+        private static int EndlessBestSeconds
+        {
+            get
+            {
+                int value = PlayerPrefs.GetInt(EndlessBestKey, 0);
+                return value > 0 ? value : 0;
+            }
         }
 
         /// <summary>
@@ -426,6 +572,14 @@ namespace NailongFNAF.UI
             if (_endQuoteAudio != null)
             {
                 _endQuoteAudio.Stop();
+            }
+
+            // 无尽模式只有「死」这一种结局，主按钮就是再来一局
+            var gm = GameManager.Instance;
+            if (gm != null && gm.EndlessMode)
+            {
+                OnEndlessClicked();
+                return;
             }
 
             if (_endTitleText.text == "你被抓住了")

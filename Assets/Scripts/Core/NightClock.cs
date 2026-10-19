@@ -19,19 +19,51 @@ namespace NailongFNAF.Core
         /// <summary>每游戏小时对应的真实秒数（可调）。</summary>
         public float SecondsPerHour { get; private set; }
 
+        /// <summary>
+        /// 是否无尽模式：无尽模式下小时数一直往上走，永远不到天亮。
+        /// 默认 false —— 原来的五夜流程完全不受影响。
+        /// </summary>
+        public bool Endless { get; private set; }
+
         /// <summary>本夜已经过去的真实秒数。</summary>
         public float ElapsedSeconds { get; private set; }
 
         /// <summary>
         /// 当前小时：0 表示 12 AM，1 表示 1 AM …… 6 表示 6 AM（天亮）。
-        /// 取值 0 ~ 6。
+        /// 普通夜晚取值 0 ~ 6；无尽模式下不封顶（可以到 7、8、9……）。
         /// </summary>
         public int CurrentHour { get; private set; }
 
-        /// <summary>是否已经撑到天亮（6 AM）。</summary>
+        /// <summary>是否已经撑到天亮（6 AM）。无尽模式永远返回 false。</summary>
         public bool IsNightComplete
         {
-            get { return CurrentHour >= HoursPerNight; }
+            get { return !Endless && CurrentHour >= HoursPerNight; }
+        }
+
+        /// <summary>已经撑过去的整点小时数 —— 无尽模式用来显示「撑了多久」。</summary>
+        public int HoursSurvived
+        {
+            get { return CurrentHour > HoursPerNight ? HoursPerNight : CurrentHour; }
+        }
+
+        /// <summary>无尽模式下这是第几「夜」（0 起）；普通夜晚恒为 0。</summary>
+        public int NightNumber
+        {
+            get { return Endless ? CurrentHour / HoursPerNight : 0; }
+        }
+
+        /// <summary>无尽模式下当前这一「夜」的第几点（0 ~ 5）；普通夜晚等于 <see cref="CurrentHour"/>。</summary>
+        public int HourOfNight
+        {
+            get
+            {
+                if (!Endless)
+                {
+                    return CurrentHour;
+                }
+
+                return CurrentHour % HoursPerNight;
+            }
         }
 
         /// <summary>本夜进度，0 ~ 1。</summary>
@@ -45,7 +77,8 @@ namespace NailongFNAF.Core
                     return 1f;
                 }
 
-                float progress = ElapsedSeconds / total;
+                float elapsed = Endless ? ElapsedSeconds % total : ElapsedSeconds;
+                float progress = elapsed / total;
                 return progress > 1f ? 1f : progress;
             }
         }
@@ -58,11 +91,18 @@ namespace NailongFNAF.Core
 
         /// <summary>用自定义节奏创建。</summary>
         public NightClock(float secondsPerHour)
+            : this(secondsPerHour, false)
         {
-            SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
         }
 
-        /// <summary>推进时间。天亮之后不再变化。</summary>
+        /// <summary>用自定义节奏创建，并指定是否无尽模式。</summary>
+        public NightClock(float secondsPerHour, bool endless)
+        {
+            SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
+            Endless = endless;
+        }
+
+        /// <summary>推进时间。天亮之后不再变化（无尽模式不会天亮）。</summary>
         public void Tick(float deltaSeconds)
         {
             if (deltaSeconds <= 0f || IsNightComplete)
@@ -73,7 +113,7 @@ namespace NailongFNAF.Core
             ElapsedSeconds += deltaSeconds;
 
             int hour = (int)(ElapsedSeconds / SecondsPerHour);
-            CurrentHour = hour > HoursPerNight ? HoursPerNight : hour;
+            CurrentHour = Endless ? hour : (hour > HoursPerNight ? HoursPerNight : hour);
         }
 
         /// <summary>回到午夜 0 点，用于开始新的一夜。</summary>

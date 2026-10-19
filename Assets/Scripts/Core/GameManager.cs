@@ -27,6 +27,21 @@ namespace NailongFNAF.Core
         /// <summary>夜晚时钟。</summary>
         public NightClock Clock { get; private set; }
 
+        /// <summary>
+        /// 是否处于无尽模式：撑不到天亮，敌人一直来；玩家靠「行动换电」续命。
+        /// 由菜单在开新一局之前设置，<see cref="Restart"/> 会照着它建时钟。
+        /// </summary>
+        public bool EndlessMode { get; private set; }
+
+        /// <summary>无尽模式的换电账本（普通模式下为 null）。</summary>
+        public EndlessRecharge Recharge { get; private set; }
+
+        /// <summary>最近一次行动补给拿到多少电量（百分点），给 HUD 弹「+8%」用。</summary>
+        public float LastGain { get; private set; }
+
+        /// <summary>距离 <see cref="LastGain"/> 过去了多久（秒），HUD 用它决定要不要淡出。</summary>
+        public float LastGainAge { get; private set; }
+
         public bool LeftDoorClosed { get; private set; }
         public bool RightDoorClosed { get; private set; }
         public bool LeftLightOn { get; private set; }
@@ -123,6 +138,7 @@ namespace NailongFNAF.Core
             }
 
             float dt = Time.deltaTime;
+            LastGainAge += dt;
 
             Clock.Tick(dt);
 
@@ -158,7 +174,10 @@ namespace NailongFNAF.Core
         public void Restart()
         {
             Power = new PowerSystem(PowerSystem.InitialLevel);
-            Clock = new NightClock(_secondsPerHour);
+            Clock = new NightClock(_secondsPerHour, EndlessMode);
+            Recharge = EndlessMode ? new EndlessRecharge() : null;
+            LastGain = 0f;
+            LastGainAge = 0f;
 
             LeftDoorClosed = false;
             RightDoorClosed = false;
@@ -178,6 +197,14 @@ namespace NailongFNAF.Core
             }
         }
 
+        /// <summary>
+        /// 设置无尽模式（下一局 <see cref="Restart"/> 生效）。菜单选「无尽模式」时传 true。
+        /// </summary>
+        public void SetEndless(bool endless)
+        {
+            EndlessMode = endless;
+        }
+
         /// <summary>视角控制脚本每帧调用，写入玩家当前看向哪边。</summary>
         public void SetView(ViewSide view)
         {
@@ -187,10 +214,13 @@ namespace NailongFNAF.Core
         /// <summary>切换到指定监控机位（0 起，超出范围忽略）。</summary>
         public void SetCamera(int index)
         {
-            if (index >= 0)
+            if (index < 0 || index == CurrentCameraIndex)
             {
-                CurrentCameraIndex = index;
+                return;
             }
+
+            CurrentCameraIndex = index;
+            NoteAction(PlayerAction.Camera);
         }
 
         /// <summary>按机位数量循环切换监控（供「下一个机位」按钮用）。</summary>
@@ -203,6 +233,7 @@ namespace NailongFNAF.Core
             }
 
             CurrentCameraIndex = (CurrentCameraIndex + 1) % cameraCount;
+            NoteAction(PlayerAction.Camera);
         }
 
         // ---------------- 操作入口（由 UI 按钮调用）----------------
@@ -212,6 +243,7 @@ namespace NailongFNAF.Core
             if (CanOperate() && !IsSideDisabled(Side.Left))
             {
                 LeftDoorClosed = !LeftDoorClosed;
+                NoteAction(PlayerAction.Door);
             }
         }
 
@@ -220,6 +252,7 @@ namespace NailongFNAF.Core
             if (CanOperate() && !IsSideDisabled(Side.Right))
             {
                 RightDoorClosed = !RightDoorClosed;
+                NoteAction(PlayerAction.Door);
             }
         }
 
@@ -228,6 +261,7 @@ namespace NailongFNAF.Core
             if (CanOperate() && !IsSideDisabled(Side.Left))
             {
                 LeftLightOn = !LeftLightOn;
+                NoteAction(PlayerAction.Light);
             }
         }
 
@@ -236,6 +270,7 @@ namespace NailongFNAF.Core
             if (CanOperate() && !IsSideDisabled(Side.Right))
             {
                 RightLightOn = !RightLightOn;
+                NoteAction(PlayerAction.Light);
             }
         }
 
@@ -244,6 +279,7 @@ namespace NailongFNAF.Core
             if (CanOperate())
             {
                 MonitorUp = !MonitorUp;
+                NoteAction(PlayerAction.Camera);
             }
         }
 
@@ -253,7 +289,35 @@ namespace NailongFNAF.Core
         /// </summary>
         public void SetFlashlight(bool on)
         {
+            bool wasOn = FlashlightOn;
             FlashlightOn = on && CanOperate();
+
+            if (!wasOn && FlashlightOn)
+            {
+                NoteAction(PlayerAction.Flashlight);
+            }
+        }
+
+        /// <summary>
+        /// 无尽模式的「行动换电」：登记一次有效操作，攒够记点就补电。
+        /// 普通模式下整个方法什么都不做（<see cref="Recharge"/> 为 null）。
+        /// </summary>
+        private void NoteAction(PlayerAction action)
+        {
+            if (!EndlessMode || Recharge == null || Power == null || !CanOperate())
+            {
+                return;
+            }
+
+            float gain = Recharge.RegisterAction(action);
+            if (gain <= 0f)
+            {
+                return;
+            }
+
+            float granted = Power.Grant(gain);
+            LastGain = granted;
+            LastGainAge = 0f;
         }
 
         /// <summary>断电、天亮或被抓到之后，玩家不能再操作设备。</summary>

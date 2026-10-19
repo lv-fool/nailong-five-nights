@@ -161,6 +161,10 @@
 
 **怎么跑测试**：Window → General → Test Runner → EditMode → Run All。
 电量、时间这类纯逻辑类不引用 UnityEngine，可以脱离 Unity 测，改动后务必跑一遍。
+**没人看着的时候**（AI / CI / 不开图形界面）用命令行版：`-batchmode -runTests` 跑测试、
+`-playSmoke` 进 Play 自动截图，完整命令与坑（要去掉代理环境变量、参数必须拼成一个带引号的
+字符串、跑完进程不退出会占着锁文件）见 `docs/08-无头验证.md`。
+Unity 2022.3.62f3c1 已装在本机 `F:\Unity\2022.3.62f3c1\Editor\Unity.exe`。
 
 ## 七、可用 skill 与使用时机
 
