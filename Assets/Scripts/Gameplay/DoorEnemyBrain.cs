@@ -67,6 +67,38 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
+        /// **仅调试用**：传送到指定机位。
+        ///
+        /// PathCameraIndex 是根据 Stage 查 _cameraPath 算出来的，不是独立字段，
+        /// 所以要反查：找到 path 里第一个等于 cameraIndex 的位置，把 Stage 设过去。
+        /// 传 -1 表示送到门口（Stage 到顶）。
+        /// </summary>
+        public override void DebugTeleport(int cameraIndex)
+        {
+            if (!HasCameraPath)
+            {
+                return;
+            }
+
+            if (cameraIndex < 0)
+            {
+                Stage = _cameraPath.Length;   // 到顶 = 站在门口
+                DoorTimer = 0f;
+                return;
+            }
+
+            for (int i = 0; i < _cameraPath.Length; i++)
+            {
+                if (_cameraPath[i] == cameraIndex)
+                {
+                    Stage = i;
+                    DoorTimer = 0f;
+                    MoveTimer = 0f;
+                    return;
+                }
+            }
+        }
+        /// <summary>
         /// 当前停在哪个监控机位（下标）。**站在门口**（<see cref="Stage"/> 到顶）、
         /// 或没配路径时返回 -1 —— 两者都不属于任何机位。
         /// </summary>

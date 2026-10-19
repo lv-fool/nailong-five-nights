@@ -41,6 +41,32 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
+        /// **仅调试用**：传送到指定机位（同 DoorEnemyBrain 的反查思路）。
+        /// </summary>
+        public override void DebugTeleport(int cameraIndex)
+        {
+            if (_cameraPath == null || _cameraPath.Length == 0)
+            {
+                return;
+            }
+
+            if (cameraIndex < 0)
+            {
+                Stage = _cameraPath.Length;
+                return;
+            }
+
+            for (int i = 0; i < _cameraPath.Length; i++)
+            {
+                if (_cameraPath[i] == cameraIndex)
+                {
+                    Stage = i;
+                    MoveTimer = 0f;
+                    return;
+                }
+            }
+        }
+        /// <summary>
         /// 当前停在哪个监控机位（下标）。**站在正门口**（<see cref="Stage"/> 到顶）、
         /// 或没配路径时返回 -1 —— 两者都不属于任何机位。
         /// </summary>

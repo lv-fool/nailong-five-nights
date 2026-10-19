@@ -52,6 +52,16 @@ namespace NailongFNAF.Gameplay
                 : DefaultMoveIntervalSeconds;
         }
 
+        /// <summary>
+        /// **仅调试用**：把敌人直接传送到指定机位。
+        ///
+        /// 正常游戏流程不会调用它 —— 它绕过移动骰子和路径检查，
+        /// 目的就是让调试面板能一键摆位，省得等 AI 自己爬过去。
+        /// 默认实现什么都不做，由各子类覆写成自己那套字段。
+        /// </summary>
+        public virtual void DebugTeleport(int cameraIndex)
+        {
+        }
         /// <summary>推进一帧。dt 为真实秒数。</summary>
         public void Tick(float dt, EnemyContext ctx)
         {

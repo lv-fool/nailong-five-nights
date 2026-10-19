@@ -492,6 +492,18 @@ MonoBehaviour:
     Angry: {fileID: 0}
     Jumpscare: {fileID: 0}
     Blackout: {fileID: 0}
+    RoomPoses:
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
   - Id: 1
     Idle: {fileID: 21300000, guid: 98f5dc0c20495ca44971075ce5ab3e2d, type: 3}
     Stare: {fileID: 21300000, guid: faf84b3c5bca93041b22af75748b881b, type: 3}
@@ -500,6 +512,18 @@ MonoBehaviour:
     Angry: {fileID: 0}
     Jumpscare: {fileID: 0}
     Blackout: {fileID: 0}
+    RoomPoses:
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
   - Id: 2
     Idle: {fileID: 21300000, guid: aa1c69b990002af48a4a870bd38c4487, type: 3}
     Stare: {fileID: 21300000, guid: c58929f537a3a6f42bb45c056a72d256, type: 3}
@@ -508,6 +532,18 @@ MonoBehaviour:
     Angry: {fileID: 21300000, guid: 505a8ed0f2a8aba42ab352087a864b2e, type: 3}
     Jumpscare: {fileID: 0}
     Blackout: {fileID: 0}
+    RoomPoses:
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
   - Id: 3
     Idle: {fileID: 21300000, guid: e0d62dcfd5b3c964eb6da24ec3ea934d, type: 3}
     Stare: {fileID: 21300000, guid: 25adaa5a4fc21914b8e1219ec276a474, type: 3}
@@ -516,6 +552,30 @@ MonoBehaviour:
     Angry: {fileID: 0}
     Jumpscare: {fileID: 21300000, guid: feafbfdb1de2c934cb4917e3bf5d0ad1, type: 3}
     Blackout: {fileID: 21300000, guid: 927d21e120e48cc42a775a8ccd63dc68, type: 3}
+    RoomPoses:
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+    - {fileID: 0}
+  _occluderMasks:
+  - {fileID: 21300000, guid: 3202633bc07a75644b09e472fc370579, type: 3}
+  - {fileID: 21300000, guid: e9f2dc06412cdbf4cae5a3f4c88a41c9, type: 3}
+  - {fileID: 21300000, guid: 3a2ecbf400079ba42af4172cc2b5f005, type: 3}
+  - {fileID: 21300000, guid: a8f70af681ad85347a1c4e4951bdfca8, type: 3}
+  - {fileID: 21300000, guid: bb80865f589e9e84c984bab121caa4e7, type: 3}
+  - {fileID: 21300000, guid: 68f4ec7b61a144c43a7c51750bf54cbf, type: 3}
+  - {fileID: 21300000, guid: b9a2840f232752b448d5fab7f6c94b1c, type: 3}
+  - {fileID: 21300000, guid: 2db6f8649a8206445a26caae29e1e8d6, type: 3}
+  - {fileID: 21300000, guid: 61d6e5d82bbb1d248abd70227ae22981, type: 3}
+  - {fileID: 0}
+  - {fileID: 21300000, guid: 7b72db8f10c621f48b9caa799b85f6df, type: 3}
 --- !u!4 &2125327511
 Transform:
   m_ObjectHideFlags: 0

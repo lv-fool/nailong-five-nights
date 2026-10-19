@@ -54,6 +54,29 @@ namespace NailongFNAF.Gameplay
         /// <summary>它现在蹲在第几个机位（0 起）。</summary>
         public int CameraIndex { get; private set; }
 
+        /// <summary>
+        /// **仅调试用**：把奶龙直接放到指定机位。
+        ///
+        /// 奶龙有两个身份：偷电时用 CameraIndex，转化成门类敌人后用
+        /// 基类的 PathCameraIndex。这里按当前 Mode 走对应的那条路。
+        /// </summary>
+        public override void DebugTeleport(int cameraIndex)
+        {
+            if (Mode == NailongMode.Approaching)
+            {
+                base.DebugTeleport(cameraIndex);   // 已转化：走门类敌人那套
+                return;
+            }
+
+            if (cameraIndex < 0)
+            {
+                return;   // 偷电阶段没有「门口」这个概念
+            }
+
+            CameraIndex = cameraIndex;
+        }
+
+
         /// <summary>当前状态：偷电 / 已转化成门类敌人进攻。</summary>
         public NailongMode Mode { get; private set; }
 
