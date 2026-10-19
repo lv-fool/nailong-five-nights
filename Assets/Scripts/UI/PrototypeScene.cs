@@ -598,6 +598,19 @@ namespace NailongFNAF.UI
         private Image _flashlightGlow;
         private float _flashlightGlowAlpha;
         private Image _monitorOverlay;
+
+        /// <summary>
+        /// 监控画面的**底图**（挂在 overlay 下面单独一层）。
+        ///
+        /// 为什么不直接画在 overlay 上：底图要能**单独平移 / 缩放**（以后换成分块背景
+        /// 得靠这个对齐），而 overlay 同时还是敌人立绘、小地图、机位名的父节点 ——
+        /// 缩放 overlay 会把那些一起缩掉。所以拆出一层专门的底图。
+        /// </summary>
+        private Image _monitorFrame;
+
+        /// <summary>底图缩放后四周露出来的部分用纯黑填，别让办公室画面透上来。</summary>
+        private Image _monitorBackdrop;
+
         /// <summary>
         /// 监控画面里叠的敌人立绘槽位（最多三个）。
         /// 同一机位可能站着不止一个（比如舞台上的袋鼠 + 牛来），
@@ -610,7 +623,7 @@ namespace NailongFNAF.UI
         /// 由编辑器菜单「奶龙 / 6. 编辑监控遮挡区」生成，
         /// 运行时优先用它 —— 比程序自动算的遮罩准，因为是人按真实家具轮廓画的。
         /// </summary>
-        private Dictionary<int, List<Vector2[]>> _occluderPolys;
+        private Dictionary<int, List<OccluderShape>> _occluderPolys;
 
         /// <summary>每个槽位当前是不是「近档」（近档不参与遮挡裁剪）。</summary>
         private readonly bool[] _slotIsNear = new bool[3];
@@ -632,6 +645,9 @@ namespace NailongFNAF.UI
 
         /// <summary>小地图上的敌人头像（4 个敌人各一个）。调试时随时显示。</summary>
         private Image[] _debugMapPins;
+
+        /// <summary>调试面板里「每只敌人当前在哪个机位」的文本。</summary>
+        private Text[] _debugEnemyPosText;
 
         /// <summary>电量调试用的显示文本。</summary>
         private Text _debugPowerText;
@@ -786,6 +802,7 @@ namespace NailongFNAF.UI
                 _enemyDirector = go.AddComponent<EnemyDirector>();
             }
 
+            _enemyDirectorRef = _enemyDirector;   // 给静态辅助方法用
             _enemyDirector.Attacked += OnEnemyAttacked;
         }
 
@@ -1603,8 +1620,7 @@ namespace NailongFNAF.UI
             // 厨房只有声音没有画面 —— 照官方，切过去一片黑，也不显示任何角色
             if (index == KitchenCameraIndex)
             {
-                _monitorOverlay.sprite = _solidSprite;
-                _monitorOverlay.color = Color.black;
+                SetMonitorFrame(_solidSprite, Color.black);
                 _monitorLabel.text = CameraName(index) + "    (AUDIO ONLY)";
                 HideMonitorCharacters();
                 UpdateCameraBoxes(index);
@@ -1618,13 +1634,31 @@ namespace NailongFNAF.UI
                 frame = _monitorFrames[index];
             }
 
-            _monitorOverlay.sprite = frame != null ? frame : _solidSprite;
-            _monitorOverlay.color = frame != null ? Color.white : MonitorFallback;
+            SetMonitorFrame(frame != null ? frame : _solidSprite,
+                frame != null ? Color.white : MonitorFallback);
             _monitorLabel.text = CameraName(index);
+
+            // 底图的平移 / 缩放（编辑器里拖过才有）
+            ApplyMonitorBackground(index);
 
             ApplyMonitorCharacter(gm);
 
             UpdateCameraBoxes(index);
+        }
+
+        /// <summary>把画面贴图设到底图那一层（没有底图层的旧场景就退回 overlay 本体）。</summary>
+        private void SetMonitorFrame(Sprite sprite, Color color)
+        {
+            if (_monitorFrame != null)
+            {
+                _monitorFrame.sprite = sprite;
+                _monitorFrame.color = color;
+            }
+            else
+            {
+                _monitorOverlay.sprite = sprite;
+                _monitorOverlay.color = color;
+            }
         }
 
         /// <summary>小地图上把当前机位那一格点亮。</summary>
@@ -1745,7 +1779,19 @@ namespace NailongFNAF.UI
                 // 这样它才真的躲在家具后面，而不是站在旁边的空地上
                 float x = near ? slot.x : PullTowardOccluder(slot.x, cam);
 
-                rect.anchoredPosition = new Vector2(x, slot.y + lift);
+                // **编辑器里手拖过的点位优先**：直接定死立绘底边中点，
+                // 不再叠 lift、也不再被拉向遮挡箱 —— 你摆哪儿它就站哪儿。
+                MonitorPoint custom = FindMonitorPoint(ids[i], cam);
+                if (custom != null)
+                {
+                    var overlayRt = (RectTransform)_monitorOverlay.transform;
+                    x = (custom.x - 0.5f) * overlayRt.rect.width;
+                    rect.anchoredPosition = new Vector2(x, custom.y * overlayRt.rect.height);
+                }
+                else
+                {
+                    rect.anchoredPosition = new Vector2(x, slot.y + lift);
+                }
 
                 // ⚠️ **框的宽高比必须和立绘一致**，不能写死 260×380 ——
                 // Image 开着 preserveAspect，框比例和精灵不一致时，
@@ -1764,6 +1810,10 @@ namespace NailongFNAF.UI
 
                 float scale = MonitorSlotScale(ids[i], cam);
                 scale *= near ? MonitorNearScale : MonitorFarScale;
+                if (custom != null && custom.scale > 0.01f)
+                {
+                    scale *= custom.scale;
+                }
                 rect.localScale = new Vector3(scale, scale, 1f);
             }
 
@@ -1930,7 +1980,7 @@ namespace NailongFNAF.UI
         /// 再用「敌人身份」选一个固定的点。不同敌人天然分开，
         /// 而且位置都属于真实存在的道具旁边，不是网格里的空位。
         /// </summary>
-        private static Vector2 MonitorSlotPosition(EnemyId id, int cameraIndex)
+        public static Vector2 MonitorSlotPosition(EnemyId id, int cameraIndex)
         {
             Vector2[] points = RoomStandPoints(cameraIndex);
             if (points.Length == 0)
@@ -1983,7 +2033,7 @@ namespace NailongFNAF.UI
         {
             EnsureOccluderPolys();
 
-            List<Vector2[]> polys;
+            List<OccluderShape> polys;
             if (_occluderPolys == null
                 || !_occluderPolys.TryGetValue(cameraIndex, out polys)
                 || polys == null
@@ -1995,9 +2045,14 @@ namespace NailongFNAF.UI
             // 取所有遮挡多边形的横向中心（归一化 0..1 → 画布坐标）
             float minX = float.MaxValue;
             float maxX = float.MinValue;
-            foreach (var poly in polys)
+            foreach (var shape in polys)
             {
-                foreach (var p in poly)
+                if (shape.Points == null)
+                {
+                    continue;
+                }
+
+                foreach (var p in shape.Points)
                 {
                     minX = Mathf.Min(minX, p.x);
                     maxX = Mathf.Max(maxX, p.x);
@@ -2031,6 +2086,25 @@ namespace NailongFNAF.UI
         /// （<c>mon_1b_occl.png</c> 之类），白色 = 家具。
         /// 这样椅子之间的空隙会正确保留，而不是像矩形裁剪那样一刀切平。
         /// </summary>
+        /// <summary>遮挡形状的类型。</summary>
+        private enum OccluderKind
+        {
+            Polygon = 0,
+            Rect = 1,
+            Ellipse = 2,
+        }
+
+        /// <summary>
+        /// 一块遮挡区域。
+        ///
+        /// 矩形 / 椭圆也存成 4 个点的包围盒 —— 这样数据格式统一，
+        /// 只是栅格化时按 Kind 走不同的填法。
+        /// </summary>
+        private struct OccluderShape
+        {
+            public OccluderKind Kind;
+            public Vector2[] Points;
+        }
         /// <summary>
         /// 读人工画的遮挡多边形（Resources/occluders.json）。
         /// 文件不存在 / 解析失败都静默跳过 —— 那样就退回程序遮罩。
@@ -2042,7 +2116,7 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            _occluderPolys = new Dictionary<int, List<Vector2[]>>();
+            _occluderPolys = new Dictionary<int, List<OccluderShape>>();
 
             var asset = Resources.Load<TextAsset>("occluders");
             if (asset == null)
@@ -2060,7 +2134,7 @@ namespace NailongFNAF.UI
 
                 foreach (var room in doc.rooms)
                 {
-                    var list = new List<Vector2[]>();
+                    var list = new List<OccluderShape>();
                     if (room.shapes != null)
                     {
                         foreach (var shape in room.shapes)
@@ -2076,7 +2150,13 @@ namespace NailongFNAF.UI
                             {
                                 poly[i] = new Vector2(shape.points[i * 2], shape.points[i * 2 + 1]);
                             }
-                            list.Add(poly);
+
+                            list.Add(new OccluderShape
+                            {
+                                // kind 缺省 0 = 多边形，老数据自动兼容
+                                Kind = (OccluderKind)shape.kind,
+                                Points = poly,
+                            });
                         }
                     }
                     _occluderPolys[room.room] = list;
@@ -2085,6 +2165,138 @@ namespace NailongFNAF.UI
             catch (System.Exception e)
             {
                 Debug.LogWarning("[奶龙] 遮挡多边形解析失败：" + e.Message);
+            }
+        }
+
+        // ---------------- 监控画面布局（编辑器「奶龙 / 6. 监控画面编辑器」生成）----------------
+
+        /// <summary>
+        /// 每个机位的底图变换 + 敌人点位。
+        /// 由编辑器窗口拖动生成，运行时直接套用 —— 不用改代码就能调构图。
+        /// 文件不存在就整套退回原来的自动布局，不会报错。
+        /// </summary>
+        [System.Serializable]
+        private class MonitorLayoutDoc
+        {
+            public MonitorLayoutRoom[] rooms;
+        }
+
+        [System.Serializable]
+        private class MonitorLayoutRoom
+        {
+            public int room;
+
+            /// <summary>底图相对屏幕中心的像素偏移。</summary>
+            public float bgX;
+            public float bgY;
+
+            /// <summary>底图缩放（1 = 铺满）。</summary>
+            public float bgScale = 1f;
+
+            public MonitorPoint[] points;
+        }
+
+        [System.Serializable]
+        private class MonitorPoint
+        {
+            /// <summary>EnemyId 的整数值（Niulai=0 / Daishu=1 / Lulu=2 / Nailong=3）。</summary>
+            public int enemy;
+
+            /// <summary>归一化坐标，左下原点：x = 立绘底边中点，y = 底边距画面底部。</summary>
+            public float x = 0.5f;
+            public float y = 0.06f;
+
+            /// <summary>额外缩放（1 = 原尺寸）。</summary>
+            public float scale = 1f;
+        }
+
+        private Dictionary<int, MonitorLayoutRoom> _monitorLayout;
+
+        private void EnsureMonitorLayout()
+        {
+            if (_monitorLayout != null)
+            {
+                return;
+            }
+
+            _monitorLayout = new Dictionary<int, MonitorLayoutRoom>();
+
+            var asset = Resources.Load<TextAsset>("monitor_layout");
+            if (asset == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var doc = JsonUtility.FromJson<MonitorLayoutDoc>(asset.text);
+                if (doc == null || doc.rooms == null)
+                {
+                    return;
+                }
+
+                foreach (var room in doc.rooms)
+                {
+                    if (room != null)
+                    {
+                        _monitorLayout[room.room] = room;
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[奶龙] 监控布局解析失败：" + e.Message);
+            }
+        }
+
+        /// <summary>取某个敌人在某个机位上手动摆的点位；没配就返回 null（走自动布局）。</summary>
+        private MonitorPoint FindMonitorPoint(EnemyId id, int cameraIndex)
+        {
+            EnsureMonitorLayout();
+
+            MonitorLayoutRoom room;
+            if (_monitorLayout == null
+                || !_monitorLayout.TryGetValue(cameraIndex, out room)
+                || room == null
+                || room.points == null)
+            {
+                return null;
+            }
+
+            foreach (var p in room.points)
+            {
+                if (p != null && p.enemy == (int)id)
+                {
+                    return p;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>把底图的平移 / 缩放套到画面上。没配该机位就复位。</summary>
+        private void ApplyMonitorBackground(int cameraIndex)
+        {
+            if (_monitorFrame == null)
+            {
+                return;
+            }
+
+            EnsureMonitorLayout();
+
+            var rt = _monitorFrame.rectTransform;
+
+            MonitorLayoutRoom room;
+            if (_monitorLayout != null && _monitorLayout.TryGetValue(cameraIndex, out room) && room != null)
+            {
+                float s = room.bgScale <= 0.01f ? 1f : room.bgScale;
+                rt.anchoredPosition = new Vector2(room.bgX, room.bgY);
+                rt.localScale = new Vector3(s, s, 1f);
+            }
+            else
+            {
+                rt.anchoredPosition = Vector2.zero;
+                rt.localScale = Vector3.one;
             }
         }
 
@@ -2105,7 +2317,7 @@ namespace NailongFNAF.UI
                 return cached;
             }
 
-            List<Vector2[]> polys;
+            List<OccluderShape> polys;
             if (_occluderPolys == null
                 || !_occluderPolys.TryGetValue(cameraIndex, out polys)
                 || polys == null
@@ -2145,10 +2357,18 @@ namespace NailongFNAF.UI
             // 所以敢上 1920×1080（否则 200 万像素 × 每个顶点会明显卡）。
             var xs = new List<float>(16);
 
-            foreach (var poly in polys)
+            foreach (var shape in polys)
             {
+                var poly = shape.Points;
                 if (poly == null || poly.Length < 3)
                 {
+                    continue;
+                }
+
+                if (shape.Kind == OccluderKind.Rect || shape.Kind == OccluderKind.Ellipse)
+                {
+                    // 矩形 / 椭圆只存包围盒的四角，用前两个对角点即可
+                    FillBox(px, W, H, poly, shape.Kind == OccluderKind.Ellipse);
                     continue;
                 }
 
@@ -2200,6 +2420,61 @@ namespace NailongFNAF.UI
             return tex;
         }
 
+        /// <summary>
+        /// 把「包围盒」填成矩形或椭圆。
+        ///
+        /// 矩形 / 椭圆在数据里只存四个角（包围盒），所以这里取对角两点的
+        /// 最小 / 最大即可，不依赖点的顺序。
+        /// 椭圆用归一化后的 (dx/a)² + (dy/b)² <= 1 判定。
+        /// </summary>
+        private static void FillBox(Color32[] px, int w, int h, Vector2[] corners, bool ellipse)
+        {
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+
+            foreach (var p in corners)
+            {
+                minX = Mathf.Min(minX, p.x);
+                minY = Mathf.Min(minY, p.y);
+                maxX = Mathf.Max(maxX, p.x);
+                maxY = Mathf.Max(maxY, p.y);
+            }
+
+            int x0 = Mathf.Clamp(Mathf.FloorToInt(minX * w), 0, w - 1);
+            int x1 = Mathf.Clamp(Mathf.CeilToInt(maxX * w), 0, w - 1);
+            int y0 = Mathf.Clamp(Mathf.FloorToInt(minY * h), 0, h - 1);
+            int y1 = Mathf.Clamp(Mathf.CeilToInt(maxY * h), 0, h - 1);
+
+            float cx = (minX + maxX) * 0.5f;
+            float cy = (minY + maxY) * 0.5f;
+            float rx = Mathf.Max((maxX - minX) * 0.5f, 1e-5f);
+            float ry = Mathf.Max((maxY - minY) * 0.5f, 1e-5f);
+
+            var white = new Color32(255, 255, 255, 255);
+
+            for (int y = y0; y <= y1; y++)
+            {
+                float ny = (y + 0.5f) / h;
+                int row = y * w;
+
+                for (int x = x0; x <= x1; x++)
+                {
+                    if (ellipse)
+                    {
+                        float nx = (x + 0.5f) / w;
+                        float dx = (nx - cx) / rx;
+                        float dy = (ny - cy) / ry;
+
+                        if (dx * dx + dy * dy > 1f)
+                        {
+                            continue;
+                        }
+                    }
+
+                    px[row + x] = white;
+                }
+            }
+        }
         /// <summary>射线法判断点是否在多边形内。</summary>
         private static bool PointInPolygon(Vector2[] poly, float x, float y)
         {
@@ -2234,6 +2509,9 @@ namespace NailongFNAF.UI
         [System.Serializable]
         private class OccluderShapeJson
         {
+            /// <summary>0=多边形 1=矩形 2=椭圆（缺省 0，兼容老数据）</summary>
+            public int kind;
+
             public float[] points;
         }
 
@@ -2916,6 +3194,7 @@ namespace NailongFNAF.UI
             }
 
             UpdateDebugMapPins();
+            UpdateDebugEnemyPositions();
         }
 
         /// <summary>
@@ -3546,6 +3825,23 @@ namespace NailongFNAF.UI
         {
             _monitorOverlay = MakeFullScreenImage("MonitorOverlay", MonitorFallback, true);
 
+            // overlay 本身只当**容器**用，别再往上画东西（否则底图一缩放，
+            // 敌人立绘、小地图、机位名会跟着缩）。底色压黑即可。
+            _monitorOverlay.color = Color.black;
+
+            // 1) 纯黑垫底：底图缩小 / 平移后露出来的地方必须是黑的，
+            //    否则会透出办公室画面，看着像"监控没铺满"。
+            _monitorBackdrop = MakeFullScreenImage("MonitorBackdrop", Color.black, false);
+            _monitorBackdrop.transform.SetParent(_monitorOverlay.transform, false);
+            StretchToParent(_monitorBackdrop.rectTransform);
+            _monitorBackdrop.transform.SetAsFirstSibling();
+
+            // 2) 底图：可单独平移 / 缩放（以后换分块背景靠它对齐）
+            _monitorFrame = MakeFullScreenImage("MonitorFrame", Color.white, false);
+            _monitorFrame.transform.SetParent(_monitorOverlay.transform, false);
+            StretchToParent(_monitorFrame.rectTransform);
+            _monitorFrame.transform.SetSiblingIndex(1);
+
             _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1B",
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
@@ -3795,8 +4091,22 @@ namespace NailongFNAF.UI
             var panel = new GameObject("DebugControls", typeof(RectTransform));
             panel.transform.SetParent(parent, false);
             var panelRect = (RectTransform)panel.transform;
+            // 面板放进一个带深色底的容器 —— 否则调试文字会和 HUD（电量/时间）
+            // 叠在一起，互相看不清。位置行那块尤其容易压到 "Power left"。
             PlaceRect(panelRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(40f, -260f), new Vector2(1100f, 200f));
+                new Vector2(40f, -60f), new Vector2(1100f, 420f));
+
+            var bg = new GameObject("DebugBg", typeof(RectTransform),
+                typeof(CanvasRenderer), typeof(Image));
+            bg.transform.SetParent(panel.transform, false);
+            var bgRect = (RectTransform)bg.transform;
+            PlaceRect(bgRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(0f, 0f), new Vector2(1100f, 420f));
+            var bgImg = bg.GetComponent<Image>();
+            bgImg.sprite = _buttonSprite;
+            bgImg.color = new Color(0.05f, 0.06f, 0.08f, 0.86f);
+            bgImg.raycastTarget = false;
+            bg.transform.SetAsFirstSibling();   // 垫在最底下
 
             // ── 一键跳杀 ──
             Text jumpLabel = MakeLabel(panel.transform, "跳杀：", 18,
@@ -3878,8 +4188,218 @@ namespace NailongFNAF.UI
                 new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                 new Vector2(560f, -38f), new Vector2(260f, 36f));
             _debugPowerText.alignment = TextAnchor.MiddleLeft;
+
+            // ── 敌人位置 ──
+            // 标签只用两个字 —— 原先写「敌人位置：」宽 90，
+            // 和后面 x=56 的 ◀ 按钮压在一起，"位置" 两个字被盖住了。
+            Text posLabel = MakeLabel(panel.transform, "位置：", 17,
+                new Color(0.6f, 0.8f, 0.95f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(4f, -104f), new Vector2(52f, 36f));
+            posLabel.alignment = TextAnchor.MiddleLeft;
+
+            BuildDebugEnemyPositionRows(panel.transform, -104f);
         }
 
+        /// <summary>
+        /// 敌人位置控制：四行 × 「← 机位 →」，把敌人一键搬到指定监控。
+        ///
+        /// 调试时最常做的事就是「把某只摆到某间屋子看效果」，
+        /// 靠 AI 自己走要等几十秒，还不一定走得对。
+        /// </summary>
+        private void BuildDebugEnemyPositionRows(Transform parent, float startY)
+        {
+            EnemyId[] order =
+            {
+                EnemyId.Niulai, EnemyId.Daishu, EnemyId.Lulu, EnemyId.Nailong
+            };
+            string[] names = { "牛来", "袋鼠", "噜噜", "奶龙" };
+
+            _debugEnemyPosText = new Text[order.Length];
+
+            for (int i = 0; i < order.Length; i++)
+            {
+                EnemyId id = order[i];
+                float y = startY - i * 42f;
+
+                // 名字
+                Text name = MakeLabel(parent, names[i], 16,
+                    new Color(0.75f, 0.82f, 0.9f),
+                    new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(4f, y), new Vector2(52f, 36f));
+                name.alignment = TextAnchor.MiddleLeft;
+
+                // ← 上一个机位
+                EnemyId capturedPrev = id;
+                MakeDebugButton(parent, "◀", 56f, y, 34f, 34f,
+                    delegate { DebugMoveEnemy(capturedPrev, -1); });
+
+                // 当前机位名（只读显示）
+                Text pos = MakeLabel(parent, "-", 15, Color.white,
+                    new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(94f, y), new Vector2(210f, 34f));
+                pos.alignment = TextAnchor.MiddleCenter;
+                _debugEnemyPosText[i] = pos;
+
+                // → 下一个机位
+                EnemyId capturedNext = id;
+                MakeDebugButton(parent, "▶", 310f, y, 34f, 34f,
+                    delegate { DebugMoveEnemy(capturedNext, +1); });
+            }
+        }
+
+        /// <summary>调试面板上的一个小按钮。</summary>
+        private void MakeDebugButton(Transform parent, string label,
+            float x, float y, float w, float h, UnityEngine.Events.UnityAction onClick)
+        {
+            var go = new GameObject("DbgBtn",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+
+            var rect = (RectTransform)go.transform;
+            PlaceRect(rect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(x, y), new Vector2(w, h));
+
+            var img = go.GetComponent<Image>();
+            img.sprite = _buttonSprite;
+            img.color = new Color(0.22f, 0.30f, 0.42f, 0.95f);
+
+            var btn = go.GetComponent<Button>();
+            btn.targetGraphic = img;
+            btn.onClick.AddListener(onClick);
+
+            Text t = MakeLabel(go.transform, label, 18, Color.white,
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(w, h));
+            t.raycastTarget = false;
+        }
+
+        /// <summary>这只敌人的固定巡逻路径（反射读 _cameraPath，调试专用）。</summary>
+        private static int[] CameraPathOf(EnemyId id)
+        {
+            var dir = _enemyDirectorRef;
+            if (dir == null)
+            {
+                return null;
+            }
+
+            var brain = dir.GetBrain(id);
+            if (brain == null)
+            {
+                return null;
+            }
+
+            // 沿继承链找 _cameraPath（DoorEnemyBrain 和 LuluBrain 各有一份）
+            for (var ty = brain.GetType(); ty != null; ty = ty.BaseType)
+            {
+                var f = ty.GetField("_cameraPath",
+                    System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.DeclaredOnly);
+
+                if (f != null)
+                {
+                    return f.GetValue(brain) as int[];
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>_enemyDirector 的静态副本，给静态辅助方法用。</summary>
+        private static EnemyDirector _enemyDirectorRef;
+        /// <summary>把敌人挪到相邻的上/下一个机位（跳过厨房那种没画面的）。</summary>
+        private void DebugMoveEnemy(EnemyId id, int step)
+        {
+            if (_enemyDirector == null)
+            {
+                return;
+            }
+
+            var brain = _enemyDirector.GetBrain(id);
+            if (brain == null)
+            {
+                return;
+            }
+
+            // ⚠️ 每只敌人有**自己的固定路径**（FNAF 原作设定）：
+            //   牛来 [0,1,10,6,7]  袋鼠 [0,1,5,3,4]  噜噜 [2,1]  奶龙 [1,6,7]
+            // 所以「下一个机位」必须按**它自己的路径**走，
+            // 不能按全局 CameraNames 下标自增 —— 那样会跳到它根本不去的地方，
+            // DebugTeleport 反查失败就只能原地不动，看起来像按钮没反应。
+            int[] path = CameraPathOf(id);
+            if (path == null || path.Length == 0)
+            {
+                return;
+            }
+
+            int cur = DebugCameraOf(brain);
+            int idx = System.Array.IndexOf(path, cur);
+
+            int next;
+            if (idx < 0)
+            {
+                // 当前不在路径上（比如刚被重置）：从路径头/尾开始
+                next = step > 0 ? path[0] : path[path.Length - 1];
+            }
+            else
+            {
+                int ni = (idx + step) % path.Length;
+                if (ni < 0)
+                {
+                    ni += path.Length;
+                }
+                next = path[ni];
+            }
+
+            brain.DebugTeleport(next);
+        }
+
+        /// <summary>刷新每只敌人的「当前机位」显示。</summary>
+        private void UpdateDebugEnemyPositions()
+        {
+            if (_debugEnemyPosText == null || _enemyDirector == null)
+            {
+                return;
+            }
+
+            EnemyId[] order =
+            {
+                EnemyId.Niulai, EnemyId.Daishu, EnemyId.Lulu, EnemyId.Nailong
+            };
+
+            for (int i = 0; i < order.Length && i < _debugEnemyPosText.Length; i++)
+            {
+                Text t = _debugEnemyPosText[i];
+                if (t == null)
+                {
+                    continue;
+                }
+
+                var brain = _enemyDirector.GetBrain(order[i]);
+                int cam = brain != null ? DebugCameraOf(brain) : -1;
+
+                if (cam < 0)
+                {
+                    t.text = "（门口）";
+                    continue;
+                }
+
+                // 显示「第几个 / 共几个」+ 机位名 ——
+                // 每只敌人只走自己那条路径，光给机位名会让人以为按钮坏了
+                int[] path = CameraPathOf(order[i]);
+                string camName = CameraNames[cam].Replace("    ", " ");
+                if (path != null && path.Length > 0)
+                {
+                    int pos = System.Array.IndexOf(path, cam) + 1;
+                    t.text = "[" + pos + "/" + path.Length + "] " + camName;
+                }
+                else
+                {
+                    t.text = camName;
+                }
+            }
+        }
         /// <summary>
         /// 小地图上的敌人头像：调试时四个敌人的当前位置一眼可见。
         /// 独立一层，不依赖监控是否升起 —— 调试就是要随时能看到。

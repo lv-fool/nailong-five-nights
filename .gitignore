@@ -79,3 +79,4 @@ tools/update_and_run.ps1
 tools/更新.bat
 tools/publish_dev.ps1
 Builds/_releases/
+*.bak.meta
