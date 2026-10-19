@@ -58,6 +58,17 @@ namespace NailongFNAF.UI
         private GameObject _levelView;
         private GameObject _endView;
         private GameObject _pauseView;
+        private GameObject _customView;
+        private GameObject _achvView;
+
+        // 自定义夜界面：每只敌人一行的活动度数字（下标 = (int)EnemyId）
+        private readonly Text[] _customLevelTexts = new Text[EnemyIds.All.Length];
+        private CustomNightConfig _customConfig;
+
+        // 成就界面：计数 + 每行的名称 / 描述（顺序照 AchievementCatalog.All）
+        private Text _achvCountText;
+        private readonly Text[] _achvTitleTexts = new Text[AchievementCatalog.All.Length];
+        private readonly Text[] _achvDescTexts = new Text[AchievementCatalog.All.Length];
 
         // 结算面板文案
         private Text _endTitleText;
@@ -79,6 +90,13 @@ namespace NailongFNAF.UI
 
         /// <summary>标题页「永夜模式 / 继续永夜」那颗按钮的文字，有存档时要换名字。</summary>
         private Text _endlessLabel;
+
+        /// <summary>标题页「自定义夜」按钮：通关隐藏夜才解锁（照 FNAF 1 的第 7 夜）。</summary>
+        private Button _customButton;
+        private Text _customLabel;
+
+        /// <summary>自定义夜解锁存档键：通关隐藏夜时写 1。</summary>
+        public const string CustomUnlockedKey = "nailong.customUnlocked";
 
         /// <summary>已解锁到第几夜（0 起）。</summary>
         private static int UnlockedNight
@@ -103,6 +121,8 @@ namespace NailongFNAF.UI
 
             BuildTitleView();
             BuildLevelView();
+            BuildCustomView();
+            BuildAchievementsView();
             BuildEndView();
             BuildPauseView();
 
@@ -114,26 +134,32 @@ namespace NailongFNAF.UI
             _titleView = MakeFullScreenPanel("TitleView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
 
             MakeLabel(_titleView.transform, "奶龙的五夜后宫", 72, new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.5f, 0.72f), new Vector2(0.5f, 0.72f), new Vector2(0f, 0f), new Vector2(1100f, 120f));
+                new Vector2(0.5f, 0.82f), new Vector2(0.5f, 0.82f), new Vector2(0f, 0f), new Vector2(1100f, 120f));
             MakeLabel(_titleView.transform, "NAILONG · FIVE NIGHTS", 26, new Color(0.7f, 0.7f, 0.75f),
-                new Vector2(0.5f, 0.62f), new Vector2(0.5f, 0.62f), new Vector2(0f, 0f), new Vector2(1100f, 50f));
+                new Vector2(0.5f, 0.73f), new Vector2(0.5f, 0.73f), new Vector2(0f, 0f), new Vector2(1100f, 50f));
 
-            // 分隔装饰线：放在副标题与按钮之间（0.55），别让它压到按钮
-            MakeDivider(_titleView.transform, new Vector2(0.5f, 0.55f));
+            // 分隔装饰线：放在副标题与按钮之间，别让它压到按钮
+            MakeDivider(_titleView.transform, new Vector2(0.5f, 0.66f));
 
-            // ⚠️ 按钮 84px 高 ≈ 画布 9%，间距必须留够，否则会和分隔线/彼此重叠
-            // 三个按钮现在依次排开：故事模式（选夜） / 永夜模式 / 退出
+            // ⚠️ 按钮 84px 高 ≈ 画布 9.3%，**间距必须 ≥ 0.10**，否则会叠在一起（这里踩过）
+            // 五个按钮依次排开：故事模式 / 自定义夜 / 永夜模式 / 成就 / 退出
             MakeMenuButton(_titleView.transform, "故事模式", Vector2.zero,
-                new Vector2(0.5f, 0.47f), OnStartClicked);
+                new Vector2(0.5f, 0.57f), OnStartClicked);
+            Button customButton = MakeMenuButton(_titleView.transform, "自定义夜", Vector2.zero,
+                new Vector2(0.5f, 0.47f), OnCustomClicked);
+            _customLabel = customButton.GetComponentInChildren<Text>();
+            _customButton = customButton;
             Button endlessButton = MakeMenuButton(_titleView.transform, "永夜模式", Vector2.zero,
                 new Vector2(0.5f, 0.37f), OnEndlessClicked);
             _endlessLabel = endlessButton.GetComponentInChildren<Text>();
+            MakeMenuButton(_titleView.transform, "成就", Vector2.zero,
+                new Vector2(0.5f, 0.27f), OnAchievementsClicked);
             MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
-                new Vector2(0.5f, 0.27f), OnQuitClicked);
+                new Vector2(0.5f, 0.17f), OnQuitClicked);
 
             MakeLabel(_titleView.transform, "撑过 12 点到 6 点。鼠标看左右、升起监控、关门开灯、按手电筒。",
                 20, new Color(0.55f, 0.55f, 0.6f),
-                new Vector2(0.5f, 0.08f), new Vector2(0.5f, 0.08f), new Vector2(0f, 0f), new Vector2(1200f, 40f));
+                new Vector2(0.5f, 0.05f), new Vector2(0.5f, 0.05f), new Vector2(0f, 0f), new Vector2(1200f, 40f));
         }
 
         /// <summary>
@@ -165,18 +191,23 @@ namespace NailongFNAF.UI
             MakeLabel(_levelView.transform, "选择夜晚", 52, new Color(0.95f, 0.85f, 0.3f),
                 new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 90f));
 
-            // 6 个夜晚按钮排两行，anchor 直接按画布比例给（按钮 84px ≈ 画布 9%，行距 0.14 才不叠）
+            MakeLabel(_levelView.transform, "灰色的夜还没解锁 —— 通关前一晚会点亮下一夜。", 20,
+                new Color(0.55f, 0.55f, 0.6f),
+                new Vector2(0.5f, 0.71f), new Vector2(0.5f, 0.71f), new Vector2(0f, 0f), new Vector2(1100f, 40f));
+
+            // 6 个夜晚按钮排两行。⚠️ 按钮 320px 宽 ≈ 画布 0.20，列距必须 ≥ 0.21 才不互相压边；
+            // 锁着的按钮**不加「未解锁」后缀** —— 字一长就撑破按钮、和隔壁撞在一起，
+            // 靠 interactable = false 的灰色已经够区分了。
             for (int i = 0; i < NightCount; i++)
             {
                 int night = i;
                 int col = i % 3;
                 int row = i / 3;
-                float x = (col - 1) * 0.16f;
-                float y = 0.58f - row * 0.14f;
+                float x = (col - 1) * 0.21f;
+                float y = 0.56f - row * 0.14f;
 
                 bool unlocked = i <= UnlockedNight;
-                // ⚠️ 别用 emoji（🔒）—— 中文字体/内置字体都没有 emoji 字形，显示成方块。
-                string label = unlocked ? NightName(i) : NightName(i) + " · 未解锁";
+                string label = NightName(i);
 
                 var btn = MakeMenuButton(_levelView.transform, label, Vector2.zero,
                     new Vector2(0.5f + x, y),
@@ -186,6 +217,153 @@ namespace NailongFNAF.UI
 
             MakeMenuButton(_levelView.transform, "返回", Vector2.zero,
                 new Vector2(0.5f, 0.16f), OpenTitle);
+        }
+
+        /// <summary>
+        /// 自定义夜界面：四个敌人各一行，± 按钮调活动度（0 ~ 20），
+        /// 调完点「开始」。设置会存档（<see cref="CustomNightConfig"/>），下次进来还是上次的数。
+        /// 照 FNAF 1 的第 7 夜：通关隐藏夜才解锁（按钮在标题页就锁着）。
+        /// </summary>
+        private void BuildCustomView()
+        {
+            _customView = MakeFullScreenPanel("CustomView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
+
+            MakeLabel(_customView.transform, "自定义夜", 52, new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.5f, 0.82f), new Vector2(0.5f, 0.82f), new Vector2(0f, 0f), new Vector2(900f, 90f));
+            MakeLabel(_customView.transform, "每只敌人的活动度 0 ~ 20 —— 全 20 通关有成就。", 20,
+                new Color(0.55f, 0.55f, 0.6f),
+                new Vector2(0.5f, 0.74f), new Vector2(0.5f, 0.74f), new Vector2(0f, 0f), new Vector2(1100f, 40f));
+
+            for (int i = 0; i < EnemyIds.All.Length; i++)
+            {
+                EnemyId id = EnemyIds.All[i];
+                float y = 0.66f - i * 0.10f;
+
+                // 名字 + 一句话提示（走哪边）
+                MakeLabel(_customView.transform, CustomEnemyLabel(id), 26, new Color(0.85f, 0.85f, 0.9f),
+                    new Vector2(0.34f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(360f, 60f));
+
+                MakeStepperButton(_customView.transform, "−",
+                    new Vector2(0.56f, y), () => OnCustomStep(id, -1));
+                _customLevelTexts[(int)id] = MakeLabel(_customView.transform, "0", 34, Color.white,
+                    new Vector2(0.63f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(90f, 60f));
+                MakeStepperButton(_customView.transform, "+",
+                    new Vector2(0.70f, y), () => OnCustomStep(id, 1));
+            }
+
+            // 最后一行在 0.36，按钮 84px ≈ 0.093 —— 间隔必须留够 0.10，别再压边
+            MakeMenuButton(_customView.transform, "开始", Vector2.zero,
+                new Vector2(0.5f, 0.26f), OnCustomStartClicked);
+            MakeMenuButton(_customView.transform, "返回", Vector2.zero,
+                new Vector2(0.5f, 0.16f), OpenTitle);
+
+            _customView.SetActive(false);
+        }
+
+        /// <summary>自定义夜每行的小标题：名字 + 走哪边。</summary>
+        private static string CustomEnemyLabel(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai:
+                    return "牛来 · 右门";
+                case EnemyId.Daishu:
+                    return "袋鼠 · 左门";
+                case EnemyId.Lulu:
+                    return "噜噜 · 正门";
+                case EnemyId.Nailong:
+                    return "奶龙 · 偷电";
+                default:
+                    return id.Code();
+            }
+        }
+
+        /// <summary>自定义夜的 ± 按钮（比菜单按钮小，64×64）。</summary>
+        private Button MakeStepperButton(Transform parent, string label, Vector2 anchor,
+            UnityEngine.Events.UnityAction onClick)
+        {
+            var go = new GameObject("Stepper", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+            var rect = (RectTransform)go.transform;
+            PlaceRect(rect, anchor, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(64f, 64f));
+
+            var image = go.GetComponent<Image>();
+            image.sprite = MakeRoundedSprite();
+            image.color = new Color(0.22f, 0.22f, 0.28f, 0.98f);
+            image.type = Image.Type.Simple;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            button.transition = Selectable.Transition.ColorTint;
+            var colors = button.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f);
+            colors.pressedColor = new Color(0.9f, 0.9f, 0.9f);
+            colors.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.55f);
+            button.colors = colors;
+            button.onClick.AddListener(onClick);
+
+            var labelText = MakeLabel(go.transform, label, 36, Color.white,
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(64f, 64f));
+            labelText.raycastTarget = false;
+
+            return button;
+        }
+
+        /// <summary>
+        /// 成就列表界面：逐条列出名称 / 条件 / 是否已解锁。
+        /// 9 条一行排得下；以后要加就改成滚动列表。
+        /// </summary>
+        private void BuildAchievementsView()
+        {
+            _achvView = MakeFullScreenPanel("AchievementsView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
+
+            MakeLabel(_achvView.transform, "成就", 52, new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.5f, 0.86f), new Vector2(0.5f, 0.86f), new Vector2(0f, 0f), new Vector2(900f, 80f));
+            _achvCountText = MakeLabel(_achvView.transform, "", 22, new Color(0.7f, 0.7f, 0.75f),
+                new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 40f));
+
+            for (int i = 0; i < AchievementCatalog.All.Length; i++)
+            {
+                float y = 0.70f - i * 0.062f;
+
+                Text title = MakeLabel(_achvView.transform, "", 24, Color.white,
+                    new Vector2(0.40f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(420f, 44f));
+                Text desc = MakeLabel(_achvView.transform, "", 20, new Color(0.6f, 0.6f, 0.65f),
+                    new Vector2(0.68f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 40f));
+                title.raycastTarget = false;
+                desc.raycastTarget = false;
+                _achvTitleTexts[i] = title;
+                _achvDescTexts[i] = desc;
+            }
+
+            MakeMenuButton(_achvView.transform, "返回", Vector2.zero,
+                new Vector2(0.5f, 0.10f), OpenTitle);
+
+            _achvView.SetActive(false);
+        }
+
+        /// <summary>成就界面每次打开都刷新一遍（可能在别的局里刚解锁过）。</summary>
+        private void RefreshAchievementsView()
+        {
+            _achvCountText.text = "已解锁 " + AchievementStore.UnlockedCount()
+                + " / " + AchievementCatalog.All.Length;
+
+            for (int i = 0; i < AchievementCatalog.All.Length; i++)
+            {
+                AchievementCatalog.Def def = AchievementCatalog.All[i];
+                bool unlocked = AchievementStore.IsUnlocked(def.Id);
+
+                // 已解锁的亮金、没解锁的灰下去，名字前面打个记号
+                _achvTitleTexts[i].text = (unlocked ? "★ " : "☆ ") + def.Title;
+                _achvTitleTexts[i].color = unlocked
+                    ? new Color(0.95f, 0.85f, 0.3f)
+                    : new Color(0.45f, 0.45f, 0.5f);
+                _achvDescTexts[i].text = def.Description;
+                _achvDescTexts[i].color = unlocked
+                    ? new Color(0.7f, 0.7f, 0.75f)
+                    : new Color(0.4f, 0.4f, 0.45f);
+            }
         }
 
         private void BuildEndView()
@@ -309,6 +487,8 @@ namespace NailongFNAF.UI
                 _titleView.SetActive(false);
                 _levelView.SetActive(false);
                 _endView.SetActive(false);
+                _customView.SetActive(false);
+                _achvView.SetActive(false);
                 _pauseView.SetActive(true);
             }
 
@@ -416,6 +596,14 @@ namespace NailongFNAF.UI
         /// <summary>标题页按钮文案：有存档就叫「继续永夜」，顺带报一下撑了多久。</summary>
         private void RefreshTitleButtons()
         {
+            // 自定义夜：通关隐藏夜才解锁，没解锁就灰着并把条件写在按钮上
+            if (_customButton != null && _customLabel != null)
+            {
+                bool customUnlocked = CustomNightUnlocked;
+                _customButton.interactable = customUnlocked;
+                _customLabel.text = customUnlocked ? "自定义夜" : "自定义夜 · 未解锁";
+            }
+
             if (_endlessLabel == null)
             {
                 return;
@@ -493,6 +681,16 @@ namespace NailongFNAF.UI
             _titleView.SetActive(true);
             _levelView.SetActive(false);
             _endView.SetActive(false);
+            if (_customView != null)
+            {
+                _customView.SetActive(false);
+            }
+
+            if (_achvView != null)
+            {
+                _achvView.SetActive(false);
+            }
+
             if (_pauseView != null)
             {
                 _pauseView.SetActive(false);
@@ -520,9 +718,92 @@ namespace NailongFNAF.UI
             _titleView.SetActive(false);
             _levelView.SetActive(true);
             _endView.SetActive(false);
+            _customView.SetActive(false);
+            _achvView.SetActive(false);
 
             // 刷新关卡按钮的锁态（可能刚通关解锁了下一夜）
             RefreshLevelButtons();
+        }
+
+        /// <summary>标题页「自定义夜」：打开调节界面，读上次的设置。</summary>
+        private void OnCustomClicked()
+        {
+            if (!CustomNightUnlocked)
+            {
+                return;
+            }
+
+            _menuOpen = true;
+            _menuRoot.SetActive(true);
+            _menuRoot.transform.SetAsLastSibling();
+            _titleView.SetActive(false);
+            _levelView.SetActive(false);
+            _endView.SetActive(false);
+            _achvView.SetActive(false);
+            _customView.SetActive(true);
+
+            _customConfig = CustomNightConfig.Load();
+            RefreshCustomLabels();
+        }
+
+        /// <summary>标题页「成就」。</summary>
+        private void OnAchievementsClicked()
+        {
+            _menuOpen = true;
+            _menuRoot.SetActive(true);
+            _menuRoot.transform.SetAsLastSibling();
+            _titleView.SetActive(false);
+            _levelView.SetActive(false);
+            _endView.SetActive(false);
+            _customView.SetActive(false);
+            _achvView.SetActive(true);
+
+            RefreshAchievementsView();
+        }
+
+        /// <summary>自定义夜某只敌人 ±1（CustomNightConfig 会夹在 0 ~ 20）。</summary>
+        private void OnCustomStep(EnemyId id, int delta)
+        {
+            if (_customConfig == null)
+            {
+                _customConfig = CustomNightConfig.Load();
+            }
+
+            _customConfig.SetLevel(id, _customConfig.GetLevel(id) + delta);
+            RefreshCustomLabels();
+        }
+
+        /// <summary>自定义夜「开始」：先存档，再按设置开局。</summary>
+        private void OnCustomStartClicked()
+        {
+            if (_customConfig != null)
+            {
+                _customConfig.Save();
+            }
+
+            StartCustomNight();
+        }
+
+        private void RefreshCustomLabels()
+        {
+            if (_customConfig == null)
+            {
+                return;
+            }
+
+            foreach (EnemyId id in EnemyIds.All)
+            {
+                if (_customLevelTexts[(int)id] != null)
+                {
+                    _customLevelTexts[(int)id].text = _customConfig.GetLevel(id).ToString();
+                }
+            }
+        }
+
+        /// <summary>自定义夜是否已解锁（通关隐藏夜）。</summary>
+        private static bool CustomNightUnlocked
+        {
+            get { return PlayerPrefs.GetInt(CustomUnlockedKey, 0) == 1; }
         }
 
         private void RefreshLevelButtons()
@@ -542,7 +823,7 @@ namespace NailongFNAF.UI
                 {
                     bool unlocked = i <= UnlockedNight;
                     buttons[index].interactable = unlocked;
-                    label.text = unlocked ? NightName(i) : NightName(i) + " · 未解锁";
+                    label.text = NightName(i);
                     index++;
                 }
             }
@@ -558,6 +839,8 @@ namespace NailongFNAF.UI
 
             if (_enemyDirector != null)
             {
+                // 回普通夜：关掉自定义夜的覆盖
+                _enemyDirector.ClearCustomLevels();
                 _enemyDirector.SetNight(night);
             }
 
@@ -589,6 +872,12 @@ namespace NailongFNAF.UI
             }
 
             gm.SetEndless(true);
+
+            if (_enemyDirector != null)
+            {
+                // 永夜有自己的难度爬升，自定义夜的覆盖要关掉
+                _enemyDirector.ClearCustomLevels();
+            }
 
             _endlessStage = EndlessStartNight;
             _endlessOverdrive = 0f;
@@ -665,32 +954,112 @@ namespace NailongFNAF.UI
             _menuRoot.transform.SetAsLastSibling(); // 置于跳杀层之上
             _titleView.SetActive(false);
             _levelView.SetActive(false);
+            _customView.SetActive(false);
+            _achvView.SetActive(false);
             _endView.SetActive(true);
 
+            var gm = GameManager.Instance;
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
-            bool wasLast = current >= NightCount - 1;
+            bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
+            bool wasLast = !custom && current >= NightCount - 1;
             bool unlockedNext = false;
 
-            if (!wasLast && current + 1 > UnlockedNight)
+            // 自定义夜不动解锁进度 —— 它不属于任何一夜
+            if (!custom && !wasLast && current + 1 > UnlockedNight)
             {
                 PlayerPrefs.SetInt(UnlockKey, current + 1);
                 PlayerPrefs.Save();
                 unlockedNext = true;
             }
 
-            _endTitleText.text = wasLast ? "全部通关！" : NightName(current) + " 通关";
-            _endBodyText.text = wasLast
-                ? "你撑过了所有夜晚 —— 奶龙也拿你没办法。"
-                : (unlockedNext ? "已解锁 " + NightName(current + 1) : "天亮了，你活下来了。");
+            // 通关隐藏夜 → 解锁自定义夜（照 FNAF 1 的第 7 夜）
+            if (wasLast && !CustomNightUnlocked)
+            {
+                PlayerPrefs.SetInt(CustomUnlockedKey, 1);
+                PlayerPrefs.Save();
+            }
 
-            _endPrimaryLabel.text = wasLast ? "返回标题" : "下一夜";
-            _endPrimaryButton.interactable = !wasLast;
+            string achievementLine = CheckWinAchievements(gm, current, custom, wasLast);
+
+            _endTitleText.text = custom ? "自定义夜 通关" : (wasLast ? "全部通关！" : NightName(current) + " 通关");
+            _endBodyText.text = custom
+                ? "你自调的难度也拿你没办法。" + achievementLine
+                : (wasLast
+                    ? "你撑过了所有夜晚 —— 奶龙也拿你没办法。" + achievementLine
+                    : (unlockedNext ? "已解锁 " + NightName(current + 1) : "天亮了，你活下来了。") + achievementLine);
+
+            _endPrimaryLabel.text = custom ? "再来一局" : (wasLast ? "返回标题" : "下一夜");
+            _endPrimaryButton.interactable = custom || !wasLast;
 
             // 通关没有「谁说了句话」，清掉上一局残留的台词
             if (_endQuoteText != null)
             {
                 _endQuoteText.text = string.Empty;
             }
+        }
+
+        /// <summary>
+        /// 通关结算时检查成就，返回要追加在结算文案后面的一行（没有新成就就是空串）。
+        /// 判定都靠 GameManager / EnemyDirector 的现状快照，不碰流程。
+        /// </summary>
+        private string CheckWinAchievements(GameManager gm, int current, bool custom, bool wasLast)
+        {
+            if (gm == null)
+            {
+                return string.Empty;
+            }
+
+            var newly = new System.Collections.Generic.List<string>();
+
+            if (custom)
+            {
+                // 全 20 才给「终极挑战」（照 FNAF 1 的 20/20/20/20）
+                if (CustomNightConfig.Load().TotalLevel() >= EnemyBrain.MaxActivityLevel * EnemyIds.All.Length)
+                {
+                    TryUnlock(AchievementCatalog.CustomMax, newly);
+                }
+            }
+            else
+            {
+                if (current == 0) TryUnlock(AchievementCatalog.FirstNight, newly);
+                if (current == 2) TryUnlock(AchievementCatalog.HalfWay, newly);
+                if (current == 4) TryUnlock(AchievementCatalog.FiveNights, newly);
+                if (wasLast) TryUnlock(AchievementCatalog.HiddenNight, newly);
+
+                // 断电后仍撑到 6 点（断电演出没抓到人）
+                if (gm.HasPowerOut) TryUnlock(AchievementCatalog.BlackoutSurvivor, newly);
+            }
+
+            // 剩余电量 ≥ 30%（故事 / 自定义都算）
+            if (gm.Power != null && gm.Power.Level >= 30f)
+            {
+                TryUnlock(AchievementCatalog.PowerSaver, newly);
+            }
+
+            // 单夜逼退噜噜 3 次
+            if (_enemyDirector != null && _enemyDirector.LuluRetreatCount >= 3)
+            {
+                TryUnlock(AchievementCatalog.LuluMaster, newly);
+            }
+
+            if (newly.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return "\n新成就：" + string.Join("、", newly.ToArray());
+        }
+
+        /// <summary>解锁并在 <paramref name="newly"/> 里记下标题；不是新解锁就不记。</summary>
+        private static void TryUnlock(string id, System.Collections.Generic.List<string> newly)
+        {
+            if (!AchievementStore.Unlock(id))
+            {
+                return;
+            }
+
+            AchievementCatalog.Def def = AchievementCatalog.Find(id);
+            newly.Add(def != null ? def.Title : id);
         }
 
         private void ShowLoseEnd()
@@ -701,6 +1070,8 @@ namespace NailongFNAF.UI
             _menuRoot.transform.SetAsLastSibling(); // 置于跳杀层之上
             _titleView.SetActive(false);
             _levelView.SetActive(false);
+            _customView.SetActive(false);
+            _achvView.SetActive(false);
             _endView.SetActive(true);
 
             var gm = GameManager.Instance;
@@ -710,11 +1081,14 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
 
             _endTitleText.text = "你被抓住了";
-            _endBodyText.text = NightName(current) + " 失败 —— 再来一次。";
-            _endPrimaryLabel.text = "重试本夜";
+            _endBodyText.text = custom
+                ? "自定义夜 失败 —— 再来一次。"
+                : NightName(current) + " 失败 —— 再来一次。";
+            _endPrimaryLabel.text = custom ? "重试" : "重试本夜";
             _endPrimaryButton.interactable = true;
 
             // 跳杀完，那只敌人说一句话
@@ -742,9 +1116,21 @@ namespace NailongFNAF.UI
                 best = survived;
             }
 
+            // 永夜成就：一局撑过 12 小时
+            var newly = new System.Collections.Generic.List<string>();
+            if (secondsPerHour > 0f && survived / secondsPerHour >= 12f)
+            {
+                TryUnlock(AchievementCatalog.EndlessDozen, newly);
+            }
+
+            string achievementLine = newly.Count == 0
+                ? string.Empty
+                : "\n新成就：" + string.Join("、", newly.ToArray());
+
             _endTitleText.text = isRecord ? "新纪录！" : "永夜模式结束";
             _endBodyText.text = "撑过 " + FormatSpan(survived, secondsPerHour)
-                + (isRecord ? " · 这是你的最好成绩" : " · 最佳 " + FormatSpan(best, secondsPerHour));
+                + (isRecord ? " · 这是你的最好成绩" : " · 最佳 " + FormatSpan(best, secondsPerHour))
+                + achievementLine;
             _endPrimaryLabel.text = "再来一局";
             _endPrimaryButton.interactable = true;
 
@@ -843,8 +1229,9 @@ namespace NailongFNAF.UI
 
         private void OnEndPrimaryClicked()
         {
+            bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
-            bool wasLast = current >= NightCount - 1;
+            bool wasLast = !custom && current >= NightCount - 1;
 
             if (_endQuoteAudio != null)
             {
@@ -856,6 +1243,13 @@ namespace NailongFNAF.UI
             if (gm != null && gm.EndlessMode)
             {
                 OnEndlessClicked();
+                return;
+            }
+
+            // 自定义夜：胜（再来一局）负（重试）都是按当前设置重开
+            if (custom)
+            {
+                StartCustomNight();
                 return;
             }
 
@@ -872,6 +1266,39 @@ namespace NailongFNAF.UI
             }
 
             OnNightClicked(current + 1);
+        }
+
+        /// <summary>
+        /// 按存档里的自定义设置开一局自定义夜。
+        /// 顺序照 <see cref="OnEndlessClicked"/> 的教训：先设好模式与难度，再 Restart。
+        /// </summary>
+        private void StartCustomNight()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            CustomNightConfig config = CustomNightConfig.Load();
+
+            gm.SetEndless(false);
+            _endlessStage = EndlessStartNight;
+            _endlessOverdrive = 0f;
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.SetCustomLevels(config);
+                _enemyDirector.SetOverdrive(0f);
+            }
+
+            gm.Restart();
+            ClearJumpscare();
+
+            _menuRoot.SetActive(false);
+            _menuOpen = false;
+            _endShown = false;
+            _caughtHoldTimer = 0f;
         }
 
         private void OnQuitClicked()

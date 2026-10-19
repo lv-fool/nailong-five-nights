@@ -118,6 +118,14 @@ namespace NailongFNAF.Gameplay
         private float _overdrive;
 
         /// <summary>
+        /// 自定义夜：开启后 <see cref="ApplyDifficulty"/> 不再读难度表，
+        /// 改用玩家自调的四个活动度。换夜 / 永夜会把它关掉（见菜单那侧）。
+        /// 字段不随 <see cref="Build"/> 重设 —— 自定义夜重开一局时设置要留住。
+        /// </summary>
+        private bool _customActive;
+        private readonly int[] _customLevels = new int[EnemyIds.All.Length];
+
+        /// <summary>
         /// 已突破但还没动手的敌人。照 FNAF 1：门被突破后该侧门灯立刻失效，
         /// **要等玩家放下监控才跳杀** —— 给玩家一瞬间的「完了」的绝望感，
         /// 而不是当场黑屏。
@@ -199,6 +207,7 @@ namespace NailongFNAF.Gameplay
             _rng = new SystemRandomSource();
             _difficulty = NightDifficulty.CreateDefault();
             _attackFired = false;
+            LuluRetreatCount = 0;
             _brains.Clear();
 
             float musicSeconds = _blackoutMusicSecondsOverride > 0f
@@ -299,6 +308,48 @@ namespace NailongFNAF.Gameplay
             ApplyDifficulty();
         }
 
+        /// <summary>本夜噜噜被手电筒逼退的次数（成就「闪光灯大师」用）。</summary>
+        public int LuluRetreatCount { get; private set; }
+
+        /// <summary>当前是否跑自定义夜。</summary>
+        public bool CustomActive
+        {
+            get { return _customActive; }
+        }
+
+        /// <summary>
+        /// 开自定义夜：四个敌人的活动度用玩家自调的值（<see cref="CustomNightConfig"/>），
+        /// 不再读每夜难度表。<see cref="_nightIndex"/> 保持原值 ——
+        /// 自定义夜不属于任何一夜，结算文案由菜单按 <see cref="CustomActive"/> 判断。
+        /// </summary>
+        public void SetCustomLevels(CustomNightConfig config)
+        {
+            if (config == null)
+            {
+                return;
+            }
+
+            foreach (EnemyId id in EnemyIds.All)
+            {
+                _customLevels[(int)id] = config.GetLevel(id);
+            }
+
+            _customActive = true;
+            ApplyDifficulty();
+        }
+
+        /// <summary>关掉自定义夜，回到每夜难度表（换夜 / 进永夜时菜单会调）。</summary>
+        public void ClearCustomLevels()
+        {
+            if (!_customActive)
+            {
+                return;
+            }
+
+            _customActive = false;
+            ApplyDifficulty();
+        }
+
         public EnemyBrain GetBrain(EnemyId id)
         {
             EnemyBrain brain;
@@ -314,7 +365,10 @@ namespace NailongFNAF.Gameplay
         {
             foreach (var pair in _brains)
             {
-                int level = _difficulty.GetLevel(_nightIndex, pair.Key);
+                // 自定义夜用玩家自调的数，否则读每夜难度表
+                int level = _customActive
+                    ? _customLevels[(int)pair.Key]
+                    : _difficulty.GetLevel(_nightIndex, pair.Key);
                 if (_overdrive > 0f)
                 {
                     level = (int)System.Math.Round(level * (1f + _overdrive));
@@ -420,6 +474,12 @@ namespace NailongFNAF.Gameplay
                     FindRightDoorHolder(), game.FlashlightOn);
 
                 pair.Value.Tick(dt, ctx);
+
+                // 噜噜被手电筒逼退 —— 计进本夜次数（成就「闪光灯大师」用）
+                if (pair.Key == EnemyId.Lulu && pair.Value.RetreatedThisTick)
+                {
+                    LuluRetreatCount++;
+                }
             }
 
             // 奶龙偷电

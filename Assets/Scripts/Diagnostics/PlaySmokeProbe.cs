@@ -157,9 +157,68 @@ namespace NailongFNAF.Diagnostics
                 Snap("04_normal_night");
                 ReportNormal();
             }
-            else if (_step == 11 && elapsed > 16.0f)
+            else if (_step == 11 && elapsed > 15.0f)
             {
                 _step = 12;
+
+                // 先看「故事模式」的选夜界面（6 个夜晚 + 返回，两行排布最容易压边）
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnStartClicked", null);
+                Snap("10_levels");
+            }
+            else if (_step == 12 && elapsed > 16.2f)
+            {
+                _step = 13;
+
+                // 自定义夜默认锁着，探针先替玩家把锁打开，再进界面截图
+                PlayerPrefs.SetInt("nailong.customUnlocked", 1);
+                PlayerPrefs.Save();
+
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnCustomClicked", null);
+                Snap("07_custom");
+                ReportCustom("自定义夜界面（进入时）");
+            }
+            else if (_step == 13 && elapsed > 17.4f)
+            {
+                _step = 14;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                object config = Get(scene, "_customConfig");
+                if (config != null)
+                {
+                    Invoke(config, "SetAll", new object[] { 20 });
+                }
+
+                Invoke(scene, "RefreshCustomLabels", null);
+                Snap("08_custom20");
+                ReportCustom("自定义夜界面（全 20）");
+            }
+            else if (_step == 14 && elapsed > 18.6f)
+            {
+                _step = 15;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OnAchievementsClicked", null);
+                Snap("09_achievements");
+                ReportAchievements();
+            }
+            else if (_step == 15 && elapsed > 19.8f)
+            {
+                _step = 16;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OnCustomStartClicked", null);
+
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                object director = Instance("NailongFNAF.Gameplay.EnemyDirector");
+                Debug.Log("SMOKE: 自定义夜开局 CustomActive = " +
+                          (director != null ? Get(director, "CustomActive") : null) +
+                          " EndlessMode = " + (gm != null ? Get(gm, "EndlessMode") : null) +
+                          " 菜单开着 = " + Get(scene, "_menuOpen"));
+            }
+            else if (_step == 16 && elapsed > 21.5f)
+            {
+                _step = 17;
                 Finish();
             }
         }
@@ -193,6 +252,40 @@ namespace NailongFNAF.Diagnostics
             }
 
             Debug.Log("SMOKE: 已模拟 3 轮门/监控/手电筒操作");
+        }
+
+        private void ReportCustom(string title)
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object config = Get(scene, "_customConfig");
+            string line = "SMOKE: " + title + " 数值 = ";
+            if (config != null)
+            {
+                System.Reflection.MethodInfo getLevel = config.GetType().GetMethod("GetLevel");
+                System.Type idType = getLevel.GetParameters()[0].ParameterType;
+                foreach (string code in new[] { "niulai", "daishu", "lulu", "nailong" })
+                {
+                    object id = System.Enum.Parse(idType, code, true);
+                    line += code + ":" + getLevel.Invoke(config, new[] { id }) + " ";
+                }
+            }
+
+            Debug.Log(line);
+        }
+
+        private void ReportAchievements()
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object count = Get(scene, "_achvCountText");
+            object firstTitle = null;
+            object titles = Get(scene, "_achvTitleTexts");
+            if (titles is System.Array && ((System.Array)titles).Length > 0)
+            {
+                firstTitle = ((System.Array)titles).GetValue(0);
+            }
+
+            Debug.Log("SMOKE: 成就计数 = [" + (count != null ? Get(count, "text") : null) +
+                      "] 第一条 = [" + (firstTitle != null ? Get(firstTitle, "text") : null) + "]");
         }
 
         private void ReportPause()
