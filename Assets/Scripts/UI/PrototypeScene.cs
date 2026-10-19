@@ -645,6 +645,13 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // 永夜模式的暂停：Esc 开/关面板。暂停期间这一帧就到此为止 ——
+            // 时间已经靠 timeScale = 0 冻住了，别的更新再跑也没意义。
+            if (HandlePause(gm))
+            {
+                return;
+            }
+
             HandleDebugKeys();
 
             // 永夜模式：撑得越久敌人越凶（普通模式什么都不做）

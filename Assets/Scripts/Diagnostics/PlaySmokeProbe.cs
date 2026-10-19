@@ -99,36 +99,67 @@ namespace NailongFNAF.Diagnostics
                 Snap("03_endless_after_actions");
                 ReportEndless();
             }
-            else if (_step == 4 && elapsed > 7.0f)
+            else if (_step == 4 && elapsed > 7.4f)
             {
                 _step = 5;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Debug.Log("SMOKE: 请求暂停 = " + Invoke(scene, "OpenPause", null));
+                Snap("06_pause");
+                ReportPause();
+            }
+            else if (_step == 5 && elapsed > 8.6f)
+            {
+                _step = 6;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OnPauseSave", null);
+                ReportSave();
+                Invoke(scene, "ResumeFromPause", null);
+                Debug.Log("SMOKE: 恢复后 timeScale = " + Time.timeScale +
+                          " AudioListener.pause = " + AudioListener.pause);
+            }
+            else if (_step == 6 && elapsed > 9.4f)
+            {
+                _step = 7;
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                object gm = Instance("NailongFNAF.Core.GameManager");
+
+                // 刚存的档应该能被「继续永夜」读回来：再点一次按钮，看时间有没有接上
+                Invoke(scene, "OnEndlessClicked", null);
+                object clock = gm != null ? Get(gm, "Clock") : null;
+                object power = gm != null ? Get(gm, "Power") : null;
+                Debug.Log("SMOKE: 续档后 已撑秒 = " + (clock != null ? Get(clock, "ElapsedSeconds") : null) +
+                          " 电量 = " + (power != null ? Get(power, "Level") : null));
+            }
+            else if (_step == 7 && elapsed > 10.2f)
+            {
+                _step = 8;
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Debug.Log("SMOKE: 直接走失败结算（永夜分支）= " +
                           Invoke(scene, "ShowLoseEnd", null));
             }
-            else if (_step == 5 && elapsed > 8.5f)
+            else if (_step == 8 && elapsed > 11.6f)
             {
-                _step = 6;
+                _step = 9;
                 Snap("05_endless_end");
                 ReportEndPanel();
             }
-            else if (_step == 6 && elapsed > 9.5f)
+            else if (_step == 9 && elapsed > 12.6f)
             {
-                _step = 7;
+                _step = 10;
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "OnStartClicked", null);
                 Invoke(scene, "OnNightClicked", new object[] { 0 });
                 Debug.Log("SMOKE: 已切到普通夜晚 1");
             }
-            else if (_step == 7 && elapsed > 11.0f)
+            else if (_step == 10 && elapsed > 14.0f)
             {
-                _step = 8;
+                _step = 11;
                 Snap("04_normal_night");
                 ReportNormal();
             }
-            else if (_step == 8 && elapsed > 13.0f)
+            else if (_step == 11 && elapsed > 16.0f)
             {
-                _step = 9;
+                _step = 12;
                 Finish();
             }
         }
@@ -162,6 +193,29 @@ namespace NailongFNAF.Diagnostics
             }
 
             Debug.Log("SMOKE: 已模拟 3 轮门/监控/手电筒操作");
+        }
+
+        private void ReportPause()
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object pauseView = Get(scene, "_pauseView");
+            object info = Get(scene, "_pauseInfoText");
+            Debug.Log("SMOKE: 暂停 timeScale = " + Time.timeScale +
+                      " AudioListener.pause = " + AudioListener.pause +
+                      " 暂停面板 = " + (pauseView != null ? Get(pauseView, "activeSelf") : null) +
+                      " 面板文案 = [" + (info != null ? Get(info, "text") : null) + "]");
+        }
+
+        private void ReportSave()
+        {
+            string raw = PlayerPrefs.GetString("nailong.eternalSave", string.Empty);
+            Debug.Log("SMOKE: 存档长度 = " + raw.Length + " 内容 = [" + raw + "]");
+
+            object gm = Instance("NailongFNAF.Core.GameManager");
+            object clock = gm != null ? Get(gm, "Clock") : null;
+            object power = gm != null ? Get(gm, "Power") : null;
+            Debug.Log("SMOKE: 存档时 已撑秒 = " + (clock != null ? Get(clock, "ElapsedSeconds") : null) +
+                      " 电量 = " + (power != null ? Get(power, "Level") : null));
         }
 
         private void ReportEndless()

@@ -209,6 +209,31 @@ namespace NailongFNAF.Gameplay
             return Clamp(decayed, MinGain, MaxGain);
         }
 
+        /// <summary>
+        /// 从存档把账本恢复过来（读永夜模式的存档用）。负数一律按 0 处理。
+        /// </summary>
+        public void Restore(float credits, float noise, int settlements,
+            float secondsIntoPeriod, float totalGranted, int actionsRegistered)
+        {
+            Credits = credits > 0f ? credits : 0f;
+            Noise = noise > 0f ? noise : 0f;
+            Settlements = settlements > 0 ? settlements : 0;
+            SecondsIntoPeriod = secondsIntoPeriod > 0f ? secondsIntoPeriod : 0f;
+            TotalGranted = totalGranted > 0f ? totalGranted : 0f;
+            ActionsRegistered = actionsRegistered > 0 ? actionsRegistered : 0;
+
+            for (int i = 0; i < _counts.Length; i++)
+            {
+                _counts[i] = 0;
+            }
+
+            // 周期进度别越过结算线，否则读档瞬间就连爆几次结算
+            if (SecondsIntoPeriod >= Interval)
+            {
+                SecondsIntoPeriod = 0f;
+            }
+        }
+
         /// <summary>清空整本账（重开一局）。</summary>
         public void Reset()
         {

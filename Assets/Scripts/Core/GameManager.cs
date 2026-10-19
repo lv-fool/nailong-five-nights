@@ -42,6 +42,13 @@ namespace NailongFNAF.Core
         /// <summary>距离 <see cref="LastGain"/> 过去了多久（秒），HUD 用它决定要不要淡出。</summary>
         public float LastGainAge { get; private set; }
 
+        /// <summary>
+        /// 是否暂停中（只有永夜模式能暂停）。暂停靠 <see cref="Time.timeScale"/> = 0
+        /// 把时间、电量、敌人一起冻住，再停掉 <see cref="AudioListener"/>，
+        /// 所以恢复时那一帧不会跳时间。
+        /// </summary>
+        public bool IsPaused { get; private set; }
+
         public bool LeftDoorClosed { get; private set; }
         public bool RightDoorClosed { get; private set; }
         public bool LeftLightOn { get; private set; }
@@ -119,6 +126,10 @@ namespace NailongFNAF.Core
             if (Instance == this)
             {
                 Instance = null;
+
+                // 暂停状态下退出，别把 timeScale = 0 留给下一个人（编辑器里尤其明显）
+                Time.timeScale = 1f;
+                AudioListener.pause = false;
             }
         }
 
@@ -192,6 +203,7 @@ namespace NailongFNAF.Core
             Recharge = EndlessMode ? new EndlessRecharge() : null;
             LastGain = 0f;
             LastGainAge = 0f;
+            SetPaused(false);
 
             LeftDoorClosed = false;
             RightDoorClosed = false;
@@ -218,6 +230,72 @@ namespace NailongFNAF.Core
         {
             EndlessMode = endless;
         }
+
+        // ---------------------------------------------------------------
+        // 暂停 / 存档（只服务永夜模式）
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// 暂停或继续。**只有永夜模式能暂停**，故事模式调了也不会冻住 ——
+        /// 免得玩家在夜里按 Esc 把时钟停住刷时间。
+        /// </summary>
+        public void SetPaused(bool paused)
+        {
+            if (paused && !EndlessMode)
+            {
+                return;
+            }
+
+            IsPaused = paused;
+            Time.timeScale = paused ? 0f : 1f;
+            AudioListener.pause = paused;
+        }
+
+        /// <summary>把当前这一局的进度打包成存档；不是永夜模式就返回 null。</summary>
+        public EternalNightSave CaptureSave()
+        {
+            if (!EndlessMode || Clock == null || Power == null || Recharge == null)
+            {
+                return null;
+            }
+
+            return new EternalNightSave
+            {
+                ElapsedSeconds = Clock.ElapsedSeconds,
+                Power = Power.Level,
+                Settlements = Recharge.Settlements,
+                Credits = Recharge.Credits,
+                Noise = Recharge.Noise,
+                SecondsIntoPeriod = Recharge.SecondsIntoPeriod,
+                TotalGranted = Recharge.TotalGranted,
+                ActionsRegistered = Recharge.ActionsRegistered,
+                Hour = Clock.CurrentHour,
+            };
+        }
+
+        /// <summary>
+        /// 读档：把时间、电量、账本一起拨回存档那一刻。
+        /// 必须在 <see cref="SetEndless"/>(true) + <see cref="Restart"/> 之后调，
+        /// 因为它要写进 Restart 建好的那几个对象里。敌人不恢复状态，从当前难度重新开始。
+        /// </summary>
+        public bool LoadSave(EternalNightSave save)
+        {
+            if (save == null || !EndlessMode || Clock == null || Power == null || Recharge == null)
+            {
+                return false;
+            }
+
+            Clock.RestoreElapsed(save.ElapsedSeconds);
+            Power.SetLevel(save.Power);
+            Recharge.Restore(save.Credits, save.Noise, save.Settlements,
+                save.SecondsIntoPeriod, save.TotalGranted, save.ActionsRegistered);
+
+            LastGain = 0f;
+            LastGainAge = 0f;
+            SetPaused(false);
+            return true;
+        }
+
 
         /// <summary>视角控制脚本每帧调用，写入玩家当前看向哪边。</summary>
         public void SetView(ViewSide view)

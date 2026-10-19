@@ -116,6 +116,16 @@ namespace NailongFNAF.Core
             CurrentHour = Endless ? hour : (hour > HoursPerNight ? HoursPerNight : hour);
         }
 
+        /// <summary>
+        /// 直接把时间拨到某一秒（读永夜模式的存档用）。负数按 0 处理。
+        /// </summary>
+        public void RestoreElapsed(float seconds)
+        {
+            ElapsedSeconds = seconds > 0f ? seconds : 0f;
+            int hour = (int)(ElapsedSeconds / SecondsPerHour);
+            CurrentHour = Endless ? hour : (hour > HoursPerNight ? HoursPerNight : hour);
+        }
+
         /// <summary>回到午夜 0 点，用于开始新的一夜。</summary>
         public void Reset()
         {

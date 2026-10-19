@@ -28,6 +28,9 @@ namespace NailongFNAF.UI
         /// <summary>永夜模式的纪录存档键：存「撑过的真实秒数」，越大越好。</summary>
         public const string EndlessBestKey = "nailong.endlessBest";
 
+        /// <summary>永夜模式的进度存档键：一行文本，格式见 <see cref="EternalNightSave"/>。</summary>
+        public const string EternalSaveKey = "nailong.eternalSave";
+
         /// <summary>永夜模式开局用的难度夜（0 起）—— 与 <see cref="EndlessDifficulty.StartNight"/> 同源。</summary>
         public const int EndlessStartNight = EndlessDifficulty.StartNight;
 
@@ -54,6 +57,7 @@ namespace NailongFNAF.UI
         private GameObject _titleView;
         private GameObject _levelView;
         private GameObject _endView;
+        private GameObject _pauseView;
 
         // 结算面板文案
         private Text _endTitleText;
@@ -66,6 +70,15 @@ namespace NailongFNAF.UI
         private AudioSource _endQuoteAudio;
         private Button _endPrimaryButton;
         private Text _endPrimaryLabel;
+
+        // 暂停面板
+        private Text _pauseInfoText;
+        private Text _pauseSavedText;
+        private bool _paused;
+        private float _savedToastTimer;
+
+        /// <summary>标题页「永夜模式 / 继续永夜」那颗按钮的文字，有存档时要换名字。</summary>
+        private Text _endlessLabel;
 
         /// <summary>已解锁到第几夜（0 起）。</summary>
         private static int UnlockedNight
@@ -91,6 +104,7 @@ namespace NailongFNAF.UI
             BuildTitleView();
             BuildLevelView();
             BuildEndView();
+            BuildPauseView();
 
             OpenTitle();
         }
@@ -108,11 +122,12 @@ namespace NailongFNAF.UI
             MakeDivider(_titleView.transform, new Vector2(0.5f, 0.55f));
 
             // ⚠️ 按钮 84px 高 ≈ 画布 9%，间距必须留够，否则会和分隔线/彼此重叠
-            // 三个按钮现在依次排开：开始游戏（选夜） / 永夜模式 / 退出
-            MakeMenuButton(_titleView.transform, "开始游戏", Vector2.zero,
+            // 三个按钮现在依次排开：故事模式（选夜） / 永夜模式 / 退出
+            MakeMenuButton(_titleView.transform, "故事模式", Vector2.zero,
                 new Vector2(0.5f, 0.47f), OnStartClicked);
-            MakeMenuButton(_titleView.transform, "永夜模式", Vector2.zero,
+            Button endlessButton = MakeMenuButton(_titleView.transform, "永夜模式", Vector2.zero,
                 new Vector2(0.5f, 0.37f), OnEndlessClicked);
+            _endlessLabel = endlessButton.GetComponentInChildren<Text>();
             MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
                 new Vector2(0.5f, 0.27f), OnQuitClicked);
 
@@ -210,6 +225,231 @@ namespace NailongFNAF.UI
             _endQuoteAudio.volume = 0.95f;
         }
 
+        /// <summary>
+        /// 永夜模式的暂停面板：Esc 打开，时间 / 电量 / 敌人全冻住（靠 timeScale = 0）。
+        /// 三个出路 —— 继续、存一档再走、直接放弃；存档留在 PlayerPrefs 里，
+        /// 下次进标题页那颗按钮会变成「继续永夜」。
+        /// </summary>
+        private void BuildPauseView()
+        {
+            _pauseView = MakeFullScreenPanel("PauseView", new Color(0.02f, 0.02f, 0.03f, 0.92f), _menuRoot.transform);
+
+            MakeLabel(_pauseView.transform, "暂停", 60, new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.5f, 0.76f), new Vector2(0.5f, 0.76f), new Vector2(0f, 0f), new Vector2(900f, 90f));
+
+            _pauseInfoText = MakeLabel(_pauseView.transform, "", 26, new Color(0.75f, 0.75f, 0.8f),
+                new Vector2(0.5f, 0.66f), new Vector2(0.5f, 0.66f), new Vector2(0f, 0f), new Vector2(1100f, 50f));
+
+            _pauseSavedText = MakeLabel(_pauseView.transform, "", 24, new Color(0.6f, 0.85f, 0.6f),
+                new Vector2(0.5f, 0.59f), new Vector2(0.5f, 0.59f), new Vector2(0f, 0f), new Vector2(1100f, 40f));
+
+            MakeMenuButton(_pauseView.transform, "继续游戏", Vector2.zero,
+                new Vector2(0.5f, 0.48f), ResumeFromPause);
+            MakeMenuButton(_pauseView.transform, "保存进度", Vector2.zero,
+                new Vector2(0.5f, 0.38f), OnPauseSave);
+            MakeMenuButton(_pauseView.transform, "保存并退出", Vector2.zero,
+                new Vector2(0.5f, 0.28f), OnPauseSaveAndExit);
+            MakeMenuButton(_pauseView.transform, "放弃本局", Vector2.zero,
+                new Vector2(0.5f, 0.18f), OnPauseAbandon);
+
+            _pauseView.SetActive(false);
+        }
+
+        /// <summary>
+        /// 每帧调一次。返回 true 表示这一帧已经被暂停逻辑接管（外面别再跑游戏更新）。
+        /// 只有永夜模式能暂停 —— 故事模式按 Esc 什么都不做，免得把时钟停住刷时间。
+        /// </summary>
+        private bool HandlePause(GameManager gm)
+        {
+            if (_paused)
+            {
+                // 暂停时 timeScale = 0，计时都得用 unscaled
+                if (_savedToastTimer > 0f)
+                {
+                    _savedToastTimer -= Time.unscaledDeltaTime;
+                    if (_savedToastTimer <= 0f && _pauseSavedText != null)
+                    {
+                        _pauseSavedText.text = string.Empty;
+                    }
+                }
+
+                if (Input.GetKeyDown(KeyCode.Escape))
+                {
+                    ResumeFromPause();
+                }
+
+                return true;
+            }
+
+            if (gm.EndlessMode && !gm.HasPowerOut && !gm.HasBeenCaught &&
+                Input.GetKeyDown(KeyCode.Escape))
+            {
+                OpenPause();
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>打开暂停面板：冻住时间，写一行「撑了多久 / 危险度」。</summary>
+        private void OpenPause()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null || !gm.EndlessMode || gm.IsPaused)
+            {
+                return;
+            }
+
+            _paused = true;
+            gm.SetPaused(true);
+
+            if (_menuRoot != null)
+            {
+                _menuRoot.SetActive(true);
+                _titleView.SetActive(false);
+                _levelView.SetActive(false);
+                _endView.SetActive(false);
+                _pauseView.SetActive(true);
+            }
+
+            if (_pauseInfoText != null && gm.Clock != null && gm.Recharge != null)
+            {
+                float hours = gm.Clock.ElapsedSeconds / Mathf.Max(1f, gm.Clock.SecondsPerHour);
+                int danger = EndlessDifficulty.TierFor(hours, gm.Recharge.Noise) + 1;
+                _pauseInfoText.text = "永夜 · 已撑 " + gm.Clock.CurrentHour + " 小时 · 危险 " + danger + "/" + NightCount;
+            }
+
+            if (_pauseSavedText != null)
+            {
+                _pauseSavedText.text = string.Empty;
+            }
+
+            _savedToastTimer = 0f;
+        }
+
+        /// <summary>继续游戏：面板收起、解冻。</summary>
+        private void ResumeFromPause()
+        {
+            _paused = false;
+            _savedToastTimer = 0f;
+
+            var gm = GameManager.Instance;
+            if (gm != null)
+            {
+                gm.SetPaused(false);
+            }
+
+            if (_pauseView != null)
+            {
+                _pauseView.SetActive(false);
+            }
+
+            if (_menuRoot != null)
+            {
+                _menuRoot.SetActive(false);
+            }
+        }
+
+        /// <summary>存一档，面板不关（还能继续打），只弹一句「进度已保存」。</summary>
+        private void OnPauseSave()
+        {
+            if (SaveEternalNight() && _pauseSavedText != null)
+            {
+                _pauseSavedText.text = "进度已保存";
+                _savedToastTimer = 2.5f;
+            }
+        }
+
+        /// <summary>存档后退回标题 —— 标题页那颗按钮会变成「继续永夜」。</summary>
+        private void OnPauseSaveAndExit()
+        {
+            SaveEternalNight();
+            ResumeFromPause();
+            OpenTitle();
+        }
+
+        /// <summary>放弃本局：删掉存档，回标题，下次点永夜就是从零开始。</summary>
+        private void OnPauseAbandon()
+        {
+            ClearEternalNightSave();
+            ResumeFromPause();
+            OpenTitle();
+        }
+
+        // ---------------------------------------------------------------
+        // 永夜模式的存档（PlayerPrefs 一行文本，见 EternalNightSave）
+        // ---------------------------------------------------------------
+
+        /// <summary>把当前进度写进 PlayerPrefs。成功返回 true。</summary>
+        private static bool SaveEternalNight()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return false;
+            }
+
+            var save = gm.CaptureSave();
+            if (save == null)
+            {
+                return false;
+            }
+
+            PlayerPrefs.SetString(EternalSaveKey, save.ToStorage());
+            PlayerPrefs.Save();
+            return true;
+        }
+
+        /// <summary>读存档；没有或者格式不对都返回 false。</summary>
+        private static bool TryLoadEternalNight(out EternalNightSave save)
+        {
+            string raw = PlayerPrefs.GetString(EternalSaveKey, string.Empty);
+            return EternalNightSave.TryParse(raw, out save);
+        }
+
+        private static void ClearEternalNightSave()
+        {
+            PlayerPrefs.DeleteKey(EternalSaveKey);
+            PlayerPrefs.Save();
+        }
+
+        /// <summary>标题页按钮文案：有存档就叫「继续永夜」，顺带报一下撑了多久。</summary>
+        private void RefreshTitleButtons()
+        {
+            if (_endlessLabel == null)
+            {
+                return;
+            }
+
+            EternalNightSave save;
+            if (!TryLoadEternalNight(out save))
+            {
+                _endlessLabel.text = "永夜模式";
+                return;
+            }
+
+            _endlessLabel.text = save.Hour >= 1
+                ? "继续永夜（" + save.Hour + " 小时）"
+                : "继续永夜";
+        }
+
+        /// <summary>按「已撑多久 + 动静」把敌人顶到对应难度（读档后立刻生效）。</summary>
+        private void ApplyEternalDifficulty(GameManager gm)
+        {
+            if (_enemyDirector == null || gm == null || gm.Clock == null)
+            {
+                return;
+            }
+
+            float hours = gm.Clock.ElapsedSeconds / Mathf.Max(1f, gm.Clock.SecondsPerHour);
+            float noise = gm.Recharge != null ? gm.Recharge.Noise : 0f;
+
+            _endlessStage = EndlessDifficulty.TierFor(hours, noise);
+            _endlessOverdrive = EndlessDifficulty.OverdriveFor(hours, noise);
+            _enemyDirector.SetNight(_endlessStage);
+            _enemyDirector.SetOverdrive(_endlessOverdrive);
+        }
+
         // ---------------------------------------------------------------
         // 交互
         // ---------------------------------------------------------------
@@ -253,6 +493,14 @@ namespace NailongFNAF.UI
             _titleView.SetActive(true);
             _levelView.SetActive(false);
             _endView.SetActive(false);
+            if (_pauseView != null)
+            {
+                _pauseView.SetActive(false);
+            }
+
+            _paused = false;
+            _savedToastTimer = 0f;
+            RefreshTitleButtons();
 
             // 暂停这一夜：按一下重开，让时钟/敌人停在原地，等玩家选好夜晚再真正开始
             var gm = GameManager.Instance;
@@ -350,7 +598,24 @@ namespace NailongFNAF.UI
                 _enemyDirector.SetOverdrive(0f);
             }
 
+            // 有存档就接着上次跑（标题页那颗按钮这时写着「继续永夜」），
+            // 没有就是新的一局 —— 顺手把残留的旧档清掉。
+            EternalNightSave save;
+            bool resume = TryLoadEternalNight(out save);
+
             gm.Restart();
+            if (resume)
+            {
+                if (gm.LoadSave(save))
+                {
+                    ApplyEternalDifficulty(gm);
+                }
+            }
+            else
+            {
+                ClearEternalNightSave();
+            }
+
             ClearJumpscare();
 
             _menuRoot.SetActive(false);
@@ -463,6 +728,8 @@ namespace NailongFNAF.UI
         /// </summary>
         private void ShowEndlessLoseEnd(GameManager gm)
         {
+            // 这一局已经结束：存档作废，标题页下次点永夜就是从零开始
+            ClearEternalNightSave();
             float secondsPerHour = gm.Clock != null ? gm.Clock.SecondsPerHour : NightClock.DefaultSecondsPerHour;
             int survived = gm.Clock != null ? Mathf.FloorToInt(gm.Clock.ElapsedSeconds) : 0;
             int best = EndlessBestSeconds;
