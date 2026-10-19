@@ -5,90 +5,87 @@ using NUnit.Framework;
 namespace NailongFNAF.Tests
 {
     /// <summary>
-    /// 无尽模式「行动换电」的规格。
-    /// 老板原话：不以时间为标准补电，按玩家在时间里的行动补电；
-    /// 干得越多补得越多，但补给必须是递减的。
+    /// 永夜模式「固定周期结算 + 行动换电」的规格。
+    ///
+    /// 老板原话（2026-10-19 改版）：补给改成**固定时间结算**；行动会让难度变大，
+    /// 但行动也给更多电；「增加递减」的模式要保留。这个名字玩家看到的是「永夜模式」，
+    /// 代码里的 Endless* 是历史代号。
     /// </summary>
     public class EndlessRechargeTests
     {
         private const float Tolerance = 0.0001f;
 
-        private static EndlessRecharge MakeRecharge()
+        /// <summary>把周期调大的账本：谁也结算不了，只看记账本身。</summary>
+        private static EndlessRecharge MakeLedger()
         {
-            return new EndlessRecharge();
+            return new EndlessRecharge(1000f, 4f, 0.75f, 0.9f, 1f, 24f, 0.5f);
         }
 
-        /// <summary>一直做同一种动作，直到攒出 count 次结算（或做满 limit 次）。</summary>
-        private static float DrainActions(EndlessRecharge recharge, PlayerAction action, int count, int limit = 500)
-        {
-            float gained = 0f;
-            int settlements = 0;
-            for (int i = 0; i < limit && settlements < count; i++)
-            {
-                float gain = recharge.RegisterAction(action);
-                if (gain > 0f)
-                {
-                    gained += gain;
-                    settlements++;
-                }
-            }
-
-            return gained;
-        }
+        // ---------------- 固定周期结算 ----------------
 
         [Test]
-        public void 不登记任何操作就不补电()
+        public void 时间没到就不补电()
         {
-            var recharge = MakeRecharge();
+            var recharge = new EndlessRecharge();
+            recharge.RegisterAction(PlayerAction.Door);
+            recharge.RegisterAction(PlayerAction.Light);
 
+            float grant = recharge.Tick(recharge.Interval * 0.9f);
+
+            Assert.AreEqual(0f, grant, Tolerance);
+            Assert.AreEqual(0, recharge.Settlements);
             Assert.AreEqual(0f, recharge.TotalGranted, Tolerance);
-            Assert.AreEqual(0, recharge.Settlements);
-            Assert.AreEqual(0f, recharge.Credits, Tolerance);
         }
 
         [Test]
-        public void 攒够记点后结算一次并把记点清零()
+        public void 时间一到就结算一次并把本周期账清零()
         {
-            var recharge = new EndlessRecharge(2f, 8f, 0.82f, 1.5f, 20f, 0.5f);
+            var recharge = new EndlessRecharge();
+            recharge.RegisterAction(PlayerAction.Door);
 
-            float first = recharge.RegisterAction(PlayerAction.Door);
-            Assert.AreEqual(0f, first, Tolerance, "1 点还不够 2 点的门槛");
-            Assert.AreEqual(0, recharge.Settlements);
+            float grant = recharge.Tick(recharge.Interval);
 
-            // 第二次关门：权重 1.0 / (1 + 1*0.5) = 0.667，累计 1.667 还不够
-            float second = recharge.RegisterAction(PlayerAction.Door);
-            Assert.AreEqual(0f, second, Tolerance);
-
-            // 再来几次总能凑够；一旦结算，记点必须清零
-            for (int i = 0; i < 20 && recharge.Settlements == 0; i++)
-            {
-                recharge.RegisterAction(PlayerAction.Door);
-            }
-
+            Assert.Greater(grant, 0f);
             Assert.AreEqual(1, recharge.Settlements);
             Assert.AreEqual(0f, recharge.Credits, Tolerance);
         }
 
         [Test]
-        public void 动作越多累计补电越多()
+        public void 一口气走过两个周期会结算两次()
         {
-            var few = MakeRecharge();
-            var many = MakeRecharge();
+            var recharge = new EndlessRecharge();
 
-            DrainActions(few, PlayerAction.Camera, 2);
-            DrainActions(many, PlayerAction.Camera, 6);
+            float grant = recharge.Tick(recharge.Interval * 2f + 1f);
 
-            Assert.Greater(many.TotalGranted, few.TotalGranted);
-            Assert.Greater(many.Settlements, few.Settlements);
+            Assert.AreEqual(2, recharge.Settlements);
+            Assert.Greater(grant, 0f);
         }
 
         [Test]
-        public void 每次结算补的电都比上一次少()
+        public void 同一个周期里动作越多补得越多()
         {
-            var recharge = MakeRecharge();
+            var lazy = new EndlessRecharge();
+            var busy = new EndlessRecharge();
+
+            lazy.RegisterAction(PlayerAction.Camera);
+            for (int i = 0; i < 8; i++)
+            {
+                busy.RegisterAction(PlayerAction.Camera);
+            }
+
+            float lazyGain = lazy.Tick(lazy.Interval);
+            float busyGain = busy.Tick(busy.Interval);
+
+            Assert.Greater(busyGain, lazyGain, "动作多的那一个周期应该补得更多");
+        }
+
+        [Test]
+        public void 第几次结算比上一次少()
+        {
+            var recharge = new EndlessRecharge();
             float previous = float.MaxValue;
 
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 10; i++)
             {
                 float gain = recharge.GainForSettlement(i);
                 Assert.Less(gain, previous, "第 " + (i + 1) + " 次补给应该比上一次少");
@@ -97,40 +94,43 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 结算给的电不会低于下限()
+        public void 结算不会低于下限()
         {
-            var recharge = MakeRecharge();
+            var recharge = new EndlessRecharge();
 
-            float deep = recharge.GainForSettlement(80);
-
-            Assert.AreEqual(EndlessRecharge.DefaultMinGain, deep, Tolerance);
+            Assert.AreEqual(EndlessRecharge.DefaultMinGain, recharge.GainForSettlement(120), Tolerance);
         }
 
         [Test]
-        public void 同类操作越做越不值钱()
+        public void 结算不会高于上限()
         {
-            var recharge = new EndlessRecharge(1000f, 8f, 0.82f, 1.5f, 20f, 0.5f);
+            var recharge = new EndlessRecharge();
+            for (int i = 0; i < 200; i++)
+            {
+                recharge.RegisterAction(PlayerAction.Door);
+            }
 
-            // 门槛调到 1000，谁也结算不了，只看记点的边际收益
-            recharge.RegisterAction(PlayerAction.Door);
-            float afterFirst = recharge.Credits;
+            Assert.LessOrEqual(recharge.GainForSettlement(0), EndlessRecharge.DefaultMaxGain);
+        }
 
-            recharge.RegisterAction(PlayerAction.Door);
-            float firstStep = recharge.Credits - afterFirst;
+        [Test]
+        public void 同一周期里同类操作越点越不值钱()
+        {
+            var recharge = MakeLedger();
 
-            recharge.RegisterAction(PlayerAction.Door);
-            float secondStep = recharge.Credits - afterFirst - firstStep;
+            float first = recharge.RegisterAction(PlayerAction.Door);
+            float second = recharge.RegisterAction(PlayerAction.Door);
+            float third = recharge.RegisterAction(PlayerAction.Door);
 
-            Assert.Greater(afterFirst, 0f);
-            Assert.Less(firstStep, afterFirst);
-            Assert.Less(secondStep, firstStep);
+            Assert.Greater(first, second);
+            Assert.Greater(second, third);
         }
 
         [Test]
         public void 换着花样操作比死点同一类更值钱()
         {
-            var repeated = new EndlessRecharge(1000f, 8f, 0.82f, 1.5f, 20f, 0.5f);
-            var mixed = new EndlessRecharge(1000f, 8f, 0.82f, 1.5f, 20f, 0.5f);
+            var repeated = MakeLedger();
+            var mixed = MakeLedger();
 
             for (int i = 0; i < 4; i++)
             {
@@ -145,28 +145,73 @@ namespace NailongFNAF.Tests
             Assert.Greater(mixed.Credits, repeated.Credits);
         }
 
+        // ---------------- 动静（难度输入） ----------------
+
         [Test]
-        public void 离下次结算的差额和进度是自洽的()
+        public void 动作会攒动静且门最吵()
         {
-            var recharge = MakeRecharge();
+            var door = MakeLedger();
+            var camera = MakeLedger();
 
+            door.RegisterAction(PlayerAction.Door);
+            camera.RegisterAction(PlayerAction.Camera);
+
+            Assert.Greater(door.Noise, 0f);
+            Assert.Greater(door.Noise, camera.Noise);
+        }
+
+        [Test]
+        public void 不动手的话动静会慢慢散掉()
+        {
+            var recharge = MakeLedger();
+            recharge.RegisterAction(PlayerAction.Door);
+            float afterAction = recharge.Noise;
+
+            recharge.Tick(6f);
+
+            Assert.Less(recharge.Noise, afterAction);
+            Assert.GreaterOrEqual(recharge.Noise, 0f);
+        }
+
+        // ---------------- 读数自洽 ----------------
+
+        [Test]
+        public void 距离下次结算的秒数和进度是自洽的()
+        {
+            var recharge = new EndlessRecharge();
+
+            recharge.Tick(recharge.Interval * 0.25f);
+
+            Assert.AreEqual(recharge.Interval * 0.75f, recharge.SecondsToNext, 0.001f);
+            Assert.AreEqual(0.25f, recharge.ProgressToNext, 0.001f);
+        }
+
+        [Test]
+        public void 预计补给量和实际结算量一致()
+        {
+            var recharge = new EndlessRecharge();
             recharge.RegisterAction(PlayerAction.Light);
+            recharge.RegisterAction(PlayerAction.Camera);
 
-            Assert.Greater(recharge.CreditsToNext, 0f);
-            Assert.Less(recharge.ProgressToNext, 1f);
-            Assert.AreEqual(recharge.Threshold, recharge.Credits + recharge.CreditsToNext, Tolerance);
+            float predicted = recharge.NextGain;
+            float actual = recharge.Tick(recharge.Interval);
+
+            Assert.AreEqual(predicted, actual, 0.001f);
         }
 
         [Test]
         public void 重置之后账本归零()
         {
-            var recharge = MakeRecharge();
-            DrainActions(recharge, PlayerAction.Door, 2);
+            var recharge = new EndlessRecharge();
+            recharge.RegisterAction(PlayerAction.Door);
+            recharge.Tick(recharge.Interval);
 
             recharge.Reset();
 
-            Assert.AreEqual(0f, recharge.TotalGranted, Tolerance);
             Assert.AreEqual(0f, recharge.Credits, Tolerance);
+            Assert.AreEqual(0f, recharge.Noise, Tolerance);
+            Assert.AreEqual(0f, recharge.TotalGranted, Tolerance);
+            Assert.AreEqual(0f, recharge.SecondsIntoPeriod, Tolerance);
             Assert.AreEqual(0, recharge.Settlements);
             Assert.AreEqual(0, recharge.ActionsRegistered);
         }
@@ -195,10 +240,10 @@ namespace NailongFNAF.Tests
             Assert.IsTrue(power.IsDepleted);
         }
 
-        // ---------------- 无尽时钟 ----------------
+        // ---------------- 永夜的时钟 ----------------
 
         [Test]
-        public void 无尽模式时钟一直往上走且永远不会天亮()
+        public void 永夜模式时钟一直往上走且永远不会天亮()
         {
             var clock = new NightClock(10f, true);
 
@@ -210,7 +255,7 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 无尽模式的夜数和点数会自己循环()
+        public void 永夜模式的夜数和点数会自己循环()
         {
             var clock = new NightClock(10f, true);
 

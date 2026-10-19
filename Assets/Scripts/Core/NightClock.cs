@@ -20,7 +20,7 @@ namespace NailongFNAF.Core
         public float SecondsPerHour { get; private set; }
 
         /// <summary>
-        /// 是否无尽模式：无尽模式下小时数一直往上走，永远不到天亮。
+        /// 是否永夜模式：永夜模式下小时数一直往上走，永远不到天亮。
         /// 默认 false —— 原来的五夜流程完全不受影响。
         /// </summary>
         public bool Endless { get; private set; }
@@ -30,29 +30,29 @@ namespace NailongFNAF.Core
 
         /// <summary>
         /// 当前小时：0 表示 12 AM，1 表示 1 AM …… 6 表示 6 AM（天亮）。
-        /// 普通夜晚取值 0 ~ 6；无尽模式下不封顶（可以到 7、8、9……）。
+        /// 普通夜晚取值 0 ~ 6；永夜模式下不封顶（可以到 7、8、9……）。
         /// </summary>
         public int CurrentHour { get; private set; }
 
-        /// <summary>是否已经撑到天亮（6 AM）。无尽模式永远返回 false。</summary>
+        /// <summary>是否已经撑到天亮（6 AM）。永夜模式永远返回 false。</summary>
         public bool IsNightComplete
         {
             get { return !Endless && CurrentHour >= HoursPerNight; }
         }
 
-        /// <summary>已经撑过去的整点小时数 —— 无尽模式用来显示「撑了多久」。</summary>
+        /// <summary>已经撑过去的整点小时数 —— 永夜模式用来显示「撑了多久」。</summary>
         public int HoursSurvived
         {
             get { return CurrentHour > HoursPerNight ? HoursPerNight : CurrentHour; }
         }
 
-        /// <summary>无尽模式下这是第几「夜」（0 起）；普通夜晚恒为 0。</summary>
+        /// <summary>永夜模式下这是第几「夜」（0 起）；普通夜晚恒为 0。</summary>
         public int NightNumber
         {
             get { return Endless ? CurrentHour / HoursPerNight : 0; }
         }
 
-        /// <summary>无尽模式下当前这一「夜」的第几点（0 ~ 5）；普通夜晚等于 <see cref="CurrentHour"/>。</summary>
+        /// <summary>永夜模式下当前这一「夜」的第几点（0 ~ 5）；普通夜晚等于 <see cref="CurrentHour"/>。</summary>
         public int HourOfNight
         {
             get
@@ -95,14 +95,14 @@ namespace NailongFNAF.Core
         {
         }
 
-        /// <summary>用自定义节奏创建，并指定是否无尽模式。</summary>
+        /// <summary>用自定义节奏创建，并指定是否永夜模式。</summary>
         public NightClock(float secondsPerHour, bool endless)
         {
             SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
             Endless = endless;
         }
 
-        /// <summary>推进时间。天亮之后不再变化（无尽模式不会天亮）。</summary>
+        /// <summary>推进时间。天亮之后不再变化（永夜模式不会天亮）。</summary>
         public void Tick(float deltaSeconds)
         {
             if (deltaSeconds <= 0f || IsNightComplete)

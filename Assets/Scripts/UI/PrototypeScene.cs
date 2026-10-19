@@ -528,7 +528,7 @@ namespace NailongFNAF.UI
         private Text _powerText;
         private Image[] _usageBars;
 
-        /// <summary>无尽模式专属的那一行 HUD（已撑多久 / 还差多少攒一次补给）。</summary>
+        /// <summary>永夜模式专属的那一行 HUD（已撑多久 / 还差多少攒一次补给）。</summary>
         private Text _endlessText;
 
         /// <summary>左下角「电量 + Usage」整组。断电后收起来，跟原版一样只剩黑暗。</summary>
@@ -647,7 +647,7 @@ namespace NailongFNAF.UI
 
             HandleDebugKeys();
 
-            // 无尽模式：撑得越久敌人越凶（普通模式什么都不做）
+            // 永夜模式：撑得越久敌人越凶（普通模式什么都不做）
             UpdateEndlessRamp(gm);
 
             if (Input.GetKeyDown(KeyCode.R))
@@ -2157,7 +2157,7 @@ namespace NailongFNAF.UI
 
         private void UpdateHud(GameManager gm)
         {
-            // 普通模式显示「几点」；无尽模式小时数不封顶，只显示这一夜的第几点（夜数另有提示）
+            // 普通模式显示「几点」；永夜模式小时数不封顶，只显示这一夜的第几点（夜数另有提示）
             _clockText.text = FormatHour(gm.EndlessMode ? gm.Clock.HourOfNight : gm.Clock.CurrentHour);
             _powerText.text = "Power left: " + Mathf.CeilToInt(gm.Power.Level) + "%";
             UpdateUsageBars(gm.Power.UsageLevel);
@@ -2177,8 +2177,8 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 无尽模式那一行：撑了多久、离下一次补给还差多少记点、刚补了多少。
-        /// 普通模式整行隐藏（无尽模式才有的东西，别在五夜流程里多一行噪音）。
+        /// 永夜模式那一行：撑了多久、下次补给还有几秒 / 预计补多少、当前危险度、刚补了多少。
+        /// 普通模式整行隐藏（永夜模式才有的东西，别在五夜流程里多一行噪音）。
         /// </summary>
         private void UpdateEndlessHud(GameManager gm)
         {
@@ -2203,14 +2203,27 @@ namespace NailongFNAF.UI
                 _endlessText.gameObject.SetActive(true);
             }
 
-            var sb = new StringBuilder();
-            sb.Append("无尽 · 已撑 ").Append(gm.Clock.CurrentHour).Append(" 小时");
-            sb.Append(" · 下次补给还差 ").Append(Mathf.CeilToInt(recharge.CreditsToNext)).Append(" 点");
+            float hours = gm.Clock.ElapsedSeconds / Mathf.Max(1f, gm.Clock.SecondsPerHour);
+            int danger = EndlessDifficulty.TierFor(hours, recharge.Noise) + 1;
+            bool overload = EndlessDifficulty.OverdriveFor(hours, recharge.Noise) > 0f;
 
-            // 刚补完电的 1.6 秒内，把「+8%」挂在后面，让玩家知道刚才那一下有回报
-            if (gm.LastGainAge < 1.6f && gm.LastGain > 0.01f)
+            var sb = new StringBuilder();
+            sb.Append("永夜 · 已撑 ").Append(gm.Clock.CurrentHour).Append(" 小时");
+            sb.Append(" · ").Append(Mathf.CeilToInt(recharge.SecondsToNext)).Append(" 秒后补 ");
+            sb.Append(Mathf.RoundToInt(recharge.NextGain)).Append("%");
+            sb.Append(" · 危险 ").Append(danger).Append("/").Append(NightCount);
+            if (overload)
             {
-                sb.Append(" · +").Append(Mathf.RoundToInt(gm.LastGain)).Append("%");
+                sb.Append("（过载）");
+            }
+
+            // 刚补完电的 1.6 秒内，把「+8%」挂在后面，让玩家知道刚才那一下有回报。
+            // 电量本来就在 99~100%，一次结算可能只补进零点几个百分点 —— 四舍五入成 0
+            // 的话就别显示「+0%」了，看着像 bug。
+            int gained = Mathf.RoundToInt(gm.LastGain);
+            if (gm.LastGainAge < 1.6f && gained > 0)
+            {
+                sb.Append(" · +").Append(gained).Append("%");
             }
 
             _endlessText.text = sb.ToString();
@@ -3010,7 +3023,7 @@ namespace NailongFNAF.UI
             PlaceRect(usageLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(40f, 62f), new Vector2(110f, 30f));
 
-            // 无尽模式那一行（普通模式直接隐藏）：摆在电量条正上方
+            // 永夜模式那一行（普通模式直接隐藏）：摆在电量条正上方
             _endlessText = MakeText(hud.transform, "EndlessText", string.Empty,
                 TextAnchor.LowerLeft, 24, new Color(0.75f, 0.88f, 0.75f));
             PlaceRect(_endlessText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),

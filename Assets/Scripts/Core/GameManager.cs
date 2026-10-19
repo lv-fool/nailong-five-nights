@@ -28,12 +28,12 @@ namespace NailongFNAF.Core
         public NightClock Clock { get; private set; }
 
         /// <summary>
-        /// 是否处于无尽模式：撑不到天亮，敌人一直来；玩家靠「行动换电」续命。
+        /// 是否处于永夜模式：撑不到天亮，敌人一直来；玩家靠「行动换电」续命。
         /// 由菜单在开新一局之前设置，<see cref="Restart"/> 会照着它建时钟。
         /// </summary>
         public bool EndlessMode { get; private set; }
 
-        /// <summary>无尽模式的换电账本（普通模式下为 null）。</summary>
+        /// <summary>永夜模式的换电账本（普通模式下为 null）。</summary>
         public EndlessRecharge Recharge { get; private set; }
 
         /// <summary>最近一次行动补给拿到多少电量（百分点），给 HUD 弹「+8%」用。</summary>
@@ -157,6 +157,20 @@ namespace NailongFNAF.Core
 
             Power.SetUsageLevel(CountUsageLevel());
             Power.Tick(dt);
+
+            // 永夜模式：固定周期结算补给。到点才补，跟手上正在做什么无关；
+            // 一个周期里做了多少有效操作，只决定这次补多少（见 EndlessRecharge）。
+            if (EndlessMode && Recharge != null && CanOperate())
+            {
+                float grant = Recharge.Tick(dt);
+                if (grant > 0f)
+                {
+                    float actual = Power.Grant(grant);
+                    Recharge.NoteGranted(actual);
+                    LastGain = actual;
+                    LastGainAge = 0f;
+                }
+            }
         }
 
         /// <summary>断电后设备全部停摆。</summary>
@@ -198,7 +212,7 @@ namespace NailongFNAF.Core
         }
 
         /// <summary>
-        /// 设置无尽模式（下一局 <see cref="Restart"/> 生效）。菜单选「无尽模式」时传 true。
+        /// 设置永夜模式（下一局 <see cref="Restart"/> 生效）。菜单选「永夜模式」时传 true。
         /// </summary>
         public void SetEndless(bool endless)
         {
@@ -299,7 +313,8 @@ namespace NailongFNAF.Core
         }
 
         /// <summary>
-        /// 无尽模式的「行动换电」：登记一次有效操作，攒够记点就补电。
+        /// 永夜模式的记账：登记一次有效操作 —— 攒账 + 加动静（动静会抬难度）。
+        /// **补电不在这里发生**：补给按固定周期结算，见 <see cref="Update"/>。
         /// 普通模式下整个方法什么都不做（<see cref="Recharge"/> 为 null）。
         /// </summary>
         private void NoteAction(PlayerAction action)
@@ -309,15 +324,7 @@ namespace NailongFNAF.Core
                 return;
             }
 
-            float gain = Recharge.RegisterAction(action);
-            if (gain <= 0f)
-            {
-                return;
-            }
-
-            float granted = Power.Grant(gain);
-            LastGain = granted;
-            LastGainAge = 0f;
+            Recharge.RegisterAction(action);
         }
 
         /// <summary>断电、天亮或被抓到之后，玩家不能再操作设备。</summary>

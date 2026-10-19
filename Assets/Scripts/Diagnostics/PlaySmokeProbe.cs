@@ -10,7 +10,7 @@ namespace NailongFNAF.Diagnostics
 {
     /// <summary>
     /// Play 模式冒烟探针：只在编辑器里存在，且只有命令行带 -playSmoke 时才自动装到场景里。
-    /// 作用是把「进 Play → 截标题页 → 点无尽模式 → 模拟操作 → 截 HUD → 打印状态 → 退出」
+    /// 作用是把「进 Play → 截标题页 → 点永夜模式 → 模拟操作 → 截 HUD → 打印状态 → 退出」
     /// 这一整套动作做完，用来做无人值守的画面验证。
     /// </summary>
     public sealed class PlaySmokeProbe : MonoBehaviour
@@ -103,7 +103,7 @@ namespace NailongFNAF.Diagnostics
             {
                 _step = 5;
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
-                Debug.Log("SMOKE: 直接走失败结算（无尽分支）= " +
+                Debug.Log("SMOKE: 直接走失败结算（永夜分支）= " +
                           Invoke(scene, "ShowLoseEnd", null));
             }
             else if (_step == 5 && elapsed > 8.5f)
@@ -151,6 +151,16 @@ namespace NailongFNAF.Diagnostics
                 Invoke(gm, "SetFlashlight", new object[] { false });
             }
 
+            // 永夜模式的补给是「固定周期结算」：把周期临时压到 1 秒，
+            // 让随后的真实 Update 路径自己结算（Tick → Power.Grant → LastGain），
+            // 这样验到的是玩家真会看到的节拍，而不是直接调 Grant。
+            object recharge = Get(gm, "Recharge");
+            if (recharge != null)
+            {
+                SetBackingField(recharge, "<Interval>k__BackingField", 1f);
+                Debug.Log("SMOKE: 结算周期临时压到 1 秒，动静 " + Get(recharge, "Noise"));
+            }
+
             Debug.Log("SMOKE: 已模拟 3 轮门/监控/手电筒操作");
         }
 
@@ -185,19 +195,20 @@ namespace NailongFNAF.Diagnostics
                 Debug.Log("SMOKE: 记点 = " + Get(recharge, "Credits") +
                           " 结算次数 = " + Get(recharge, "Settlements") +
                           " 累计补电 = " + Get(recharge, "TotalGranted") +
-                          " 记账次数 = " + Get(recharge, "ActionsRegistered"));
+                          " 记账次数 = " + Get(recharge, "ActionsRegistered") +
+                          " 动静 = " + Get(recharge, "Noise"));
             }
 
             object scene = Instance("NailongFNAF.UI.PrototypeScene");
             object endlessText = Get(scene, "_endlessText");
             if (endlessText == null)
             {
-                Debug.LogError("SMOKE: 找不到 HUD 无尽行 _endlessText");
+                Debug.LogError("SMOKE: 找不到 HUD 永夜行 _endlessText");
                 return;
             }
 
             object textGo = Get(endlessText, "gameObject");
-            Debug.Log("SMOKE: HUD 无尽行 = [" + Get(endlessText, "text") + "] active=" +
+            Debug.Log("SMOKE: HUD 永夜行 = [" + Get(endlessText, "text") + "] active=" +
                       (textGo != null ? Get(textGo, "activeSelf") : null));
         }
 
@@ -212,7 +223,7 @@ namespace NailongFNAF.Diagnostics
             Debug.Log("SMOKE: 普通夜 EndlessMode = " + Get(gm, "EndlessMode") +
                       " 夜内点 = " + (clock != null ? Get(clock, "CurrentHour") : null) +
                       " 结束 = " + (clock != null ? Get(clock, "IsNightComplete") : null) +
-                      " HUD 无尽行 active = " + (textGo != null ? Get(textGo, "activeSelf") : null));
+                      " HUD 永夜行 active = " + (textGo != null ? Get(textGo, "activeSelf") : null));
         }
 
         private void ReportEndPanel()
@@ -325,6 +336,23 @@ namespace NailongFNAF.Diagnostics
             mi.Invoke(target, args);
             return true;
         }
+
+        /// <summary>改自动属性的幕后字段（探针专用，比如把结算周期临时压短）。</summary>
+        private static void SetBackingField(object target, string fieldName, object value)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            FieldInfo fi = target.GetType().GetField(
+                fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+            if (fi != null)
+            {
+                fi.SetValue(target, value);
+            }
+        }
+
     }
 }
 #endif

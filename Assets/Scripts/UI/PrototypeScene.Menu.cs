@@ -25,17 +25,17 @@ namespace NailongFNAF.UI
         /// <summary>解锁进度存档键：存「已解锁到第几夜」，0 起。</summary>
         public const string UnlockKey = "nailong.unlockedNight";
 
-        /// <summary>无尽模式的纪录存档键：存「撑过的真实秒数」，越大越好。</summary>
+        /// <summary>永夜模式的纪录存档键：存「撑过的真实秒数」，越大越好。</summary>
         public const string EndlessBestKey = "nailong.endlessBest";
 
-        /// <summary>无尽模式开局用的难度夜（0 起）—— 从第 3 夜那种强度开始，别太软。</summary>
-        public const int EndlessStartNight = 2;
+        /// <summary>永夜模式开局用的难度夜（0 起）—— 与 <see cref="EndlessDifficulty.StartNight"/> 同源。</summary>
+        public const int EndlessStartNight = EndlessDifficulty.StartNight;
 
-        /// <summary>无尽模式每撑过这么多小时，难度往上加一档。</summary>
-        public const int EndlessHoursPerStage = 2;
-
-        /// <summary>无尽模式当前难度档对应的夜（0 起）。</summary>
+        /// <summary>永夜模式当前难度档对应的夜（0 起）。</summary>
         private int _endlessStage = EndlessStartNight;
+
+        /// <summary>永夜模式当前的加压系数（0 = 没加压）。</summary>
+        private float _endlessOverdrive;
 
         /// <summary>菜单是否开着（开着就冻住这一夜）。</summary>
         private bool _menuOpen;
@@ -108,10 +108,10 @@ namespace NailongFNAF.UI
             MakeDivider(_titleView.transform, new Vector2(0.5f, 0.55f));
 
             // ⚠️ 按钮 84px 高 ≈ 画布 9%，间距必须留够，否则会和分隔线/彼此重叠
-            // 三个按钮现在依次排开：开始游戏（选夜） / 无尽模式 / 退出
+            // 三个按钮现在依次排开：开始游戏（选夜） / 永夜模式 / 退出
             MakeMenuButton(_titleView.transform, "开始游戏", Vector2.zero,
                 new Vector2(0.5f, 0.47f), OnStartClicked);
-            MakeMenuButton(_titleView.transform, "无尽模式", Vector2.zero,
+            MakeMenuButton(_titleView.transform, "永夜模式", Vector2.zero,
                 new Vector2(0.5f, 0.37f), OnEndlessClicked);
             MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
                 new Vector2(0.5f, 0.27f), OnQuitClicked);
@@ -313,9 +313,10 @@ namespace NailongFNAF.UI
                 _enemyDirector.SetNight(night);
             }
 
-            // 走普通流程时把无尽模式关掉 —— 否则时钟还是「永远不到天亮」那一套
+            // 走普通流程时把永夜模式关掉 —— 否则时钟还是「永远不到天亮」那一套
             gm.SetEndless(false);
             _endlessStage = EndlessStartNight;
+            _endlessOverdrive = 0f;
 
             gm.Restart();
             ClearJumpscare();
@@ -327,7 +328,7 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 标题页「无尽模式」：撑不到天亮，敌人一轮轮来，靠玩家自己的操作换电。
+        /// 标题页「永夜模式」：撑不到天亮，敌人一轮轮来；操作能换电，但也会把难度抬上去。
         /// 顺序很重要 —— <see cref="GameManager.SetEndless"/> 必须早于 <see cref="GameManager.Restart"/>，
         /// 因为 Restart 是照着 EndlessMode 去建时钟和换电账本的。
         /// </summary>
@@ -342,9 +343,11 @@ namespace NailongFNAF.UI
             gm.SetEndless(true);
 
             _endlessStage = EndlessStartNight;
+            _endlessOverdrive = 0f;
             if (_enemyDirector != null)
             {
                 _enemyDirector.SetNight(EndlessStartNight);
+                _enemyDirector.SetOverdrive(0f);
             }
 
             gm.Restart();
@@ -357,8 +360,10 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 无尽模式难度爬升：每撑过 <see cref="EndlessHoursPerStage"/> 个小时把敌人顶高一档。
-        /// 只有档位真的变了才调 SetNight —— 它会把整局活动度重设，不能每帧调。
+        /// 永夜模式难度爬升：时间越长越难，玩家动静越大也越难（见 <see cref="EndlessDifficulty"/>）。
+        /// 爬到第 6 夜之后不再换夜，改用 <see cref="EnemyDirector.SetOverdrive"/> 继续加压。
+        ///
+        /// 只有档位 / 加压真的变了才调 —— SetNight 与 SetOverdrive 都会重设整局活动度，不能每帧调。
         /// </summary>
         private void UpdateEndlessRamp(GameManager gm)
         {
@@ -367,19 +372,24 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            int stage = EndlessStartNight + gm.Clock.CurrentHour / EndlessHoursPerStage;
-            if (stage > NightCount - 1)
+            float hours = gm.Clock.ElapsedSeconds / Mathf.Max(1f, gm.Clock.SecondsPerHour);
+            float noise = gm.Recharge != null ? gm.Recharge.Noise : 0f;
+
+            int stage = EndlessDifficulty.TierFor(hours, noise);
+            float overdrive = EndlessDifficulty.OverdriveFor(hours, noise);
+
+            if (stage != _endlessStage)
             {
-                stage = NightCount - 1;
+                _endlessStage = stage;
+                _enemyDirector.SetNight(stage);
             }
 
-            if (stage == _endlessStage)
+            // 加压一档一档往上走（0.22），变化够大才重设，免得每帧刷敌人状态
+            if (Mathf.Abs(overdrive - _endlessOverdrive) > 0.05f)
             {
-                return;
+                _endlessOverdrive = overdrive;
+                _enemyDirector.SetOverdrive(overdrive);
             }
-
-            _endlessStage = stage;
-            _enemyDirector.SetNight(stage);
         }
 
         private void ShowWinEnd()
@@ -448,7 +458,7 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 无尽模式的结算：报「撑了多久 / 破没破纪录」，主按钮直接再来一局。
+        /// 永夜模式的结算：报「撑了多久 / 破没破纪录」，主按钮直接再来一局。
         /// 纪录按游戏内时长（小时）算，用真实秒数存档，换节奏调参也不会作废旧纪录。
         /// </summary>
         private void ShowEndlessLoseEnd(GameManager gm)
@@ -465,13 +475,13 @@ namespace NailongFNAF.UI
                 best = survived;
             }
 
-            _endTitleText.text = isRecord ? "新纪录！" : "无尽模式结束";
+            _endTitleText.text = isRecord ? "新纪录！" : "永夜模式结束";
             _endBodyText.text = "撑过 " + FormatSpan(survived, secondsPerHour)
                 + (isRecord ? " · 这是你的最好成绩" : " · 最佳 " + FormatSpan(best, secondsPerHour));
             _endPrimaryLabel.text = "再来一局";
             _endPrimaryButton.interactable = true;
 
-            // 无尽模式死法多半是被抓，台词照旧；没抓到就没台词
+            // 永夜模式死法多半是被抓，台词照旧；没抓到就没台词
             _endQuoteText.text = QuoteFor(_jumpscareEnemy);
             PlayEndQuoteVoice(_jumpscareEnemy);
         }
@@ -501,7 +511,7 @@ namespace NailongFNAF.UI
             return hours + " 小时 " + minutes + " 分";
         }
 
-        /// <summary>无尽模式最好成绩（真实秒数），没打过就是 0。</summary>
+        /// <summary>永夜模式最好成绩（真实秒数），没打过就是 0。</summary>
         private static int EndlessBestSeconds
         {
             get
@@ -574,7 +584,7 @@ namespace NailongFNAF.UI
                 _endQuoteAudio.Stop();
             }
 
-            // 无尽模式只有「死」这一种结局，主按钮就是再来一局
+            // 永夜模式只有「死」这一种结局，主按钮就是再来一局
             var gm = GameManager.Instance;
             if (gm != null && gm.EndlessMode)
             {

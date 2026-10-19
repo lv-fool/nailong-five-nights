@@ -112,6 +112,12 @@ namespace NailongFNAF.Gameplay
         private bool _attackFired;
 
         /// <summary>
+        /// 永夜模式的加压系数：0 = 不加压，0.3 = 所有敌人活动度各涨三成。
+        /// 爬到第 6 夜以后难度就靠它继续往上走（见 <see cref="EndlessDifficulty"/>）。
+        /// </summary>
+        private float _overdrive;
+
+        /// <summary>
         /// 已突破但还没动手的敌人。照 FNAF 1：门被突破后该侧门灯立刻失效，
         /// **要等玩家放下监控才跳杀** —— 给玩家一瞬间的「完了」的绝望感，
         /// 而不是当场黑屏。
@@ -277,6 +283,22 @@ namespace NailongFNAF.Gameplay
             ApplyDifficulty();
         }
 
+        /// <summary>
+        /// 永夜模式的加压：把每个敌人的活动度按 <paramref name="factor"/> 上浮
+        /// （0 = 恢复原表，0.5 = 各涨一半；结果仍夹在 0 ~ 20）。
+        /// 只有永夜模式会用，普通夜晚保持 0。
+        /// </summary>
+        public void SetOverdrive(float factor)
+        {
+            if (factor < 0f)
+            {
+                factor = 0f;
+            }
+
+            _overdrive = factor;
+            ApplyDifficulty();
+        }
+
         public EnemyBrain GetBrain(EnemyId id)
         {
             EnemyBrain brain;
@@ -292,7 +314,13 @@ namespace NailongFNAF.Gameplay
         {
             foreach (var pair in _brains)
             {
-                pair.Value.SetActivityLevel(_difficulty.GetLevel(_nightIndex, pair.Key));
+                int level = _difficulty.GetLevel(_nightIndex, pair.Key);
+                if (_overdrive > 0f)
+                {
+                    level = (int)System.Math.Round(level * (1f + _overdrive));
+                }
+
+                pair.Value.SetActivityLevel(level);
             }
         }
 

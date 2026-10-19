@@ -97,7 +97,7 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
-        /// 补充电量 —— 只给无尽模式的「行动换电」用（见 <see cref="EndlessRecharge"/>）。
+        /// 补充电量 —— 只给永夜模式的「行动换电」用（见 <see cref="EndlessRecharge"/>）。
         ///
         /// 返回<b>实际补进去的量</b>：电量已经到顶时会被截断（可能补得比要的少，甚至 0），
         /// 这样调用方可以如实显示「+3%」而不是「+8%」。
