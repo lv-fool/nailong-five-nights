@@ -130,6 +130,16 @@ namespace NailongFNAF.EditorTools
         /// <summary>敌人点位模式下当前选中的敌人（EnemyId 整数）。</summary>
         private int _selEnemy = 3;
 
+        /// <summary>正在编辑哪一档点位：0 = 近，1 = 远。</summary>
+        private int _tier = 0;
+
+        /// <summary>
+        /// 有没有未保存的改动。
+        /// 加它是因为踩过：拖完点位忘点保存、直接关窗口，一晚上的调整全白费。
+        /// 现在标题栏显示 *，关窗口 / 切机位时也会自动保存。
+        /// </summary>
+        private bool _dirty;
+
         private GUIStyle _tagStyle;
 
         [MenuItem("奶龙/6. 监控画面编辑器（背景 / 敌人点位 / 遮挡）", false, 15)]
@@ -273,6 +283,7 @@ namespace NailongFNAF.EditorTools
 
         private void SaveAll()
         {
+            _dirty = false;
             SaveShapes();
             SaveLayout();
             AssetDatabase.Refresh();
@@ -466,14 +477,41 @@ namespace NailongFNAF.EditorTools
             DrawFooter();
         }
 
+        /// <summary>
+        /// 关窗口 / 重编译时自动保存未存的改动。
+        /// 踩过：拖完点位直接关窗口，一晚上的调整全没了。
+        /// </summary>
+        private void OnDisable()
+        {
+            if (_dirty)
+            {
+                SaveAll();
+                Debug.Log("[监控编辑器] 关窗口时自动保存了未提交的改动");
+            }
+        }
         private void DrawToolbar()
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+
+            // 有未保存改动时显示橙色 *，一眼能看到
+            if (_dirty)
+            {
+                var oldD = GUI.color;
+                GUI.color = new Color(1f, 0.75f, 0.25f);
+                GUILayout.Label("*", EditorStyles.toolbarButton, GUILayout.Width(16f));
+                GUI.color = oldD;
+            }
 
             int newRoom = EditorGUILayout.Popup(_room, RoomNames, EditorStyles.toolbarPopup,
                 GUILayout.Width(170f));
             if (newRoom != _room)
             {
+                // 切机位前先存 —— 否则上一个机位的调整会丢
+                if (_dirty)
+                {
+                    SaveAll();
+                }
+
                 _room = newRoom;
                 _current.Clear();
                 _selShape = -1;
@@ -585,6 +623,21 @@ namespace NailongFNAF.EditorTools
             }
             else if (_mode == Mode.Enemies)
             {
+                // 先选调哪一档 —— 近 / 远是**两套独立点位**
+                if (GUILayout.Toggle(_tier == 0, "近景点位",
+                        EditorStyles.toolbarButton, GUILayout.Width(70f)))
+                {
+                    _tier = 0;
+                }
+
+                if (GUILayout.Toggle(_tier == 1, "远景点位",
+                        EditorStyles.toolbarButton, GUILayout.Width(70f)))
+                {
+                    _tier = 1;
+                }
+
+                GUILayout.Space(8f);
+
                 for (int i = 0; i < EnemyNames.Length; i++)
                 {
                     var old = GUI.color;
@@ -918,6 +971,70 @@ namespace NailongFNAF.EditorTools
 
         // ==================== 画：敌人点位 ====================
 
+        /// <summary>敌人立绘（按代号索引），懒加载。</summary>
+        private readonly Texture2D[] _enemyArt = new Texture2D[4];
+
+        private static readonly string[] EnemyCodes =
+        {
+            "niulai", "daishu", "lulu", "nailong"
+        };
+
+        private Texture2D EnemyArt(int index)
+        {
+            if (index < 0 || index >= _enemyArt.Length)
+            {
+                return null;
+            }
+
+            if (_enemyArt[index] != null)
+            {
+                return _enemyArt[index];
+            }
+
+            string path = "Assets/Art/Characters/char_" + EnemyCodes[index] + "_idle.png";
+            _enemyArt[index] = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            return _enemyArt[index];
+        }
+
+        /// <summary>
+        /// 这只敌人在这个机位、这一档的**最终显示尺寸**（屏幕像素）。
+        ///
+        /// ⚠️ 必须和运行时 PrototypeScene 算得一模一样，否则你在编辑器里
+        /// 摆得挺好，进游戏就胖一圈/瘦一圈。
+        /// 运行时是依次相乘：统一定高 380 → 乘机位系数 → 乘近远系数 → 乘手动缩放。
+        /// </summary>
+        private Vector2 RuntimeSize(int enemy, Texture2D art)
+        {
+            const float Height = 380f;   // = PrototypeScene.MonitorCharacterHeight
+
+            float aspect = art.height > 0 ? (float)art.width / art.height : 1f;
+            float h = Height;
+            float w = Height * aspect;
+
+            float slotScale = PrototypeScene.MonitorSlotScale((EnemyId)enemy, _room);
+
+            float tierScale = _tier == 0
+                ? PrototypeScene.MonitorNearScale
+                : PrototypeScene.MonitorFarScale;
+
+            float manual = 1f;
+            var l = Layout(_room);
+            if (l.points != null)
+            {
+                foreach (var p in l.points)
+                {
+                    if (p != null && p.enemy == enemy && p.tier == _tier && p.scale > 0.01f)
+                    {
+                        manual = p.scale;
+                        break;
+                    }
+                }
+            }
+
+            float total = slotScale * tierScale * manual;
+            return new Vector2(w * total, h * total);
+        }
+
         private void DrawEnemyPoints(Rect r)
         {
             for (int e = 0; e < EnemyNames.Length; e++)
@@ -928,16 +1045,36 @@ namespace NailongFNAF.EditorTools
                 Color c = EnemyColors[e];
                 bool sel = e == _selEnemy;
 
-                Handles.color = new Color(c.r, c.g, c.b, sel ? 1f : 0.55f);
-                Handles.DrawSolidDisc(g, Vector3.forward, sel ? 8f : 6f);
+                // 画**真实立绘** —— 只画圆点根本判断不了构图。
+                Texture2D art = EnemyArt(e);
+                if (art != null)
+                {
+                    Vector2 size = RuntimeSize(e, art);
+                    float px = r.width / DesignW;   // 设计像素 → 窗口像素
+                    float w = size.x * px;
+                    float h = size.y * px;
+                    var box = new Rect(g.x - w * 0.5f, g.y - h, w, h);
 
-                // 立绘高度示意（GUI 里向上是 -y）
-                Handles.color = new Color(c.r, c.g, c.b, 0.5f);
-                Handles.DrawAAPolyLine(2f, g, g + new Vector2(0f, -26f));
+                    var old = GUI.color;
+                    GUI.color = new Color(1f, 1f, 1f, sel ? 0.95f : 0.45f);
+                    GUI.DrawTexture(box, art, ScaleMode.ScaleToFit, true);
+                    GUI.color = old;
 
-                GUI.Label(new Rect(g.x + 10f, g.y - 8f, 120f, 18f), EnemyNames[e], TagStyle(c));
+                    Handles.color = new Color(c.r, c.g, c.b, sel ? 1f : 0.6f);
+                    Handles.DrawAAPolyLine(sel ? 2.5f : 1.5f,
+                        new Vector2(box.xMin, box.yMin), new Vector2(box.xMax, box.yMin),
+                        new Vector2(box.xMax, box.yMax), new Vector2(box.xMin, box.yMax),
+                        new Vector2(box.xMin, box.yMin));
+                }
+
+                Handles.color = new Color(c.r, c.g, c.b, sel ? 1f : 0.7f);
+                Handles.DrawSolidDisc(g, Vector3.forward, sel ? 7f : 5f);
+
+                GUI.Label(new Rect(g.x + 10f, g.y - 8f, 140f, 18f),
+                    EnemyNames[e], TagStyle(c));
             }
         }
+
 
         private GUIStyle TagStyle(Color c)
         {
@@ -1408,7 +1545,7 @@ namespace NailongFNAF.EditorTools
             {
                 foreach (var p in l.points)
                 {
-                    if (p != null && p.enemy == enemy)
+                    if (p != null && p.enemy == enemy && p.tier == _tier)
                     {
                         return new Vector2(p.x, p.y);
                     }
@@ -1422,6 +1559,7 @@ namespace NailongFNAF.EditorTools
 
         private void SetPoint(int room, int enemy, Vector2 norm)
         {
+            _dirty = true;
             var l = Layout(room);
 
             if (l.points == null)
@@ -1431,7 +1569,7 @@ namespace NailongFNAF.EditorTools
 
             foreach (var p in l.points)
             {
-                if (p != null && p.enemy == enemy)
+                if (p != null && p.enemy == enemy && p.tier == _tier)
                 {
                     p.x = Mathf.Clamp01(norm.x);
                     p.y = Mathf.Clamp01(norm.y);
@@ -1447,6 +1585,7 @@ namespace NailongFNAF.EditorTools
             list.Add(new LayoutPoint
             {
                 enemy = enemy,
+                tier = _tier,
                 x = Mathf.Clamp01(norm.x),
                 y = Mathf.Clamp01(norm.y),
                 scale = 1f
@@ -1685,6 +1824,10 @@ namespace NailongFNAF.EditorTools
         private class LayoutPoint
         {
             public int enemy;
+
+            /// <summary>0 = 近档点位，1 = 远档点位（缺省 0，老数据当近档）</summary>
+            public int tier;
+
             public float x = 0.5f;
             public float y = 0.06f;
             public float scale = 1f;

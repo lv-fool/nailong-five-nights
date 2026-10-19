@@ -138,7 +138,7 @@ namespace NailongFNAF.UI
         /// 别设太大 —— 660 时占画面 71%，整个人糊在镜头上把房间全挡了；
         /// 380 约占 41%，跟 FNAF 里敌人在监控画面中的比例接近。
         /// </summary>
-        private const float MonitorCharacterHeight = 380f;
+        public const float MonitorCharacterHeight = 380f;
 
         /// <summary>
         /// 监控里敌人立绘整体抬高多少像素。
@@ -627,6 +627,18 @@ namespace NailongFNAF.UI
 
         /// <summary>每个槽位当前是不是「近档」（近档不参与遮挡裁剪）。</summary>
         private readonly bool[] _slotIsNear = new bool[3];
+
+        /// <summary>本帧每个槽位放的是哪只敌人（槽位是动态分配的，查档位要靠它）。</summary>
+        private EnemyId[] _slotIds;
+
+        /// <summary>
+        /// 调试用的**远近手动覆盖**。key = 敌人，value = true 近 / false 远。
+        /// 正常规则按 (敌人,机位,夜数) 哈希算；这里给调试面板一个绕过的入口。
+        /// </summary>
+        private readonly Dictionary<EnemyId, bool> _nearOverride = new Dictionary<EnemyId, bool>();
+
+        /// <summary>是否启用了远近手动覆盖。</summary>
+        private bool _nearOverrideOn;
 
 
         private CanvasGroup _monitorMapGroup;
@@ -1702,6 +1714,10 @@ namespace NailongFNAF.UI
 
             // 收集这一机位上能拍到的敌人（最多三个槽位）
             var ids = new EnemyId[_monitorCharacters.Length];
+
+            // 记下本帧槽位分配 —— 槽位按「奶龙 → 门类 → 噜噜」的动态顺序填，
+            // 不是固定映射，别处要查档位必须用这份记录
+            _slotIds = ids;
             var poses = new CharacterPose[_monitorCharacters.Length];
             int count = 0;
 
@@ -1767,9 +1783,18 @@ namespace NailongFNAF.UI
 
                 var rect = img.rectTransform;
 
-                // 这只在这个机位是近还是远（确定性，不会每帧变）
+                // 这只在这个机位是近还是远。
+                // 正常走哈希（确定性）；调试面板开了手动覆盖时以覆盖为准。
                 int night = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
-                bool near = MonitorPrefersNear(ids[i], cam, night);
+                bool near;
+                if (_nearOverrideOn && _nearOverride.TryGetValue(ids[i], out bool forced))
+                {
+                    near = forced;
+                }
+                else
+                {
+                    near = MonitorPrefersNear(ids[i], cam, night);
+                }
                 _slotIsNear[i] = near;
 
                 // ⚠️ **位置只由「哪个敌人 + 哪个机位」决定，和在场人数无关。**
@@ -1959,10 +1984,10 @@ namespace NailongFNAF.UI
         // ---------------- 远近两档 ----------------
 
         /// <summary>近档：更靠前 —— 立绘放大、**不参与遮挡**（它站在家具前面）。</summary>
-        private const float MonitorNearScale = 1.14f;
+        public const float MonitorNearScale = 1.14f;
 
         /// <summary>远档：更靠里 —— 立绘缩小、**参与遮挡**（被家具挡住下半身）。</summary>
-        private const float MonitorFarScale = 0.80f;
+        public const float MonitorFarScale = 0.80f;
 
         /// <summary>远档的纵向位置系数（越小越靠里/靠上）。</summary>
         private const float MonitorFarLiftRatio = 0.78f;
@@ -2646,7 +2671,7 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>某个敌人在某机位上的固定大小系数（0.88~1.06，确定性）。</summary>
-        private static float MonitorSlotScale(EnemyId id, int cameraIndex)
+        public static float MonitorSlotScale(EnemyId id, int cameraIndex)
         {
             int seed = ((int)id * 31337) ^ (cameraIndex * 48611) ^ 0x2f1b3c5d;
             return Mathf.Lerp(0.88f, 1.06f, Hash01(seed));
@@ -4166,22 +4191,23 @@ namespace NailongFNAF.UI
             var panel = new GameObject("DebugControls", typeof(RectTransform));
             panel.transform.SetParent(parent, false);
             var panelRect = (RectTransform)panel.transform;
-            // 面板放进一个带深色底的容器 —— 否则调试文字会和 HUD（电量/时间）
-            // 叠在一起，互相看不清。位置行那块尤其容易压到 "Power left"。
             PlaceRect(panelRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                 new Vector2(40f, -60f), new Vector2(1100f, 420f));
 
-            var bg = new GameObject("DebugBg", typeof(RectTransform),
+            // ⚠️ **不要铺整块深色底** —— 1100×420 的大黑板会把监控画面挡掉一半。
+            // 只加一层很淡的底（alpha 0.30），让文字边界能分辨，又不遮画面。
+            // （第一版用 alpha 0.86，实测像一块大黑块糊在屏幕上）
+            var frame = new GameObject("DebugFrame", typeof(RectTransform),
                 typeof(CanvasRenderer), typeof(Image));
-            bg.transform.SetParent(panel.transform, false);
-            var bgRect = (RectTransform)bg.transform;
-            PlaceRect(bgRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(0f, 0f), new Vector2(1100f, 420f));
-            var bgImg = bg.GetComponent<Image>();
-            bgImg.sprite = _buttonSprite;
-            bgImg.color = new Color(0.05f, 0.06f, 0.08f, 0.86f);
-            bgImg.raycastTarget = false;
-            bg.transform.SetAsFirstSibling();   // 垫在最底下
+            frame.transform.SetParent(panel.transform, false);
+            var frameRect = (RectTransform)frame.transform;
+            PlaceRect(frameRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(-8f, 0f), new Vector2(1116f, 436f));
+            var frameImg = frame.GetComponent<Image>();
+            frameImg.sprite = _buttonSprite;
+            frameImg.color = new Color(0.02f, 0.03f, 0.05f, 0.30f);
+            frameImg.raycastTarget = false;
+            frame.transform.SetAsFirstSibling();
 
             // ── 一键跳杀 ──
             Text jumpLabel = MakeLabel(panel.transform, "跳杀：", 18,
@@ -4318,9 +4344,56 @@ namespace NailongFNAF.UI
 
                 // → 下一个机位
                 EnemyId capturedNext = id;
-                MakeDebugButton(parent, "▶", 310f, y, 34f, 34f,
+                MakeDebugButton(parent, "▶", 300f, y, 34f, 34f,
                     delegate { DebugMoveEnemy(capturedNext, +1); });
+
+                // 近 / 远切换 —— 远近本来按哈希固定，这里给个手动覆盖方便对比
+                EnemyId capturedTier = id;
+                MakeDebugButton(parent, "近/远", 342f, y, 52f, 34f,
+                    delegate { ToggleNearFar(capturedTier); });
             }
+        }
+
+        /// <summary>
+        /// 切换某只敌人的「近 / 远」档位（调试用）。
+        /// 第一次点会开启手动覆盖，之后每点一次翻转。只影响这一只。
+        /// </summary>
+        private void ToggleNearFar(EnemyId id)
+        {
+            _nearOverrideOn = true;
+
+            bool cur;
+            if (!_nearOverride.TryGetValue(id, out cur))
+            {
+                var brain = _enemyDirector != null ? _enemyDirector.GetBrain(id) : null;
+                int cam = brain != null ? DebugCameraOf(brain) : 0;
+                int night = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
+                cur = MonitorPrefersNear(id, cam, night);
+            }
+
+            _nearOverride[id] = !cur;
+        }
+
+        /// <summary>
+        /// 某只敌人本帧在哪个监控槽位（-1 = 不在画面里）。
+        /// 槽位是动态分配的，必须查 _slotIds。
+        /// </summary>
+        private int SlotOfEnemy(EnemyId id)
+        {
+            if (_slotIds == null)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < _slotIds.Length; i++)
+            {
+                if (_slotIds[i] == id)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         /// <summary>调试面板上的一个小按钮。</summary>
@@ -4464,14 +4537,20 @@ namespace NailongFNAF.UI
                 // 每只敌人只走自己那条路径，光给机位名会让人以为按钮坏了
                 int[] path = CameraPathOf(order[i]);
                 string camName = CameraNames[cam].Replace("    ", " ");
+
+                // 带上当前档位 —— 光看画面分不清是「远」还是「被裁掉了」
+                int slot = SlotOfEnemy(order[i]);
+                string tier = slot >= 0 && slot < _slotIsNear.Length && _slotIsNear[slot]
+                    ? " 近" : " 远";
+
                 if (path != null && path.Length > 0)
                 {
                     int pos = System.Array.IndexOf(path, cam) + 1;
-                    t.text = "[" + pos + "/" + path.Length + "] " + camName;
+                    t.text = "[" + pos + "/" + path.Length + "] " + camName + tier;
                 }
                 else
                 {
-                    t.text = camName;
+                    t.text = camName + tier;
                 }
             }
         }
