@@ -188,4 +188,8 @@ Unity 2022.3.62f3c1 已装在本机 `F:\Unity\2022.3.62f3c1\Editor\Unity.exe`。
   `__pycache__/`。换机器要按 `docs/02-开发工具.md` 重建 MCP 包。
 - ⚠️ **构建产物在 `Builds/`**（Windows 版，约 320 MB），别误当源码删了；
   它是可再生的，但重新构建要几分钟。
-- ⚠️ **本机没装 Windows Build Support / IL2CPP 模块**，打包（尤其 IL2CPP）前需要补装
+- ⚠️ **本机只装了 Windows Mono 变体**（`PlaybackEngines\WindowsStandaloneSupport\Variations\` 下无 IL2CPP）。
+  打包走 `Assets/Editor/BuildWindows.cs`（菜单「奶龙 / 10. 打包 Windows 版」或
+  `-executeMethod NailongFNAF.EditorTools.BuildWindows.Build`），产物在 `Builds/Windows/`，
+  约 263 MB，压 zip 约 116 MB。流程与注意事项见 `docs/09-打包.md`；
+  要 IL2CPP 得先用 Hub 补装 **Windows Build Support (IL2CPP)** 模块

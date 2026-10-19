@@ -5,11 +5,9 @@ using System.Reflection;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
-#endif
 
 namespace NailongFNAF.Diagnostics
 {
-#if UNITY_EDITOR
     /// <summary>
     /// Play 模式冒烟探针：只在编辑器里存在，且只有命令行带 -playSmoke 时才自动装到场景里。
     /// 作用是把「进 Play → 截标题页 → 点无尽模式 → 模拟操作 → 截 HUD → 打印状态 → 退出」
