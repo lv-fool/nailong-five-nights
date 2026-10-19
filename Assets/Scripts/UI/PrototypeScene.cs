@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using NailongFNAF.Audio;
@@ -69,6 +70,31 @@ namespace NailongFNAF.UI
             /// <summary>断电后「收电费」用的那张。没给就退回 Jumpscare。</summary>
             public Sprite Blackout;
 
+            /// <summary>
+            /// **按房间的专属姿势**：下标 = 机位号，值 = 那张立绘。
+            ///
+            /// 每个敌人 × 每个房间可以各画一张（比如奶龙在餐厅是「坐椅子上」，
+            /// 在舞台是「躲在幕布后」，在储藏室是「蹲在纸箱后」）。
+            /// 空着的下标自动退回 <see cref="Idle"/>，所以可以一张一张慢慢补。
+            ///
+            /// 文件名约定见 <see cref="RoomPoseFileName"/>。
+            /// </summary>
+            public Sprite[] RoomPoses;
+
+            /// <summary>取某个房间的姿势；没画就退 Idle（再退 Stare）。</summary>
+            public Sprite GetRoomPose(int cameraIndex)
+            {
+                if (RoomPoses != null
+                    && cameraIndex >= 0
+                    && cameraIndex < RoomPoses.Length
+                    && RoomPoses[cameraIndex] != null)
+                {
+                    return RoomPoses[cameraIndex];
+                }
+
+                return Fallback(Idle);
+            }
+
             /// <summary>取某个姿态的图；缺了就沿兜底链往下退，全缺返回 null（交给色块）。</summary>
             public Sprite Get(CharacterPose pose)
             {
@@ -113,6 +139,13 @@ namespace NailongFNAF.UI
         /// 380 约占 41%，跟 FNAF 里敌人在监控画面中的比例接近。
         /// </summary>
         private const float MonitorCharacterHeight = 380f;
+
+        /// <summary>
+        /// 监控里敌人立绘整体抬高多少像素。
+        /// 目的是让**上半身露在家具遮罩之上** —— 家具（桌子/椅子/纸箱）
+        /// 在画面下部约占 27%，不抬高的话整只敌人都会被裁掉（2026-10-18 踩过）。
+        /// </summary>
+        private const float MonitorCharacterLift = 150f;
 
         // 3D 世界物体的排序层。门板在敌人后面一层（敌人站门里，门关上门板挡住它）；
         // 都比相机近，不会和全景内壁交叠闪烁（Sprite 渲染走 sortingOrder，同相机深度）。
@@ -299,6 +332,57 @@ namespace NailongFNAF.UI
         /// 奶龙也不去这里（见 <c>EnemyDirector._nailongSkipCameras</c>）。
         /// </summary>
         private const int KitchenCameraIndex = 9;
+
+        /// <summary>
+        /// 每个机位的**房间代号**（用于立绘文件名，如 char_nailong_mon_1b.png）。
+        /// 只画关键房间也可以 —— 没图的自动退 Idle。
+        /// </summary>
+        private static readonly string[] RoomCodes =
+        {
+            "mon_1a",   // 0  舞台
+            "mon_1b",   // 1  餐厅
+            "mon_1c",   // 2  海盗湾
+            "mon_2a",   // 3  西走廊
+            "mon_2b",   // 4  西转角
+            "mon_3",    // 5  储藏室
+            "mon_4a",   // 6  东走廊
+            "mon_4b",   // 7  东转角
+            "mon_5",    // 8  后台
+            "mon_6",    // 9  厨房（没画面，不用画）
+            "mon_7"     // 10 厕所
+        };
+
+        /// <summary>机位总数（= 房间代号表长度），供编辑器和测试用。</summary>
+        public static int RoomCodeCount
+        {
+            get { return RoomCodes != null ? RoomCodes.Length : 0; }
+        }
+
+        /// <summary>某机位的房间代号；越界返回空串。</summary>
+        public static string RoomCode(int cameraIndex)
+        {
+            if (RoomCodes == null || cameraIndex < 0 || cameraIndex >= RoomCodes.Length)
+            {
+                return string.Empty;
+            }
+
+            return RoomCodes[cameraIndex];
+        }
+
+        /// <summary>
+        /// 某个角色在某个房间的专属立绘文件名（不含扩展名）。
+        /// 例：char_nailong_mon_1b（奶龙在餐厅的姿势）。
+        /// </summary>
+        public static string RoomPoseFileName(EnemyId id, int cameraIndex)
+        {
+            string room = RoomCode(cameraIndex);
+            if (string.IsNullOrEmpty(room))
+            {
+                return string.Empty;
+            }
+
+            return "char_" + id.Code() + "_" + room;
+        }
 
         // ---------------------------------------------------------------
         // 小地图：整张 FNAF 1 官方平面图 —— 舞台 / 餐厅 / 海盗湾 / 西走廊 /
@@ -520,6 +604,18 @@ namespace NailongFNAF.UI
         /// 所以用数组横排，而不是单个 Image。
         /// </summary>
         private Image[] _monitorCharacters;
+
+        /// <summary>
+        /// 人工画的遮挡多边形（归一化 0..1，左下原点）。
+        /// 由编辑器菜单「奶龙 / 6. 编辑监控遮挡区」生成，
+        /// 运行时优先用它 —— 比程序自动算的遮罩准，因为是人按真实家具轮廓画的。
+        /// </summary>
+        private Dictionary<int, List<Vector2[]>> _occluderPolys;
+
+        /// <summary>每个槽位当前是不是「近档」（近档不参与遮挡裁剪）。</summary>
+        private readonly bool[] _slotIsNear = new bool[3];
+
+
         private CanvasGroup _monitorMapGroup;
         private Text _monitorLabel;
         private Image[] _camBoxes;
@@ -1289,10 +1385,7 @@ namespace NailongFNAF.UI
 
             foreach (var img in _monitorCharacters)
             {
-                if (img != null)
-                {
-                    img.gameObject.SetActive(false);
-                }
+                SetMonitorCharacterVisible(img, false);
             }
         }
 
@@ -1373,6 +1466,70 @@ namespace NailongFNAF.UI
                 Color tint = EnemyTint(id);
                 tint.a *= alpha;
 
+                image.preserveAspect = false;
+                image.sprite = _solidSprite;
+                image.color = tint;
+                image.rectTransform.sizeDelta = new Vector2(height * 0.46f, height);
+            }
+        }
+
+        /// <summary>
+        /// 在监控画面上显示某个敌人，**优先用它在当前房间的专属姿势**。
+        /// 没画那张就自动退回 <see cref="CharacterPose.Idle"/> —— 所以可以一张一张补图。
+        /// </summary>
+        /// <summary>
+        /// 显示 / 隐藏一个监控敌人（连同它外面的遮罩父节点）。
+        /// ⚠️ 不能只开关 Image 本身 —— 父节点的 RectMask2D 还留着的话，
+        /// 会挡住别的绘制或留下空节点。
+        /// </summary>
+        private static void SetMonitorCharacterVisible(Image image, bool visible)
+        {
+            if (image == null)
+            {
+                return;
+            }
+
+            var parent = image.transform.parent;
+            if (parent != null)
+            {
+                parent.gameObject.SetActive(visible);
+            }
+            else
+            {
+                image.gameObject.SetActive(visible);
+            }
+        }
+
+        private void ShowRoomCharacter(Image image, EnemyId id, int cameraIndex,
+            CharacterPose fallbackPose, float height)
+        {
+            var art = FindCharacter(id);
+            Sprite sprite = null;
+
+            if (art != null)
+            {
+                sprite = art.GetRoomPose(cameraIndex);
+
+                // GetRoomPose 在没专属图时已经退到 Idle；如果连 Idle 都没有，
+                // 再退到调用方要的姿态（如噜噜的 Peek）
+                if (sprite == null)
+                {
+                    sprite = art.Get(fallbackPose);
+                }
+            }
+
+            image.gameObject.SetActive(true);
+
+            if (sprite != null)
+            {
+                image.preserveAspect = true;
+                image.sprite = sprite;
+                image.color = Color.white;
+                FitHeight(image.rectTransform, sprite, height);
+            }
+            else
+            {
+                Color tint = EnemyTint(id);
                 image.preserveAspect = false;
                 image.sprite = _solidSprite;
                 image.color = tint;
@@ -1552,56 +1709,649 @@ namespace NailongFNAF.UI
 
                 if (i >= count)
                 {
-                    img.gameObject.SetActive(false);
+                    SetMonitorCharacterVisible(img, false);
                     continue;
                 }
 
-                ShowCharacter(img, ids[i], poses[i], MonitorCharacterHeight);
+                SetMonitorCharacterVisible(img, true);
+
+                // 用「这个敌人 + 这个房间」的专属姿势，没画就退 Idle
+                ShowRoomCharacter(img, ids[i], cam, poses[i], MonitorCharacterHeight);
 
                 var rect = img.rectTransform;
 
-                // 横排：按**在场人数**定间距，但每个人的**相对次序固定**（按代号排序）。
-                // 这样同屋走掉一个人，剩下的只会重新均分、不会互相换位；
-                // 走掉的那个腾出的空档由剩下的人均摊 —— 观感上像「本来就没那么挤」。
-                float step = count <= 1 ? 0f : (count == 2 ? 300f : 250f);
-                float slotX = (i - (count - 1) * 0.5f) * step;
+                // 这只在这个机位是近还是远（确定性，不会每帧变）
+                int night = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
+                bool near = MonitorPrefersNear(ids[i], cam, night);
+                _slotIsNear[i] = near;
 
-                // 每人再带一点固定的横向/纵向扰动（按敌人+机位确定性），
-                // 免得站成一排像列队；扰动幅度小于间距的一半，不会撞上。
-                Vector2 jitter = MonitorSlotPosition(ids[i], cam);
-                float smallJitter = Mathf.Clamp(jitter.x, -52f, 52f) * 0.42f;
+                // ⚠️ **位置只由「哪个敌人 + 哪个机位」决定，和在场人数无关。**
+                //
+                // 之前两版都错在同一个地方：拿 i（槽位索引）或 count（在场人数）参与布局。
+                // 只要同一间屋子里有人进出，别人的坐标就会跟着变 —— 看着就是画面在动。
+                //
+                // 现在：给四只各分一条**固定的横向分区**（互不重叠），
+                // 每只在自己那条里按机位做一点确定性偏移。谁来谁走都不影响别人。
+                Vector2 slot = MonitorSlotPosition(ids[i], cam);
 
-                rect.anchoredPosition = new Vector2(slotX + smallJitter, jitter.y);
-                rect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
+                // 远近两档：
+                //   近 —— 站在家具**前面**：放大、位置靠下（离镜头近）、不裁剪
+                //   远 —— 站在家具**后面**：缩小、位置靠上（离镜头远）、参与裁剪
+                float lift = near
+                    ? MonitorCharacterLift
+                    : MonitorCharacterLift * MonitorFarLiftRatio;
+
+                // 远档要**靠近遮挡箱**（房间里画了遮挡区的话）——
+                // 这样它才真的躲在家具后面，而不是站在旁边的空地上
+                float x = near ? slot.x : PullTowardOccluder(slot.x, cam);
+
+                rect.anchoredPosition = new Vector2(x, slot.y + lift);
+
+                // ⚠️ **框的宽高比必须和立绘一致**，不能写死 260×380 ——
+                // Image 开着 preserveAspect，框比例和精灵不一致时，
+                // 精灵会在框里**居中留白**（上下各一条），实际绘制区比框小。
+                // 遮挡是拿框的四角算归一化的，框大于实际绘制区 → 采样区被拉长且上移，
+                // 表现就是「遮挡偏下」。
+                // （踩过：精灵 0.81 宽高比塞进 0.68 的框，实际只有 320 高）
+                if (img.sprite != null && img.preserveAspect)
+                {
+                    FitHeight(rect, img.sprite, MonitorCharacterHeight);
+                }
+                else
+                {
+                    rect.sizeDelta = new Vector2(MonitorCharacterHeight * 0.46f, MonitorCharacterHeight);
+                }
 
                 float scale = MonitorSlotScale(ids[i], cam);
+                scale *= near ? MonitorNearScale : MonitorFarScale;
                 rect.localScale = new Vector3(scale, scale, 1f);
             }
+
+            // 只给「远档」的敌人套遮挡（近档站在家具前面，不裁）
+            ApplyOccluderToCharacters(cam);
         }
 
         /// <summary>
-        /// 某个敌人在某个机位上的固定站位。
-        /// **用「敌人 + 机位」做种子**，所以同一台摄像机同一个敌人永远站同一处 ——
-        /// 同屋其他人走掉也不会带着它挪。不同机位位置不同，避免每间屋都一个样。
+
+        /// <summary>
+        /// 某个机位上**可以站人的位置**（按房间里的道具定，不是网格）。
+        ///
+        /// 每间屋子的陈设不同，能站的点也不同 ——
+        /// 有椅子的地方站椅子旁，有箱子的站箱子旁，走廊就贴墙边。
+        /// 坐标是照着 <c>Assets/Art/Monitoring/mon_*.png</c> 的实际构图量的
+        /// （画布参考宽 1920，x = 0 是画面正中）。
+        ///
+        /// ⚠️ **只跟机位有关，跟谁站在这里无关。** 这是「走人不挪」的保证。
+        /// </summary>
+        private static Vector2[] RoomStandPoints(int cameraIndex)
+        {
+            switch (cameraIndex)
+            {
+                // CAM 1A 舞台：台面中央 + 左右黑箱旁 + 右侧台角
+                case 0:
+                    return new[]
+                    {
+                        new Vector2(-480f, 32f),
+                        new Vector2(-160f, 44f),
+                        new Vector2(190f, 40f),
+                        new Vector2(490f, 28f)
+                    };
+
+                // CAM 1B 餐厅：长桌旁的三把椅子 + 桌侧
+                case 1:
+                    return new[]
+                    {
+                        new Vector2(-470f, 56f),
+                        new Vector2(-180f, 74f),
+                        new Vector2(150f, 68f),
+                        new Vector2(460f, 50f)
+                    };
+
+                // CAM 1C 海盗湾：台座左中右
+                case 2:
+                    return new[]
+                    {
+                        new Vector2(-420f, 46f),
+                        new Vector2(-140f, 54f),
+                        new Vector2(160f, 48f),
+                        new Vector2(430f, 42f)
+                    };
+
+                // CAM 2A 西走廊：贴墙，左右各两点
+                case 3:
+                    return new[]
+                    {
+                        new Vector2(-430f, 58f),
+                        new Vector2(-170f, 52f),
+                        new Vector2(160f, 56f),
+                        new Vector2(410f, 62f)
+                    };
+
+                // CAM 2B 西转角：纸箱旁 + 门框侧
+                case 4:
+                    return new[]
+                    {
+                        new Vector2(-440f, 38f),
+                        new Vector2(-190f, 52f),
+                        new Vector2(140f, 46f),
+                        new Vector2(400f, 40f)
+                    };
+
+                // CAM 3 储藏室：纸箱堆旁 / 架子前
+                case 5:
+                    return new[]
+                    {
+                        new Vector2(-450f, 54f),
+                        new Vector2(-170f, 62f),
+                        new Vector2(160f, 48f),
+                        new Vector2(420f, 44f)
+                    };
+
+                // CAM 4A 东走廊
+                case 6:
+                    return new[]
+                    {
+                        new Vector2(-420f, 56f),
+                        new Vector2(-150f, 50f),
+                        new Vector2(170f, 58f),
+                        new Vector2(430f, 62f)
+                    };
+
+                // CAM 4B 东转角
+                case 7:
+                    return new[]
+                    {
+                        new Vector2(-430f, 44f),
+                        new Vector2(-160f, 54f),
+                        new Vector2(150f, 46f),
+                        new Vector2(410f, 40f)
+                    };
+
+                // CAM 5 后台：架子前横排
+                case 8:
+                    return new[]
+                    {
+                        new Vector2(-440f, 50f),
+                        new Vector2(-150f, 58f),
+                        new Vector2(160f, 52f),
+                        new Vector2(430f, 46f)
+                    };
+
+                // CAM 7 厕所：洗手池 / 镜子前
+                case 10:
+                    return new[]
+                    {
+                        new Vector2(-430f, 44f),
+                        new Vector2(-160f, 52f),
+                        new Vector2(150f, 48f),
+                        new Vector2(420f, 56f)
+                    };
+
+                // CAM 6 厨房只有声音、没有画面 —— 不该有人站在这里
+                default:
+                    return new[] { new Vector2(0f, 40f) };
+            }
+        }
+
+        // ---------------- 远近两档 ----------------
+
+        /// <summary>近档：更靠前 —— 立绘放大、**不参与遮挡**（它站在家具前面）。</summary>
+        private const float MonitorNearScale = 1.14f;
+
+        /// <summary>远档：更靠里 —— 立绘缩小、**参与遮挡**（被家具挡住下半身）。</summary>
+        private const float MonitorFarScale = 0.80f;
+
+        /// <summary>远档的纵向位置系数（越小越靠里/靠上）。</summary>
+        private const float MonitorFarLiftRatio = 0.78f;
+
+        /// <summary>
+        /// 这只敌人在这个机位上属于「近」还是「远」。
+        ///
+        /// **确定性哈希**（敌人 + 机位 + 夜数），不是每帧 random：
+        /// 位置一旦定了就不再变，否则会「抖动」—— 之前踩过这个坑。
+        /// 加进夜数是为了让不同夜晚的构图有变化。
+        /// </summary>
+        private bool MonitorPrefersNear(EnemyId id, int cameraIndex, int nightIndex)
+        {
+            int seed = ((int)id * 7919)
+                       ^ (cameraIndex * 104729)
+                       ^ (nightIndex * 15485863);
+
+            return Hash01(seed ^ 0x2545f491) < 0.5f;
+        }
+
+        /// <summary>
+        /// 某个敌人在某个机位上的站位。
+        ///
+        /// **只由「哪个敌人 + 哪个机位」决定，和在场人数完全无关** ——
+        /// 别人来不来、走不走都不影响它的坐标（这是「位置不固定」的根治办法）。
+        ///
+        /// 具体算法：先取该房间的可站点列表，
+        /// 再用「敌人身份」选一个固定的点。不同敌人天然分开，
+        /// 而且位置都属于真实存在的道具旁边，不是网格里的空位。
         /// </summary>
         private static Vector2 MonitorSlotPosition(EnemyId id, int cameraIndex)
         {
-            // 站位的**顺序**固定（按敌人代号），但**间距**按这间屋子有几个人动态算。
-            //
-            // 为什么不能给每个敌人一个固定 x：四只排开要 -330..330 共 660px，
-            // 平均 220px 一个 —— 但同屋通常只有 1~2 只，按 4 只分会让它们
-            // 散到画面最边上、看着很空。所以：
-            //   · 顺序不变 → 甲永远在乙左边，走人不改变相对次序
-            //   · 间距按在场人数 → 两个人时自然分开，一个人时居中
-            //
-            // slot = 这个敌人在「本次在场名单」里排第几（0 起）。
-            // 由调用方传进来，这里只管摆放。
-            int seed = ((int)id * 7919) ^ (cameraIndex * 104729);
-            float dy = Mathf.Lerp(28f, 62f, Hash01(seed ^ 0x5bf03635));
+            Vector2[] points = RoomStandPoints(cameraIndex);
+            if (points.Length == 0)
+            {
+                return Vector2.zero;
+            }
 
-            // 单只时的轻微横偏（避免永远正中，也别太偏）
-            float soloBias = Mathf.Lerp(-52f, 52f, Hash01(seed));
-            return new Vector2(soloBias, dy);
+            // 用敌人身份决定它站哪个点（固定映射，不看别人在不在）。
+            // 四只各占一个不同下标，所以同一间屋子最多同时出现四只也不会叠。
+            int pick;
+            switch (id)
+            {
+                case EnemyId.Nailong:
+                    pick = 1;   // 偏中（奶龙爱往中间凑）
+                    break;
+                case EnemyId.Daishu:
+                    pick = 0;   // 最左
+                    break;
+                case EnemyId.Niulai:
+                    pick = 2;   // 偏右
+                    break;
+                case EnemyId.Lulu:
+                    pick = 3;   // 最右
+                    break;
+                default:
+                    pick = 0;
+                    break;
+            }
+
+            Vector2 p = points[pick % points.Length];
+
+            // 极小抖动（±10px）：让重复出现的构图不完全一样，
+            // 但小到不会离开道具范围，也不会挤到别人的点上
+            int seed = ((int)id * 7919) ^ (cameraIndex * 104729);
+            p.x += (Hash01(seed) * 2f - 1f) * 10f;
+            p.y += (Hash01(seed ^ 0x5bf03635) * 2f - 1f) * 8f;
+
+            return p;
+        }
+
+        
+
+        /// <summary>
+        /// 让「远档」的敌人**靠近遮挡箱**（房间里画了遮挡区的话）。
+        ///
+        /// 近档不动 —— 它站在家具前面，本来就该在画面开阔处。
+        /// 计算方式：把立绘横向拉向遮挡区的水平中心。
+        /// </summary>
+        private float PullTowardOccluder(float slotX, int cameraIndex)
+        {
+            EnsureOccluderPolys();
+
+            List<Vector2[]> polys;
+            if (_occluderPolys == null
+                || !_occluderPolys.TryGetValue(cameraIndex, out polys)
+                || polys == null
+                || polys.Count == 0)
+            {
+                return slotX;   // 这个房间没画遮挡区，不拉
+            }
+
+            // 取所有遮挡多边形的横向中心（归一化 0..1 → 画布坐标）
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            foreach (var poly in polys)
+            {
+                foreach (var p in poly)
+                {
+                    minX = Mathf.Min(minX, p.x);
+                    maxX = Mathf.Max(maxX, p.x);
+                }
+            }
+
+            if (maxX <= minX)
+            {
+                return slotX;
+            }
+
+            var overlayRect = (RectTransform)_monitorOverlay.transform;
+            float width = overlayRect.rect.width;
+            float boxCenterX = ((minX + maxX) * 0.5f - 0.5f) * width;
+
+            // 往箱子中心靠 60%
+            return Mathf.Lerp(slotX, boxCenterX, 0.6f);
+        }
+
+        /// <summary>
+        /// 把敌人立绘**裁掉**前景道具占据的那一块（不盖色块）。
+        ///
+        /// 做法：每个敌人立绘外面套一个 RectMask2D 的父节点，
+        /// 父节点的有效区域 = 画面减去「桌面以下」，敌人超出桌面的部分自然不画。
+        /// 这样露出来的是背景图里真正的桌子，不会有任何额外色块。
+        /// </summary>
+        /// <summary>
+        /// 给每个敌人立绘套上「前景遮挡遮罩」—— 被家具挡住的像素**不画**。
+        ///
+        /// 遮罩图由 <c>tools/render_monitor.py</c> 渲染监控画面时一并产出
+        /// （<c>mon_1b_occl.png</c> 之类），白色 = 家具。
+        /// 这样椅子之间的空隙会正确保留，而不是像矩形裁剪那样一刀切平。
+        /// </summary>
+        /// <summary>
+        /// 读人工画的遮挡多边形（Resources/occluders.json）。
+        /// 文件不存在 / 解析失败都静默跳过 —— 那样就退回程序遮罩。
+        /// </summary>
+        private void EnsureOccluderPolys()
+        {
+            if (_occluderPolys != null)
+            {
+                return;
+            }
+
+            _occluderPolys = new Dictionary<int, List<Vector2[]>>();
+
+            var asset = Resources.Load<TextAsset>("occluders");
+            if (asset == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var doc = JsonUtility.FromJson<OccluderJson>(asset.text);
+                if (doc == null || doc.rooms == null)
+                {
+                    return;
+                }
+
+                foreach (var room in doc.rooms)
+                {
+                    var list = new List<Vector2[]>();
+                    if (room.shapes != null)
+                    {
+                        foreach (var shape in room.shapes)
+                        {
+                            if (shape.points == null || shape.points.Length < 6)
+                            {
+                                continue;
+                            }
+
+                            int n = shape.points.Length / 2;
+                            var poly = new Vector2[n];
+                            for (int i = 0; i < n; i++)
+                            {
+                                poly[i] = new Vector2(shape.points[i * 2], shape.points[i * 2 + 1]);
+                            }
+                            list.Add(poly);
+                        }
+                    }
+                    _occluderPolys[room.room] = list;
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[奶龙] 遮挡多边形解析失败：" + e.Message);
+            }
+        }
+
+        /// <summary>多边形遮罩纹理缓存（按机位）。</summary>
+        private readonly Dictionary<int, Texture2D> _polyMaskCache = new Dictionary<int, Texture2D>();
+
+        /// <summary>
+        /// 把人工画的多边形**栅格化成遮罩纹理**（白 = 挡住）。
+        /// 没有该机位的多边形就返回 null，调用方退回程序遮罩。
+        ///
+        /// 纹理只生成一次，之后缓存 —— 每帧重算太浪费。
+        /// </summary>
+        private Texture2D GetPolygonMaskTexture(int cameraIndex)
+        {
+            Texture2D cached;
+            if (_polyMaskCache.TryGetValue(cameraIndex, out cached))
+            {
+                return cached;
+            }
+
+            List<Vector2[]> polys;
+            if (_occluderPolys == null
+                || !_occluderPolys.TryGetValue(cameraIndex, out polys)
+                || polys == null
+                || polys.Count == 0)
+            {
+                _polyMaskCache[cameraIndex] = null;
+                return null;
+            }
+
+            // ⚠️ 分辨率直接决定**切割边缘的精细度**。
+            // 立绘在屏幕上约 264px 宽，只采样遮罩的一小块（约 0.1 宽）；
+            // 512 宽时那一小块只有 ~54 个遮罩像素去铺 264 个屏幕像素，
+            // 边缘会明显发块（锯齿状台阶）。
+            // 用和原图一致的 1920×1080 → 约 1:1，边缘干净。
+            const int W = 1920;
+            const int H = 1080;
+
+            var tex = new Texture2D(W, H, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+
+            // ⚠️ **必须 Point**：Bilinear 会在多边形边界插值出 0~1 的中间值，
+            // 结果是被挡住的边缘呈半透明（看起来像玻璃）。
+            // 这张图是「遮 / 不遮」的二值数据，不需要平滑。
+            tex.filterMode = FilterMode.Point;
+
+            var px = new Color32[W * H];
+            var clear = new Color32(0, 0, 0, 255);
+            for (int i = 0; i < px.Length; i++)
+            {
+                px[i] = clear;
+            }
+
+            var white = new Color32(255, 255, 255, 255);
+
+            // **扫描线填充**：逐行求多边形与扫描线的交点，排序后成对填充。
+            // 复杂度 O(H × 边数)，比逐像素 point-in-polygon 快几十倍 ——
+            // 所以敢上 1920×1080（否则 200 万像素 × 每个顶点会明显卡）。
+            var xs = new List<float>(16);
+
+            foreach (var poly in polys)
+            {
+                if (poly == null || poly.Length < 3)
+                {
+                    continue;
+                }
+
+                for (int y = 0; y < H; y++)
+                {
+                    float ny = (y + 0.5f) / H;
+                    xs.Clear();
+
+                    for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+                    {
+                        float yi = poly[i].y;
+                        float yj = poly[j].y;
+
+                        // 半开区间，避免顶点被算两次
+                        if ((yi > ny) == (yj > ny))
+                        {
+                            continue;
+                        }
+
+                        float t = (ny - yi) / (yj - yi);
+                        xs.Add(poly[i].x + t * (poly[j].x - poly[i].x));
+                    }
+
+                    if (xs.Count < 2)
+                    {
+                        continue;
+                    }
+
+                    xs.Sort();
+
+                    int row = y * W;
+                    for (int k = 0; k + 1 < xs.Count; k += 2)
+                    {
+                        int x0 = Mathf.Clamp(Mathf.CeilToInt(xs[k] * W - 0.5f), 0, W - 1);
+                        int x1 = Mathf.Clamp(Mathf.FloorToInt(xs[k + 1] * W - 0.5f), 0, W - 1);
+
+                        for (int x = x0; x <= x1; x++)
+                        {
+                            px[row + x] = white;
+                        }
+                    }
+                }
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply();
+
+            _polyMaskCache[cameraIndex] = tex;
+            return tex;
+        }
+
+        /// <summary>射线法判断点是否在多边形内。</summary>
+        private static bool PointInPolygon(Vector2[] poly, float x, float y)
+        {
+            bool inside = false;
+            int n = poly.Length;
+            for (int i = 0, j = n - 1; i < n; j = i++)
+            {
+                Vector2 pi = poly[i];
+                Vector2 pj = poly[j];
+                if (((pi.y > y) != (pj.y > y))
+                    && (x < (pj.x - pi.x) * (y - pi.y) / (pj.y - pi.y + 1e-9f) + pi.x))
+                {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
+        [System.Serializable]
+        private class OccluderJson
+        {
+            public OccluderRoomJson[] rooms;
+        }
+
+        [System.Serializable]
+        private class OccluderRoomJson
+        {
+            public int room;
+            public OccluderShapeJson[] shapes;
+        }
+
+        [System.Serializable]
+        private class OccluderShapeJson
+        {
+            public float[] points;
+        }
+
+        private void ApplyOccluderToCharacters(int cameraIndex)
+        {
+            if (_monitorCharacters == null)
+            {
+                return;
+            }
+
+            // 优先用**人工画的多边形**（更准），没有才退回程序生成的遮罩图
+            EnsureOccluderPolys();
+
+            Sprite mask = null;
+            Texture2D polyTex = GetPolygonMaskTexture(cameraIndex);
+            if (polyTex != null)
+            {
+                mask = Sprite.Create(polyTex, new Rect(0, 0, polyTex.width, polyTex.height),
+                    new Vector2(0.5f, 0.5f), 100f);
+            }
+            // 自动遮罩（render_monitor.py 输出的 mon_xx_occl.png）已停用 ——
+            // 现在**只用人工画的多边形**（菜单「奶龙 / 6. 编辑监控遮挡区」）。
+            // 没画就完全不遮挡。
+
+            for (int slot = 0; slot < _monitorCharacters.Length; slot++)
+            {
+                var img = _monitorCharacters[slot];
+                if (img == null)
+                {
+                    continue;
+                }
+
+                var mat = img.material;
+                if (mat == null)
+                {
+                    continue;
+                }
+
+                // ⚠️ **近档不裁剪** —— 它站在家具前面，被裁掉就穿帮了
+                bool clipThis = mask != null
+                    && slot < _slotIsNear.Length
+                    && !_slotIsNear[slot];
+
+                if (clipThis)
+                {
+                    mat.SetTexture("_Occluder", mask.texture);
+                    mat.SetFloat("_UseOccluder", 1f);
+
+                    // ⚠️ 这里**不要**再改 filterMode ——
+                    // 多边形遮罩纹理自己设的是 Point（硬边），
+                    // 早先这行把 Bilinear 写回去，覆盖了 Point，
+                    // 结果遮挡边缘又变成半透明（2026-10-18 踩过）。
+
+                    // 把立绘在**监控画面**里的归一化矩形传进去，
+                    // shader 用它把立绘 uv 映射到遮罩图的对应区域。
+                    //
+                    // 用世界角点反算，而不是拼 anchoredPosition ——
+                    // 立绘外面套着 mask 父节点、pivot 又在底部，纯算偏移会错。
+                    //
+                    // ⚠️ 基准必须是**监控图本身占的那块区域**，不是 overlay：
+                    // overlay 是 2241x925（铺满画布），而监控图是 16:9 的 1920x1080，
+                    // 两者宽高比不同，直接按 overlay 算会让采样坐标整体偏掉。
+                    var imgRect = img.rectTransform;
+                    var overlayRect = (RectTransform)_monitorOverlay.transform;
+
+                    // 监控图在 overlay 里的**实际显示区域**。
+                    // 图是 16:9，overlay 是 2241x925（宽高比 2.42:1），
+                    // 所以图会被拉伸铺满 —— 遮罩和背景图用的是同一张 1920x1080 内容，
+                    // 两者在 overlay 里占的是**同一块区域**，直接按 overlay 归一化即可。
+                    //
+                    // （早先担心的「宽高比不一致」其实不存在：拉伸对背景和遮罩
+                    //   是同时发生的，所以它们的归一化坐标仍然一一对应。）
+                    // ⚠️ 必须用 **InverseTransformPoint 转进 overlay 的本地空间**，
+                    // 不能拿世界坐标相减再除以 rect.size ——
+                    // Canvas 有缩放系数（CanvasScaler），世界单位 ≠ 本地单位，
+                    // 混用会算出**偏小且偏移**的矩形，遮挡就跑到画面别处去了
+                    // （2026-10-18 踩过：算出来 0.05 宽，实际应该是 0.09）。
+                    Vector3[] corners = new Vector3[4];
+                    imgRect.GetWorldCorners(corners);
+
+                    Rect local = overlayRect.rect;
+
+                    Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
+                    Vector2 max = new Vector2(float.MinValue, float.MinValue);
+                    for (int ci = 0; ci < 4; ci++)
+                    {
+                        Vector3 p = overlayRect.InverseTransformPoint(corners[ci]);
+                        min.x = Mathf.Min(min.x, p.x);
+                        min.y = Mathf.Min(min.y, p.y);
+                        max.x = Mathf.Max(max.x, p.x);
+                        max.y = Mathf.Max(max.y, p.y);
+                    }
+
+                    // 本地坐标 → 0..1（以 overlay 左下角为原点）
+                    float u0 = (min.x - local.xMin) / local.width;
+                    float du = (max.x - min.x) / local.width;
+
+                    // 纵向：UI 的 y 向上、纹理 v 也向上（v=0 是纹理**底行**），
+                    // 而且立绘 sprite 的 texcoord.y = 0 对应它的**底边**。
+                    //
+                    // shader 里 suv.y = v0 + texcoord.y * dv，所以：
+                    //   texcoord.y=0（立绘底）→ 要采到遮罩的「立绘底所在高度」
+                    //   ⇒ v0 必须是**底边**的归一化高度，不是顶边的！
+                    //
+                    // ⚠️ 早先这里写成 1-topNorm（顶边），整个采样区被抬高了一个 dv，
+                    // 结果角色完全采不到家具那块 —— 遮挡看着像"没生效"（2026-10-18）。
+                    float bottomNorm = (min.y - local.yMin) / local.height;
+                    float topNorm = (max.y - local.yMin) / local.height;
+                    float dv = topNorm - bottomNorm;
+                    float v0 = bottomNorm;
+
+                    mat.SetVector("_OccluderRect", new Vector4(u0, v0, du, dv));
+                }
+                else
+                {
+                    mat.SetFloat("_UseOccluder", 0f);
+                }
+            }
         }
 
         /// <summary>某个敌人在某机位上的固定大小系数（0.88~1.06，确定性）。</summary>
@@ -2805,15 +3555,45 @@ namespace NailongFNAF.UI
 
             for (int i = 0; i < _monitorCharacters.Length; i++)
             {
+                // 每个敌人外面套一层**空父节点**（只有 RectTransform，**没有 RectMask2D**）。
+                //
+                // ⚠️ **千万不要加 RectMask2D** —— 它是 IMaterialModifier，
+                // UGUI 的 materialForRendering 遇到它会换成模板材质，
+                // **直接忽略我们自定义的 shader**，遮挡完全不生效。
+                // 表现是「开着遮挡但敌人一个像素都没少」（2026-10-18 踩了很久）。
+                //
+                // 现在的裁剪全靠 MonitorCharacter.shader 逐像素 clip，不需要 RectMask2D。
+                var maskGo = new GameObject("MonitorCharacterMask" + i,
+                    typeof(RectTransform));
+                maskGo.transform.SetParent(_monitorOverlay.transform, false);
+
+                // 保险：场景里若残留旧的 RectMask2D（早期版本建的），一并清掉
+                var staleMask = maskGo.GetComponent<RectMask2D>();
+                if (staleMask != null)
+                {
+                    DestroyImmediate(staleMask);
+                }
+
+                var maskRect = maskGo.GetComponent<RectTransform>();
+                maskRect.anchorMin = new Vector2(0.5f, 0f);
+                maskRect.anchorMax = new Vector2(0.5f, 0f);
+                maskRect.pivot = new Vector2(0.5f, 0f);
+                maskRect.anchoredPosition = Vector2.zero;
+                maskRect.sizeDelta = new Vector2(1920f, MonitorCharacterHeight + 120f);
+
                 var charGo = new GameObject("MonitorCharacter" + i,
                     typeof(RectTransform), typeof(Image));
-                charGo.transform.SetParent(_monitorOverlay.transform, false);
+                charGo.transform.SetParent(maskGo.transform, false);
 
                 var charRect = charGo.GetComponent<RectTransform>();
                 charRect.anchorMin = new Vector2(0.5f, 0f);
                 charRect.anchorMax = new Vector2(0.5f, 0f);
                 charRect.pivot = new Vector2(0.5f, 0f);
-                charRect.anchoredPosition = new Vector2(0f, 46f);
+                // ⚠️ 立绘底部要**高于家具遮罩的顶边**，否则整个人都被家具挡住。
+                // 遮罩白区在画面下部约 27%（从底部算 0.106~0.379 归一化），
+                // overlay 高 925 → 遮罩顶边约在 350px 处。
+                // 把立绘底放在 300 左右：下半截被桌子挡住，上半身露出来。
+                charRect.anchoredPosition = new Vector2(0f, 300f);
                 charRect.sizeDelta = new Vector2(260f, MonitorCharacterHeight);
 
                 var img = charGo.GetComponent<Image>();
@@ -2822,8 +3602,15 @@ namespace NailongFNAF.UI
                 img.raycastTarget = false;
                 img.color = Color.white;
 
+                // 用支持「遮挡遮罩」的材质 —— 每个槽位一份，互相独立
+                var shader = Shader.Find("NailongFNAF/MonitorCharacter");
+                if (shader != null)
+                {
+                    img.material = new Material(shader);
+                }
+
                 _monitorCharacters[i] = img;
-                charGo.SetActive(false);
+                maskGo.SetActive(false);
             }
 
             // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点

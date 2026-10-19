@@ -121,6 +121,7 @@ namespace NailongFNAF.EditorTools
         /// **顺序必须与 PrototypeScene.CameraNames 一致**。
         /// 缺哪张哪张留空，运行时退回色块。
         /// </summary>
+
         private static Sprite[] LoadMonitorFrames()
         {
             string[] names =
@@ -161,8 +162,27 @@ namespace NailongFNAF.EditorTools
                 var jumpscare = LoadSprite("char_" + code + "_jumpscare");
                 var blackout = LoadSprite("char_" + code + "_blackout");
 
+                // 按房间的专属姿势：char_<代号>_mon_1a / _mon_1b / … 有就接，没有留空
+                var roomPoses = new Sprite[PrototypeScene.RoomCodeCount];
+                bool anyRoomPose = false;
+                for (int cam = 0; cam < roomPoses.Length; cam++)
+                {
+                    string room = PrototypeScene.RoomCode(cam);
+                    if (string.IsNullOrEmpty(room))
+                    {
+                        continue;
+                    }
+
+                    roomPoses[cam] = LoadSprite("char_" + code + "_" + room);
+                    if (roomPoses[cam] != null)
+                    {
+                        anyRoomPose = true;
+                    }
+                }
+
                 if (idle == null && stare == null && peek == null && startled == null
-                    && angry == null && jumpscare == null && blackout == null)
+                    && angry == null && jumpscare == null && blackout == null
+                    && !anyRoomPose)
                 {
                     continue;
                 }
@@ -176,7 +196,8 @@ namespace NailongFNAF.EditorTools
                     Startled = startled,
                     Angry = angry,
                     Jumpscare = jumpscare,
-                    Blackout = blackout
+                    Blackout = blackout,
+                    RoomPoses = roomPoses
                 });
             }
 
@@ -212,6 +233,7 @@ namespace NailongFNAF.EditorTools
         /// 背景整段是不透明的大图（一转二十来张），反过来**必须压缩**，
         /// 不然光背景就吃掉一百多 MB 显存。两边都是踩过坑的结论，别对调。
         /// </summary>
+
         private static void EnsureSpriteImport(string path, bool needsAlpha)
         {
             if (string.IsNullOrEmpty(path))

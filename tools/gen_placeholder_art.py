@@ -696,6 +696,11 @@ def render_dirs(dirs, tex, seed, dark, exposure, w, h, proj, vig=True, props=Tru
     color = post(color, seed, dark, exposure, w, h, vig=vig)
     return Image.fromarray((color * 255).astype(np.uint8), "RGB") \
         .filter(ImageFilter.GaussianBlur(0.6))
+    result = Image.fromarray((color * 255).astype(np.uint8), "RGB") \
+        .filter(ImageFilter.GaussianBlur(0.6))
+
+    return result, mask_img
+
 
 
 def post(color, seed, dark, exposure, w, h, vig=True):

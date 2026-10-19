@@ -409,7 +409,7 @@ def main():
         img = render_shot(name)
         path = os.path.join(OUT_DIR, "mon_%s.png" % name)
         img.save(path)
-        print("渲好 %s → %s" % (name, path))
+        print("rendered %s -> %s" % (name, path))
 
 
 if __name__ == "__main__":
