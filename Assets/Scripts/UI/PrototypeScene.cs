@@ -667,6 +667,9 @@ namespace NailongFNAF.UI
         /// <summary>这一轮说话演到什么时候（用 unscaledTime，暂停也能收起）。</summary>
         private float _naibaoHideAt;
 
+        /// <summary>死亡时钉在屏幕上的那句道歉（已显示的那一句；换局时清空）。</summary>
+        private string _naibaoApologyShown;
+
         /// <summary>立绘缓存：文件名 → 运行时切出来的 Sprite。</summary>
         private readonly Dictionary<string, Sprite> _naibaoSprites = new Dictionary<string, Sprite>();
 
@@ -3267,6 +3270,29 @@ namespace NailongFNAF.UI
             {
                 return;
             }
+            // 因她而死：道歉钉在屏幕上，不淡出也不换词，直到重开或回标题。
+            // 用「钉住的那句」而不是现算：人死了之后计时不再走，归因窗口过期也只是巧合。
+            if (gm.HasBeenCaught && !string.IsNullOrEmpty(gm.NaibaoApologyLine))
+            {
+                if (_naibaoApologyShown != gm.NaibaoApologyLine)
+                {
+                    _naibaoApologyShown = gm.NaibaoApologyLine;
+                    ShowNaibaoLine(gm.NaibaoApologyLine, NaibaoPose.Huffy, 0f);
+                    _naibaoHideAt = float.PositiveInfinity;
+                }
+
+                _naibaoGroup.alpha = Mathf.MoveTowards(_naibaoGroup.alpha, 1f,
+                    Time.unscaledDeltaTime * 4f);
+                return;
+            }
+
+            if (_naibaoApologyShown != null)
+            {
+                // 重开或回标题了：道歉收起来，别让它一直钉在屏幕上
+                _naibaoApologyShown = null;
+                _naibaoHideAt = 0f;
+            }
+
             bool alive = gm.Naibao != null && !gm.HasBeenCaught;
             if (!alive)
             {
@@ -3293,21 +3319,38 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // 有持续时间的动作（抢监控、偷加耗电）多留一会儿，纯说话就留 6 秒
+            float hold = cue.Seconds > 0f ? cue.Seconds + 3.5f : 6f;
+            ShowNaibaoLine(cue.Line, cue.Pose, hold);
+        }
+
+        /// <summary>
+        /// 换立绘 + 换台词。<paramref name="hold"/> ≤ 0 表示「别动收起时间」
+        /// —— 死亡道歉用它把卡片钉在屏幕上。
+        /// </summary>
+        private void ShowNaibaoLine(string line, NaibaoPose pose, float hold)
+        {
+            if (line == null)
+            {
+                return;
+            }
+
             if (_naibaoLine != null)
             {
-                _naibaoLine.text = cue.Line;
+                _naibaoLine.text = line;
             }
 
             if (_naibaoPortrait != null)
             {
-                Sprite sprite = NaibaoSprite(cue.Pose);
+                Sprite sprite = NaibaoSprite(pose);
                 _naibaoPortrait.sprite = sprite;
                 _naibaoPortrait.enabled = sprite != null;
             }
 
-            // 有持续时间的动作（抢监控、偷加耗电）多留一会儿，纯说话就留 6 秒
-            float hold = cue.Seconds > 0f ? cue.Seconds + 3.5f : 6f;
-            _naibaoHideAt = Time.unscaledTime + hold;
+            if (hold > 0f)
+            {
+                _naibaoHideAt = Time.unscaledTime + hold;
+            }
         }
 
         /// <summary>

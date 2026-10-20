@@ -72,6 +72,9 @@ namespace NailongFNAF.Core
         /// <summary>奶包偷偷加一档用电的剩余秒数。</summary>
         private float _naibaoUsageTimer;
 
+        /// <summary>「这口锅是不是奶包的」—— 她动过设备、玩家又在窗口内死掉，就算她头上。</summary>
+        private readonly NaibaoApology _naibaoApology = new NaibaoApology();
+
         /// <summary>
         /// 手电筒是否正亮着 —— **按住才亮，松手就灭**（不是点击切换）。
         /// 用来照正门外的噜噜，见 <see cref="SetFlashlight"/>。
@@ -105,6 +108,13 @@ namespace NailongFNAF.Core
         /// <summary>出场流水号：每来一次 +1，UI 靠它判断「这是新的一句」。</summary>
         public int NaibaoCueSerial { get; private set; }
 
+        /// <summary>
+        /// 玩家死的那一刻就钉住的道歉（死因算她的才有值）。
+        /// 钉在 <see cref="MarkCaught"/> 上而不是现算：人死了之后计时不再走，
+        /// 但 UI 也不能指望「窗口还在」这种巧合。
+        /// </summary>
+        public string NaibaoApologyLine { get; private set; }
+
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
         {
@@ -130,6 +140,9 @@ namespace NailongFNAF.Core
         public void MarkCaught()
         {
             HasBeenCaught = true;
+
+            // 死因归到奶包头上？那就把她这句道歉钉住，死亡面板会显示
+            NaibaoApologyLine = _naibaoApology.CulpableLine();
 
             // 结算彩蛋要看「死在第几个小时」——抓到的这一帧就把时刻钉住
             if (Stats != null && Clock != null)
@@ -195,6 +208,7 @@ namespace NailongFNAF.Core
             float dt = Time.deltaTime;
             LastGainAge += dt;
             LastNaibaoCueAge += dt;
+            _naibaoApology.Tick(dt);
 
             // 奶包：引导期到点说话，之后到点手欠。她只在玩家还能动的时候闹
             TickNaibao(dt);
@@ -321,6 +335,9 @@ namespace NailongFNAF.Core
             LastNaibaoCue = cue;
             LastNaibaoCueAge = 0f;
             NaibaoCueSerial++;
+
+            // 归因账本：她动了设备就记一笔，玩家在窗口内死掉就算她的锅（见 NaibaoApology）
+            _naibaoApology.Note(cue.Action);
         }
 
         /// <summary>重开一夜。</summary>
@@ -340,6 +357,8 @@ namespace NailongFNAF.Core
                 Naibao.Reset();
             }
             LastNaibaoCueAge = 0f;
+            _naibaoApology.Clear();
+            NaibaoApologyLine = null;
 
             LeftDoorClosed = false;
             RightDoorClosed = false;
@@ -378,6 +397,8 @@ namespace NailongFNAF.Core
             Naibao = director;
             LastNaibaoCue = default(NaibaoCue);
             LastNaibaoCueAge = 0f;
+            _naibaoApology.Clear();
+            NaibaoApologyLine = null;
         }
 
         // ---------------------------------------------------------------

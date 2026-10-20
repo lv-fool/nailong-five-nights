@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using NailongFNAF.Gameplay;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -292,9 +293,37 @@ namespace NailongFNAF.Diagnostics
                 Snap("15_naibao_mischief");
                 ReportNaibao("手欠");
             }
-            else if (_step == 23 && elapsed > 31.6f)
+            else if (_step == 23 && elapsed > 30.4f)
             {
                 _step = 24;
+
+                // 因她而死：先让她按住监控，再被抓住 —— 她该道歉
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                var cue = new NaibaoCue
+                {
+                    Action = NaibaoAction.MonitorGrab,
+                    Pose = NaibaoPose.Peek,
+                    Line = "这个机位我替你看看……",
+                    Seconds = 2.6f,
+                };
+
+                Invoke(gm, "ApplyNaibaoCue", new object[] { cue });
+                Invoke(gm, "MarkCaught", null);
+
+                if (gm != null)
+                {
+                    Debug.Log("SMOKE: 因奶包而死 道歉 = [" + Get(gm, "NaibaoApologyLine") + "]");
+                }
+            }
+            else if (_step == 24 && elapsed > 31.8f)
+            {
+                _step = 25;
+                Snap("16_naibao_apology");
+                ReportNaibao("道歉");
+            }
+            else if (_step == 25 && elapsed > 33.0f)
+            {
+                _step = 26;
                 Finish();
             }
         }
