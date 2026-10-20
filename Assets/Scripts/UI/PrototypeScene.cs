@@ -3841,10 +3841,13 @@ namespace NailongFNAF.UI
             main.playOnAwake = false;
             main.loop = true;
             main.duration = 10f;
-            main.startLifetime = 0.12f;    // 短命 → 闪一下就灭，像噪点
+            // 短命 + 高密度 = 持续的静电闪烁。
+            // lifetime 短到 0.06~0.10 秒，配合每帧大量发射，
+            // 看起来就是「整片雪花在跳」而不是「一堆点慢慢移动」。
+            main.startLifetime = 0.1f;
             main.startSpeed = 0f;          // 不动：原地闪才有「卡住的影像」感
-            main.startSize = 0.035f;       // 米制，几个像素大小
-            main.maxParticles = 600;
+            main.startSize = 0.02f;
+            main.maxParticles = 4000;      // 要能铺满整个人形
             main.simulationSpace = ParticleSystemSimulationSpace.Local;
             main.startColor = new Color(1f, 1f, 1f, 0f);
 
@@ -3887,10 +3890,13 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 从立绘 alpha 通道提取**不透明区域的轮廓点**（局部单位坐标）。
+        /// 从立绘 alpha 通道提取**所有不透明像素点**（归一化坐标）。
         ///
-        /// 逐像素扫：不透明、且上下左右至少一个邻居透明 → 边缘点。
-        /// 跳步采样抽稀到合理数量 —— 粒子再多也看不出来，反而拖性能。
+        /// 注意是**整个身体**，不是只有轮廓 —— 目标是「电视雪花屏」那种
+        /// 密实的静电噪声铺满人形，而不是沿边缘点几个亮点。
+        /// 透明区域天然被排除（alpha<=40 跳过），所以形状仍然贴合角色。
+        ///
+        /// 跳步采样控制在几千个点：够密才像噪声，太多则拖性能。
         /// 结果按敌人缓存（贴图不变，算一次就够）。
         /// </summary>
         private Vector3[] GhostOutlineOf(EnemyId id, Sprite sprite)
@@ -3913,34 +3919,25 @@ namespace NailongFNAF.UI
             int h = tex.height;
             var px = tex.GetPixels32();
 
-            var points = new List<Vector3>(1024);
+            var points = new List<Vector3>(4096);
 
-            int step = Mathf.Max(1, Mathf.RoundToInt(Mathf.Sqrt((float)w * h / 1500f)));
+            // 采样密度：控制在 3000~6000 个点。
+            // 太少会像「撒了几粒盐」，太多粒子系统撑不住；
+            // 3000+ 配合短寿命闪烁，视觉上就是一整片雪花。
+            const int TargetPoints = 4000;
+            int step = Mathf.Max(1, Mathf.RoundToInt(Mathf.Sqrt((float)w * h / TargetPoints)));
 
-            float unitW = sprite.rect.width / sprite.pixelsPerUnit;
-            float unitH = sprite.rect.height / sprite.pixelsPerUnit;
-
-            for (int y = step; y < h - step; y += step)
+            for (int y = 0; y < h; y += step)
             {
-                for (int x = step; x < w - step; x += step)
+                for (int x = 0; x < w; x += step)
                 {
-                    int i = y * w + x;
-                    if (px[i].a <= 40)
+                    if (px[y * w + x].a <= 40)
                     {
-                        continue;
+                        continue;   // 透明区域跳过 → 形状仍贴合角色
                     }
 
-                    bool edge = px[i - step].a <= 40 || px[i + step].a <= 40
-                             || px[(y - step) * w + x].a <= 40
-                             || px[(y + step) * w + x].a <= 40;
-
-                    if (!edge)
-                    {
-                        continue;
-                    }
-
-                    // 归一化 -0.5..0.5 —— 粒子系统会按立绘的实际尺寸缩放，
-                    // 这样不用关心贴图原始多大（它们有 10 米那么宽，直接给米会散太开）
+                    // 归一化 -0.5..0.5 —— 粒子系统按立绘实际尺寸缩放，
+                    // 这样不用关心贴图原始多大
                     float u = (x + 0.5f) / w - 0.5f;
                     float v = (y + 0.5f) / h - 0.5f;
 
@@ -3990,26 +3987,25 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 轮廓是归一化的 -0.5..0.5，按立绘的实际米制尺寸放大，
-            // 并和立绘用同一个 localScale（左右镜像也要一致）
-            if (sprite != null)
+            // ⚠️ 轮廓点是**归一化的 -0.5..0.5**（占立绘框的比例），
+            // 所以只要乘立绘的 localScale，就自动和它同尺寸、同镜像。
+            //
+            // 早先这里又乘了 sprite.bounds.size（那已经是米制，10 米），
+            // 结果粒子被放大到十几米 —— 屏幕上只剩几个巨大的白点，
+            // 完全看不出是雪花。归一化坐标千万不要再乘米制尺寸。
+            var sr = FindDoorSprite(id);
+            if (sr != null)
             {
-                var character = id;
-                var sr = FindDoorSprite(character);
-                Vector3 size = sprite.bounds.size;
-                ghost.transform.localScale = sr != null
-                    ? new Vector3(Mathf.Abs(sr.transform.localScale.x) * size.x,
-                                  sr.transform.localScale.y * size.y, 1f)
-                    : new Vector3(size.x, size.y, 1f);
-
-                if (sr != null)
-                {
-                    ghost.transform.position = sr.transform.position;
-                }
+                Vector3 s = sr.transform.localScale;
+                ghost.transform.localScale = new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), 1f);
+                ghost.transform.position = sr.transform.position;
             }
 
+            // 每帧发射量：按轮廓点数的一个比例，控制在几十~两百之间。
+            // 目标不是「够用」，而是「密到看不出单个粒子」——
+            // 那就是雪花屏的观感。
             int count = Mathf.Clamp(
-                Mathf.CeilToInt(outline.Length * 0.06f * (alpha / GhostMaxAlpha)), 1, 40);
+                Mathf.CeilToInt(outline.Length * 0.09f * (alpha / GhostMaxAlpha)), 10, 220);
 
             var emit = new ParticleSystem.EmitParams();
             emit.applyShapeToPosition = false;
@@ -4021,8 +4017,10 @@ namespace NailongFNAF.UI
             {
                 emit.position = outline[Random.Range(0, outline.Length)];
                 emit.startColor = new Color(1f, 1f, 1f, alpha * Random.Range(0.55f, 1f));
-                emit.startSize = Random.Range(0.012f, 0.03f);
-                emit.startLifetime = Random.Range(0.08f, 0.16f);
+                // 尺寸给得很小（归一化空间，会被 localScale 放大）：
+                // 要的是「细碎噪点」，不是「发光小球」
+                emit.startSize = Random.Range(0.006f, 0.016f);
+                emit.startLifetime = Random.Range(0.05f, 0.1f);
                 ghost.Emit(emit, 1);
             }
         }
