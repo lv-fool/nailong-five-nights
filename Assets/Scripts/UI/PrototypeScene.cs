@@ -331,7 +331,7 @@ namespace NailongFNAF.UI
         /// 照官方处理：切到它就一片黑、只留机位名，全靠听。
         /// 奶龙也不去这里（见 <c>EnemyDirector._nailongSkipCameras</c>）。
         /// </summary>
-        private const int KitchenCameraIndex = 9;
+        private const int KitchenCameraIndex = NightStats.KitchenCameraIndex;
 
         /// <summary>
         /// 每个机位的**房间代号**（用于立绘文件名，如 char_nailong_mon_1b.png）。
