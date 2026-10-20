@@ -110,6 +110,7 @@ namespace NailongFNAF.Gameplay
         private float _blackoutMusicSecondsOverride;
         private GameManager _game;
         private bool _attackFired;
+        private bool _nailongWatchedLastFrame;
 
         /// <summary>
         /// 永夜模式的加压系数：0 = 不加压，0.3 = 所有敌人活动度各涨三成。
@@ -417,6 +418,7 @@ namespace NailongFNAF.Gameplay
 
         private void OnGameRestarted()
         {
+            _nailongWatchedLastFrame = false;
             Build();
         }
 
@@ -487,6 +489,19 @@ namespace NailongFNAF.Gameplay
             if (drain > 0f)
             {
                 game.Power.DrainAmount(drain);
+            }
+
+            // 「和奶龙对上眼」：它从没被看到变成被看到的次数（彩蛋成就用）
+            if (_nailong != null && game.Stats != null)
+            {
+                bool watched = _nailong.IsBeingWatched;
+
+                if (watched && !_nailongWatchedLastFrame)
+                {
+                    game.Stats.NoteNailongLook();
+                }
+
+                _nailongWatchedLastFrame = watched;
             }
 
             // 有人突破防御 → 先标记「这侧门灯废了」，**暂不跳杀**

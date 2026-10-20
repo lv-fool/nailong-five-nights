@@ -219,6 +219,48 @@ namespace NailongFNAF.Diagnostics
             else if (_step == 16 && elapsed > 21.5f)
             {
                 _step = 17;
+
+                // 彩蛋：两列 19 条，彩蛋未解锁应该是 ???
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnAchievementsClicked", null);
+                Snap("11_achv_locked");
+                ReportAchievements();
+            }
+            else if (_step == 17 && elapsed > 22.7f)
+            {
+                _step = 18;
+
+                // 解锁一条彩蛋，看名字会不会从 ??? 变回真名
+                System.Type store = FindType("NailongFNAF.Gameplay.AchievementStore");
+                store.GetMethod("Unlock").Invoke(null, new object[] { "door_keeper" });
+
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "RefreshAchievementsView", null);
+                Snap("12_achv_unlocked");
+                ReportAchievements();
+            }
+            else if (_step == 18 && elapsed > 24.0f)
+            {
+                _step = 19;
+
+                // \u6b7b\u5728 5:50 \u4e4b\u540e\uff1a\u9a8c\u201c\u5dee\u4e00\u5206\u949f\u201d\u7684\u5f69\u86cb\u548c\u65c1\u767d
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                object stats = Get(gm, "Stats");
+                stats.GetType().GetMethod("MarkEnded", new[] { typeof(float), typeof(float) })
+                    .Invoke(stats, new object[] { 85f * 5.9f, 85f });
+
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "ShowLoseEnd", null);
+                Snap("13_lose_egg");
+
+                object body = Get(scene, "_endBodyText");
+                Debug.Log("SMOKE: \u5931\u8d25\u7ed3\u7b97\u6587\u6848 = [" +
+                          (body != null ? Get(body, "text") : null) + "]");
+            }
+            else if (_step == 19 && elapsed > 26.0f)
+            {
+                _step = 20;
                 Finish();
             }
         }
@@ -278,14 +320,21 @@ namespace NailongFNAF.Diagnostics
             object scene = Instance("NailongFNAF.UI.PrototypeScene");
             object count = Get(scene, "_achvCountText");
             object firstTitle = null;
-            object titles = Get(scene, "_achvTitleTexts");
+            object titles = Get(scene, "_achvLineTexts");
             if (titles is System.Array && ((System.Array)titles).Length > 0)
             {
                 firstTitle = ((System.Array)titles).GetValue(0);
             }
 
+            object eggTitle = null;
+            if (titles is System.Array && ((System.Array)titles).Length > 9)
+            {
+                eggTitle = ((System.Array)titles).GetValue(9);
+            }
+
             Debug.Log("SMOKE: 成就计数 = [" + (count != null ? Get(count, "text") : null) +
-                      "] 第一条 = [" + (firstTitle != null ? Get(firstTitle, "text") : null) + "]");
+                      "] 第一条 = [" + (firstTitle != null ? Get(firstTitle, "text") : null) +
+                      "] 第 10 条 = [" + (eggTitle != null ? Get(eggTitle, "text") : null) + "]");
         }
 
         private void ReportPause()

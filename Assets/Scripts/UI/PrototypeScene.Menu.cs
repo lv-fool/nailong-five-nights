@@ -1,4 +1,4 @@
-using NailongFNAF.Core;
+﻿using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
@@ -67,8 +67,7 @@ namespace NailongFNAF.UI
 
         // 成就界面：计数 + 每行的名称 / 描述（顺序照 AchievementCatalog.All）
         private Text _achvCountText;
-        private readonly Text[] _achvTitleTexts = new Text[AchievementCatalog.All.Length];
-        private readonly Text[] _achvDescTexts = new Text[AchievementCatalog.All.Length];
+        private readonly Text[] _achvLineTexts = new Text[AchievementCatalog.All.Length];
 
         // 结算面板文案
         private Text _endTitleText;
@@ -311,8 +310,9 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 成就列表界面：逐条列出名称 / 条件 / 是否已解锁。
-        /// 9 条一行排得下；以后要加就改成滚动列表。
+        /// 成就列表界面：两列，一条一行「★ 名字 · 条件」。
+        /// 19 条（9 普通 + 10 彩蛋）单列排不下，所以按 10 条一列分两栏；
+        /// 彩蛋未解锁时名字和条件都是 ???。
         /// </summary>
         private void BuildAchievementsView()
         {
@@ -323,18 +323,20 @@ namespace NailongFNAF.UI
             _achvCountText = MakeLabel(_achvView.transform, "", 22, new Color(0.7f, 0.7f, 0.75f),
                 new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 40f));
 
+            int rowsPerColumn = (AchievementCatalog.All.Length + 1) / 2;
+
             for (int i = 0; i < AchievementCatalog.All.Length; i++)
             {
-                float y = 0.70f - i * 0.062f;
+                int column = i < rowsPerColumn ? 0 : 1;
+                int row = i % rowsPerColumn;
 
-                Text title = MakeLabel(_achvView.transform, "", 24, Color.white,
-                    new Vector2(0.40f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(420f, 44f));
-                Text desc = MakeLabel(_achvView.transform, "", 20, new Color(0.6f, 0.6f, 0.65f),
-                    new Vector2(0.68f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 40f));
-                title.raycastTarget = false;
-                desc.raycastTarget = false;
-                _achvTitleTexts[i] = title;
-                _achvDescTexts[i] = desc;
+                float x = column == 0 ? 0.26f : 0.74f;
+                float y = 0.66f - row * 0.050f;
+
+                Text line = MakeLabel(_achvView.transform, "", 16, Color.white,
+                    new Vector2(x, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(720f, 34f));
+                line.raycastTarget = false;
+                _achvLineTexts[i] = line;
             }
 
             MakeMenuButton(_achvView.transform, "返回", Vector2.zero,
@@ -353,16 +355,15 @@ namespace NailongFNAF.UI
             {
                 AchievementCatalog.Def def = AchievementCatalog.All[i];
                 bool unlocked = AchievementStore.IsUnlocked(def.Id);
+                bool masked = AchievementCatalog.ShouldMask(def);
 
-                // 已解锁的亮金、没解锁的灰下去，名字前面打个记号
-                _achvTitleTexts[i].text = (unlocked ? "★ " : "☆ ") + def.Title;
-                _achvTitleTexts[i].color = unlocked
+                string title = masked ? "???" : def.Title;
+                string desc = masked ? "???" : def.Description;
+
+                _achvLineTexts[i].text = (unlocked ? "★ " : "☆ ") + title + "   ·   " + desc;
+                _achvLineTexts[i].color = unlocked
                     ? new Color(0.95f, 0.85f, 0.3f)
-                    : new Color(0.45f, 0.45f, 0.5f);
-                _achvDescTexts[i].text = def.Description;
-                _achvDescTexts[i].color = unlocked
-                    ? new Color(0.7f, 0.7f, 0.75f)
-                    : new Color(0.4f, 0.4f, 0.45f);
+                    : (masked ? new Color(0.38f, 0.38f, 0.42f) : new Color(0.5f, 0.5f, 0.56f));
             }
         }
 
@@ -999,8 +1000,10 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 通关结算时检查成就，返回要追加在结算文案后面的一行（没有新成就就是空串）。
+        /// 通关结算时检查成就，返回要追加在结算文案后面的几行（没有新成就就是空串）。
         /// 判定都靠 GameManager / EnemyDirector 的现状快照，不碰流程。
+        ///
+        /// 普通成就是「打到哪里」，彩蛋（隐藏成就）看的是「怎么活下来的」。
         /// </summary>
         private string CheckWinAchievements(GameManager gm, int current, bool custom, bool wasLast)
         {
@@ -1009,14 +1012,23 @@ namespace NailongFNAF.UI
                 return string.Empty;
             }
 
-            var newly = new System.Collections.Generic.List<string>();
+            var newly = new System.Collections.Generic.List<AchievementCatalog.Def>();
+            NightStats stats = gm.Stats;
 
             if (custom)
             {
-                // 全 20 才给「终极挑战」（照 FNAF 1 的 20/20/20/20）
-                if (CustomNightConfig.Load().TotalLevel() >= EnemyBrain.MaxActivityLevel * EnemyIds.All.Length)
+                int total = CustomNightConfig.Load().TotalLevel();
+                int max = EnemyBrain.MaxActivityLevel * EnemyIds.All.Length;
+
+                if (total >= max)
                 {
                     TryUnlock(AchievementCatalog.CustomMax, newly);
+
+                    // 彩蛋「满格」：四只全 20，通关时还剩一格拉碴电
+                    if (gm.Power != null && gm.Power.Level >= 1f)
+                    {
+                        TryUnlock(AchievementCatalog.FullHouse, newly);
+                    }
                 }
             }
             else
@@ -1042,16 +1054,72 @@ namespace NailongFNAF.UI
                 TryUnlock(AchievementCatalog.LuluMaster, newly);
             }
 
-            if (newly.Count == 0)
+            // 彩蛋：这一夜的账本
+            if (stats != null)
+            {
+                if (stats.DoorToggles >= 12) TryUnlock(AchievementCatalog.DoorKeeper, newly);
+                if (stats.MonitorToggles == 0) TryUnlock(AchievementCatalog.NoLookUp, newly);
+                if (stats.LightToggles == 0) TryUnlock(AchievementCatalog.NoLight, newly);
+
+                int cameraCount = _enemyDirector != null ? _enemyDirector.CameraCount : 0;
+                if (stats.HasVisitedAll(cameraCount)) TryUnlock(AchievementCatalog.EveryCorner, newly);
+
+                if (stats.KitchenSeconds >= 20f) TryUnlock(AchievementCatalog.KitchenSilence, newly);
+                if (stats.NailongLooks >= 3) TryUnlock(AchievementCatalog.ItBlinksFirst, newly);
+                if (stats.TotalSwitchToggles >= 40) TryUnlock(AchievementCatalog.FingerRhythm, newly);
+            }
+
+            return AchievementLine(newly);
+        }
+
+        /// <summary>
+        /// 失败结算时的彩蛋：只判「死在第几个小时」那两条。
+        /// 永夜模式没有 6 点，不判。
+        /// </summary>
+        private string CheckLoseAchievements(GameManager gm)
+        {
+            if (gm == null || gm.EndlessMode || gm.Stats == null)
             {
                 return string.Empty;
             }
 
-            return "\n新成就：" + string.Join("、", newly.ToArray());
+            var newly = new System.Collections.Generic.List<AchievementCatalog.Def>();
+
+            if (gm.Stats.EndedAfterHour(5.8333f)) TryUnlock(AchievementCatalog.FiveFiftyNine, newly);
+            if (gm.Stats.EndedBeforeHour(0.5f)) TryUnlock(AchievementCatalog.ZeroTwenty, newly);
+
+            return AchievementLine(newly);
         }
 
-        /// <summary>解锁并在 <paramref name="newly"/> 里记下标题；不是新解锁就不记。</summary>
-        private static void TryUnlock(string id, System.Collections.Generic.List<string> newly)
+        /// <summary>把这次新解锁的成就拼成「新成就：xxx」，后面跟它们的世界观旁白。</summary>
+        private static string AchievementLine(System.Collections.Generic.List<AchievementCatalog.Def> newly)
+        {
+            if (newly == null || newly.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var titles = new System.Collections.Generic.List<string>();
+            foreach (AchievementCatalog.Def def in newly)
+            {
+                titles.Add(def.Title);
+            }
+
+            string line = "\n新成就：" + string.Join("、", titles.ToArray());
+
+            foreach (AchievementCatalog.Def def in newly)
+            {
+                if (!string.IsNullOrEmpty(def.Flavor))
+                {
+                    line += "\n「" + def.Flavor + "」";
+                }
+            }
+
+            return line;
+        }
+
+        /// <summary>解锁并在 <paramref name="newly"/> 里记下定义；不是新解锁就不记。</summary>
+        private static void TryUnlock(string id, System.Collections.Generic.List<AchievementCatalog.Def> newly)
         {
             if (!AchievementStore.Unlock(id))
             {
@@ -1059,7 +1127,10 @@ namespace NailongFNAF.UI
             }
 
             AchievementCatalog.Def def = AchievementCatalog.Find(id);
-            newly.Add(def != null ? def.Title : id);
+            if (def != null)
+            {
+                newly.Add(def);
+            }
         }
 
         private void ShowLoseEnd()
@@ -1085,9 +1156,9 @@ namespace NailongFNAF.UI
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
 
             _endTitleText.text = "你被抓住了";
-            _endBodyText.text = custom
+            _endBodyText.text = (custom
                 ? "自定义夜 失败 —— 再来一次。"
-                : NightName(current) + " 失败 —— 再来一次。";
+                : NightName(current) + " 失败 —— 再来一次。") + CheckLoseAchievements(gm);
             _endPrimaryLabel.text = custom ? "重试" : "重试本夜";
             _endPrimaryButton.interactable = true;
 
@@ -1117,15 +1188,13 @@ namespace NailongFNAF.UI
             }
 
             // 永夜成就：一局撑过 12 小时
-            var newly = new System.Collections.Generic.List<string>();
+            var newly = new System.Collections.Generic.List<AchievementCatalog.Def>();
             if (secondsPerHour > 0f && survived / secondsPerHour >= 12f)
             {
                 TryUnlock(AchievementCatalog.EndlessDozen, newly);
             }
 
-            string achievementLine = newly.Count == 0
-                ? string.Empty
-                : "\n新成就：" + string.Join("、", newly.ToArray());
+            string achievementLine = AchievementLine(newly);
 
             _endTitleText.text = isRecord ? "新纪录！" : "永夜模式结束";
             _endBodyText.text = "撑过 " + FormatSpan(survived, secondsPerHour)

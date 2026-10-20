@@ -67,6 +67,12 @@ namespace NailongFNAF.Core
         /// <summary>监控当前看着第几个机位（0 起）。</summary>
         public int CurrentCameraIndex { get; private set; }
 
+        /// <summary>
+        /// 这一夜的操作账本（关门次数、看过哪些机位、厨房待了多久…），
+        /// 给隐藏成就判定用。每 <see cref="Restart"/> 一份新的。
+        /// </summary>
+        public NightStats Stats { get; private set; }
+
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
         {
@@ -92,6 +98,12 @@ namespace NailongFNAF.Core
         public void MarkCaught()
         {
             HasBeenCaught = true;
+
+            // 结算彩蛋要看「死在第几个小时」——抓到的这一帧就把时刻钉住
+            if (Stats != null && Clock != null)
+            {
+                Stats.MarkEnded(Clock.ElapsedSeconds, Clock.SecondsPerHour);
+            }
         }
 
         /// <summary>
@@ -153,6 +165,17 @@ namespace NailongFNAF.Core
 
             Clock.Tick(dt);
 
+            // 彩蛋账本：厨房机位停留计时 + 天亮那一刻的结束时刻
+            if (Stats != null)
+            {
+                Stats.Tick(dt, MonitorUp, CurrentCameraIndex);
+
+                if (Clock.IsNightComplete && !Stats.HasEnded)
+                {
+                    Stats.MarkEnded(Clock.ElapsedSeconds, Clock.SecondsPerHour);
+                }
+            }
+
             // 断电、天亮、被抓到之后手电筒也要灭（按住状态可能来不及松手）
             if (!CanOperate())
             {
@@ -201,6 +224,7 @@ namespace NailongFNAF.Core
             Power = new PowerSystem(PowerSystem.InitialLevel);
             Clock = new NightClock(_secondsPerHour, EndlessMode);
             Recharge = EndlessMode ? new EndlessRecharge() : null;
+            Stats = new NightStats();
             LastGain = 0f;
             LastGainAge = 0f;
             SetPaused(false);
@@ -313,6 +337,11 @@ namespace NailongFNAF.Core
 
             CurrentCameraIndex = index;
             NoteAction(PlayerAction.Camera);
+
+            if (Stats != null)
+            {
+                Stats.NoteCamera(index);
+            }
         }
 
         /// <summary>按机位数量循环切换监控（供「下一个机位」按钮用）。</summary>
@@ -326,6 +355,11 @@ namespace NailongFNAF.Core
 
             CurrentCameraIndex = (CurrentCameraIndex + 1) % cameraCount;
             NoteAction(PlayerAction.Camera);
+
+            if (Stats != null)
+            {
+                Stats.NoteCamera(CurrentCameraIndex);
+            }
         }
 
         // ---------------- 操作入口（由 UI 按钮调用）----------------
@@ -336,6 +370,11 @@ namespace NailongFNAF.Core
             {
                 LeftDoorClosed = !LeftDoorClosed;
                 NoteAction(PlayerAction.Door);
+
+                if (Stats != null)
+                {
+                    Stats.NoteDoorToggle();
+                }
             }
         }
 
@@ -345,6 +384,11 @@ namespace NailongFNAF.Core
             {
                 RightDoorClosed = !RightDoorClosed;
                 NoteAction(PlayerAction.Door);
+
+                if (Stats != null)
+                {
+                    Stats.NoteDoorToggle();
+                }
             }
         }
 
@@ -354,6 +398,11 @@ namespace NailongFNAF.Core
             {
                 LeftLightOn = !LeftLightOn;
                 NoteAction(PlayerAction.Light);
+
+                if (Stats != null)
+                {
+                    Stats.NoteLightToggle();
+                }
             }
         }
 
@@ -363,6 +412,11 @@ namespace NailongFNAF.Core
             {
                 RightLightOn = !RightLightOn;
                 NoteAction(PlayerAction.Light);
+
+                if (Stats != null)
+                {
+                    Stats.NoteLightToggle();
+                }
             }
         }
 
@@ -372,6 +426,17 @@ namespace NailongFNAF.Core
             {
                 MonitorUp = !MonitorUp;
                 NoteAction(PlayerAction.Camera);
+
+                if (Stats != null)
+                {
+                    Stats.NoteMonitorToggle();
+
+                    // 升起来的这一眼就算看过当前机位
+                    if (MonitorUp)
+                    {
+                        Stats.NoteCamera(CurrentCameraIndex);
+                    }
+                }
             }
         }
 
