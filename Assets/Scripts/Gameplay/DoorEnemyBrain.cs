@@ -37,7 +37,17 @@ namespace NailongFNAF.Gameplay
         /// <summary>它盯的是哪一侧的门。</summary>
         public Side Side { get; private set; }
 
-        /// <summary>到门口后，门开着能撑多久（秒）。</summary>
+        /// <summary>
+        /// 到门口后的**「移动机会」间隔**（秒）—— 门开着还是关着都用它。
+        ///
+        /// 原版语义：敌人每次移动机会才做一次决定，
+        ///   门关着 → 这次机会用来退走
+        ///   门开着 → 这次机会用来动手
+        /// 所以它同时是「关门后多久才走」和「开门后多久才动手」。
+        ///
+        /// 名字沿用旧称 DoorGraceSeconds（大量引用和测试都在用），
+        /// 但含义已经从「开门宽限」扩展成「回合间隔」。
+        /// </summary>
         public float DoorGraceSeconds { get; private set; }
 
         /// <summary>已经站在门口多久（秒）。派生类（奶龙换机位时）要能清零，所以是 protected set。</summary>
@@ -175,6 +185,22 @@ namespace NailongFNAF.Gameplay
             }
         }
 
+        /// <summary>
+        /// 站在门口之后的行为 —— **照原版 FNAF 1 的回合制**。
+        ///
+        /// 关键：无论门开还是门关，它都不会「立刻」做反应，
+        /// 而是等到**下一次移动机会**（每 MoveIntervalSeconds 一次）才行动：
+        ///
+        ///   门关着 → 用这次机会**退走**
+        ///   门开着 → 用这次机会**动手**
+        ///
+        /// 所以玩家看到的是：
+        ///   · 关上门后它还要在门口站一会儿才走（不是一关就消失）
+        ///   · 打开门后它也不是立刻扑进来，得等下一次机会
+        ///
+        /// 早先的实现是「关门立刻退、开门立刻开始算动手计时」，
+        /// 等于关门即无敌、开门即必死，两头都没有喘息。
+        /// </summary>
         protected override void OnTick(float dt, EnemyContext ctx)
         {
             if (Stage < MaxStage)
@@ -182,18 +208,29 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
-            // 门关着 —— 直接挡回去
-            if (ctx.IsDoorClosed(Side))
+            // 到门口之后开始累计「一次移动机会」的时长
+            DoorTimer += dt;
+
+            // 还没到下一次机会 —— 不管门开还是门关，都先站着等。
+            // 用 DoorGraceSeconds（= 该角色自己的移动机会间隔）而不是
+            // MoveIntervalSeconds：后者是「走廊推进」的掷骰间隔，
+            // 两者在原版里是同一个数，但这里语义上要用门口那个。
+            if (DoorTimer < DoorGraceSeconds)
             {
-                Retreat();
                 return;
             }
 
-            DoorTimer += dt;
-            if (DoorTimer >= DoorGraceSeconds)
+            // 机会到了，根据此刻门的开关做决定
+            DoorTimer = 0f;
+
+            if (ctx.IsDoorClosed(Side))
             {
-                IsAttacking = true;
+                Retreat();   // 门关着：这次机会用来退走
+                return;
             }
+
+            // 门开着：这次机会用来动手
+            IsAttacking = true;
         }
 
         public override void Retreat()

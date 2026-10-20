@@ -320,6 +320,7 @@ MonoBehaviour:
   _sfxCameraSwitch: {fileID: 8300000, guid: 2cd1bd0533d000542adeca6773f52b71, type: 3}
   _sfxFootstep: {fileID: 8300000, guid: 60c5db299dbe95e449401f294719e97b, type: 3}
   _sfxPowerOut: {fileID: 8300000, guid: e93d27b4e029a1f41a671154f758dacc, type: 3}
+  _sfxLightReveal: {fileID: 0}
   _powerOutMusic: {fileID: 8300000, guid: 8e4a8e9f2f3bd3c4f8ab4deb7f8b3817, type: 3}
   _ambientVolume: 0.3
   _sfxVolume: 0.75
@@ -564,18 +565,6 @@ MonoBehaviour:
     - {fileID: 0}
     - {fileID: 0}
     - {fileID: 0}
-  _occluderMasks:
-  - {fileID: 21300000, guid: 3202633bc07a75644b09e472fc370579, type: 3}
-  - {fileID: 21300000, guid: e9f2dc06412cdbf4cae5a3f4c88a41c9, type: 3}
-  - {fileID: 21300000, guid: 3a2ecbf400079ba42af4172cc2b5f005, type: 3}
-  - {fileID: 21300000, guid: a8f70af681ad85347a1c4e4951bdfca8, type: 3}
-  - {fileID: 21300000, guid: bb80865f589e9e84c984bab121caa4e7, type: 3}
-  - {fileID: 21300000, guid: 68f4ec7b61a144c43a7c51750bf54cbf, type: 3}
-  - {fileID: 21300000, guid: b9a2840f232752b448d5fab7f6c94b1c, type: 3}
-  - {fileID: 21300000, guid: 2db6f8649a8206445a26caae29e1e8d6, type: 3}
-  - {fileID: 21300000, guid: 61d6e5d82bbb1d248abd70227ae22981, type: 3}
-  - {fileID: 0}
-  - {fileID: 21300000, guid: 7b72db8f10c621f48b9caa799b85f6df, type: 3}
 --- !u!4 &2125327511
 Transform:
   m_ObjectHideFlags: 0

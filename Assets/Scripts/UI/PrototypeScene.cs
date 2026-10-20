@@ -573,6 +573,33 @@ namespace NailongFNAF.UI
         private SpriteRenderer _enemySideRight;
         private SpriteRenderer _enemyFront;
 
+        /// <summary>
+        /// 「门关着但灯照到人」时的**轮廓雪花粒子**。
+        ///
+        /// 为什么用粒子：早先用一整块噪点贴图铺满立绘框，
+        /// 连**透明背景**都被雪花了，看起来像一块噪声板糊在门口。
+        /// 现在只在不透明区域的**边缘点**上撒粒子 —— 只有人形轮廓在闪。
+        /// </summary>
+        private ParticleSystem _ghostLeft;
+        private ParticleSystem _ghostRight;
+
+        /// <summary>虚影淡入淡出进度 0..1（每侧一个）。</summary>
+        private float _ghostAlphaLeft;
+        private float _ghostAlphaRight;
+
+        /// <summary>
+        /// 虚影淡入淡出速度（每秒）。
+        /// **10/秒 ≈ 0.1 秒到位** —— 灯一照到就窜出来，慢了没有惊吓感。
+        /// </summary>
+        private const float GhostFadeSpeed = 10f;
+
+        /// <summary>虚影峰值强度。</summary>
+        private const float GhostMaxAlpha = 0.5f;
+
+        /// <summary>已算好的轮廓点（按敌人缓存，贴图不变所以只算一次）。</summary>
+        private readonly Dictionary<EnemyId, Vector3[]> _ghostOutlineCache =
+            new Dictionary<EnemyId, Vector3[]>();
+
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
         private SpriteRenderer _doorLightLeft;
         private SpriteRenderer _doorLightRight;
@@ -668,6 +695,24 @@ namespace NailongFNAF.UI
         private Text _debugPowerText;
         private Image _jumpscareOverlay;
         private Image _jumpscareImage;
+
+        // ── 开灯照到人的反馈 ──────────────────────────────────────────
+
+        /// <summary>边缘红色脉冲层（全屏，平时 alpha=0）。</summary>
+        private Image _revealPulse;
+
+        /// <summary>脉冲已经播了多久（秒）；小于 0 表示没在播。</summary>
+        private float _revealPulseTime = -1f;
+
+        /// <summary>脉冲总时长 —— 要快，比残血呼吸急促得多。</summary>
+        private const float RevealPulseSeconds = 0.45f;
+
+        /// <summary>一次脉冲里闪几下 —— 2 下就有「抽了一下」的急促感。</summary>
+        private const int RevealPulseBeats = 2;
+
+        /// <summary>上一帧左右两侧「灯亮着 + 门开着 + 门口有人」。</summary>
+        private bool _sawEnemyLeft;
+        private bool _sawEnemyRight;
         private Text _jumpscareText;
         private RawImage _jumpscareVideoImage;
         private VideoPlayer _jumpscareVideo;
@@ -1150,12 +1195,31 @@ namespace NailongFNAF.UI
             ShowWorldCharacter(_enemySideLeft, leftPresent, leftId, CharacterPose.Idle, Side.Left);
             ShowWorldCharacter(_enemySideRight, rightPresent, rightId, CharacterPose.Idle, Side.Right);
 
+            // 门关着 + 灯亮 + 门口有人 → 轮廓雪花粒子（只勾勒人形，不糊背景）
+            Sprite leftArt = leftPresent ? ArtOf(leftId) : null;
+            Sprite rightArt = rightPresent ? ArtOf(rightId) : null;
+
+            UpdateGhostOverlay(_ghostLeft, ref _ghostAlphaLeft,
+                leftPresent && gm.LeftDoorClosed, leftId, leftArt);
+            UpdateGhostOverlay(_ghostRight, ref _ghostAlphaRight,
+                rightPresent && gm.RightDoorClosed, rightId, rightArt);
+
             ApplyFrontCharacter3D(gm);
 
             // 门洞外的灯：灯亮 → 门口亮起一团光（呼吸），灯灭 → 熄灭
             float breathe = 0.85f + Mathf.Sin(Time.time * 2.4f) * 0.15f;
             ApplyDoorLight(_doorLightLeft, gm.LeftLightOn, breathe);
             ApplyDoorLight(_doorLightRight, gm.RightLightOn, breathe);
+
+            // 开灯照到人的上升沿 → 音效 + 边缘红脉冲（门关着的那侧不算）
+            UpdateLightReveal(gm);
+        }
+
+        /// <summary>取某只敌人 Idle 立绘（轮廓提取要用它的 alpha 通道）。</summary>
+        private Sprite ArtOf(EnemyId id)
+        {
+            var art = FindCharacter(id);
+            return art != null ? art.Get(CharacterPose.Idle) : null;
         }
 
         private static void ApplyDoorLight(SpriteRenderer light, bool on, float breathe)
@@ -1269,10 +1333,12 @@ namespace NailongFNAF.UI
                 return false;
             }
 
-            bool closed = side == Side.Left ? gm.LeftDoorClosed : gm.RightDoorClosed;
             bool lightOn = side == Side.Left ? gm.LeftLightOn : gm.RightLightOn;
 
-            if (closed || !lightOn)
+            // 门关不关**不影响能不能看见** —— 灯照亮的是门外走廊，
+            // 门板挡的是人不是光。所以关门后玩家也能开灯确认「它走了没有」，
+            // 不用冒险开门（开门可能正好撞上它的移动机会）。
+            if (!lightOn)
             {
                 return false;
             }
@@ -3235,6 +3301,9 @@ namespace NailongFNAF.UI
 
             UpdateDebugMapPins();
             UpdateDebugEnemyPositions();
+
+            // 边缘红脉冲的动画推进（跟帧走，不受 timeScale 影响）
+            UpdateRevealPulse();
         }
 
         /// <summary>
@@ -3683,6 +3752,11 @@ namespace NailongFNAF.UI
             _enemySideRight = MakeWorldSprite("EnemySideRight", DoorWorldCenterRight, SpriteSortEnemy);
             _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
 
+            // 雪花轮廓粒子：比立绘高一层，盖在它上面
+            _ghostLeft = MakeGhostParticles("GhostLeft", DoorWorldCenterLeft, SpriteSortEnemy + 1);
+            _ghostRight = MakeGhostParticles("GhostRight", DoorWorldCenterRight, SpriteSortEnemy + 1);
+            _ghostRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
+
             // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
             _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
             _doorLightRight = MakeDoorLight("DoorLightRight", DoorWorldCenterRight, SpriteSortDoor - 1);
@@ -3747,6 +3821,228 @@ namespace NailongFNAF.UI
         /// 世界空间 SpriteRenderer —— 不缩放到米制以外，靠 PPU 保证「像素 = 真实米」：
         /// 立绘字面是真实身高的像素（噜噜 ~1.7m 的 PNG），尺寸就是对的。
         /// </summary>
+        /// <summary>
+        /// 「门关着但灯照到人」时的**轮廓雪花粒子**。
+        ///
+        /// 早先用一张 96×96 噪点贴图铺满立绘框，结果连**透明背景**都被雪花了，
+        /// 看起来像一块噪声板糊在门口，而不是「人形轮廓在闪」。
+        /// 现在只在不透明区域的边缘点撒粒子，背景完全干净。
+        /// </summary>
+        private static ParticleSystem MakeGhostParticles(string name, Vector3 pivotPoint,
+            int sortingOrder)
+        {
+            var go = new GameObject(name);
+            go.transform.position = pivotPoint;
+            go.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+
+            var ps = go.AddComponent<ParticleSystem>();
+
+            var main = ps.main;
+            main.playOnAwake = false;
+            main.loop = true;
+            main.duration = 10f;
+            main.startLifetime = 0.12f;    // 短命 → 闪一下就灭，像噪点
+            main.startSpeed = 0f;          // 不动：原地闪才有「卡住的影像」感
+            main.startSize = 0.035f;       // 米制，几个像素大小
+            main.maxParticles = 600;
+            main.simulationSpace = ParticleSystemSimulationSpace.Local;
+            main.startColor = new Color(1f, 1f, 1f, 0f);
+
+            // 不靠固定速率发射 —— 位置全由 UpdateGhostOverlay 自己给
+            var emission = ps.emission;
+            emission.enabled = false;
+
+            var shape = ps.shape;
+            shape.enabled = false;
+
+            var pr = go.GetComponent<ParticleSystemRenderer>();
+            pr.renderMode = ParticleSystemRenderMode.Billboard;
+            pr.sortingOrder = sortingOrder;
+            pr.material = MakeParticleMaterial();
+
+            go.SetActive(false);
+            return ps;
+        }
+
+        /// <summary>粒子材质：加法混合的白色亮点（不用纹理，越简单越稳）。</summary>
+        private static Material MakeParticleMaterial()
+        {
+            var shader = Shader.Find("Particles/Standard Unlit");
+            if (shader == null)
+            {
+                shader = Shader.Find("Sprites/Default");
+            }
+
+            if (shader == null)
+            {
+                return null;
+            }
+
+            var mat = new Material(shader);
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+            mat.SetInt("_ZWrite", 0);
+            mat.renderQueue = 3000;
+            return mat;
+        }
+
+        /// <summary>
+        /// 从立绘 alpha 通道提取**不透明区域的轮廓点**（局部单位坐标）。
+        ///
+        /// 逐像素扫：不透明、且上下左右至少一个邻居透明 → 边缘点。
+        /// 跳步采样抽稀到合理数量 —— 粒子再多也看不出来，反而拖性能。
+        /// 结果按敌人缓存（贴图不变，算一次就够）。
+        /// </summary>
+        private Vector3[] GhostOutlineOf(EnemyId id, Sprite sprite)
+        {
+            Vector3[] cached;
+            if (_ghostOutlineCache.TryGetValue(id, out cached))
+            {
+                return cached;
+            }
+
+            if (sprite == null || sprite.texture == null || !sprite.texture.isReadable)
+            {
+                // 读不到像素（导入没开 Read/Write）→ 空表，粒子层自然不显示
+                _ghostOutlineCache[id] = new Vector3[0];
+                return _ghostOutlineCache[id];
+            }
+
+            var tex = sprite.texture;
+            int w = tex.width;
+            int h = tex.height;
+            var px = tex.GetPixels32();
+
+            var points = new List<Vector3>(1024);
+
+            int step = Mathf.Max(1, Mathf.RoundToInt(Mathf.Sqrt((float)w * h / 1500f)));
+
+            float unitW = sprite.rect.width / sprite.pixelsPerUnit;
+            float unitH = sprite.rect.height / sprite.pixelsPerUnit;
+
+            for (int y = step; y < h - step; y += step)
+            {
+                for (int x = step; x < w - step; x += step)
+                {
+                    int i = y * w + x;
+                    if (px[i].a <= 40)
+                    {
+                        continue;
+                    }
+
+                    bool edge = px[i - step].a <= 40 || px[i + step].a <= 40
+                             || px[(y - step) * w + x].a <= 40
+                             || px[(y + step) * w + x].a <= 40;
+
+                    if (!edge)
+                    {
+                        continue;
+                    }
+
+                    // 归一化 -0.5..0.5 —— 粒子系统会按立绘的实际尺寸缩放，
+                    // 这样不用关心贴图原始多大（它们有 10 米那么宽，直接给米会散太开）
+                    float u = (x + 0.5f) / w - 0.5f;
+                    float v = (y + 0.5f) / h - 0.5f;
+
+                    points.Add(new Vector3(u, v, 0f));
+                }
+            }
+
+            var arr = points.ToArray();
+            _ghostOutlineCache[id] = arr;
+            return arr;
+        }
+
+        /// <summary>
+        /// 雪花虚影的淡入淡出 + 粒子发射。
+        /// **10/秒 ≈ 0.1 秒到位** —— 灯一照到就窜出来。
+        /// </summary>
+        private void UpdateGhostOverlay(ParticleSystem ghost, ref float alpha,
+            bool shouldShow, EnemyId id, Sprite sprite)
+        {
+            if (ghost == null)
+            {
+                return;
+            }
+
+            float target = shouldShow ? GhostMaxAlpha : 0f;
+            alpha = Mathf.MoveTowards(alpha, target, GhostFadeSpeed * Time.deltaTime);
+
+            if (alpha <= 0.001f)
+            {
+                if (ghost.gameObject.activeSelf)
+                {
+                    ghost.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    ghost.gameObject.SetActive(false);
+                }
+                return;
+            }
+
+            if (!ghost.gameObject.activeSelf)
+            {
+                ghost.gameObject.SetActive(true);
+                ghost.Play();
+            }
+
+            var outline = GhostOutlineOf(id, sprite);
+            if (outline == null || outline.Length == 0)
+            {
+                return;
+            }
+
+            // 轮廓是归一化的 -0.5..0.5，按立绘的实际米制尺寸放大，
+            // 并和立绘用同一个 localScale（左右镜像也要一致）
+            if (sprite != null)
+            {
+                var character = id;
+                var sr = FindDoorSprite(character);
+                Vector3 size = sprite.bounds.size;
+                ghost.transform.localScale = sr != null
+                    ? new Vector3(Mathf.Abs(sr.transform.localScale.x) * size.x,
+                                  sr.transform.localScale.y * size.y, 1f)
+                    : new Vector3(size.x, size.y, 1f);
+
+                if (sr != null)
+                {
+                    ghost.transform.position = sr.transform.position;
+                }
+            }
+
+            int count = Mathf.Clamp(
+                Mathf.CeilToInt(outline.Length * 0.06f * (alpha / GhostMaxAlpha)), 1, 40);
+
+            var emit = new ParticleSystem.EmitParams();
+            emit.applyShapeToPosition = false;
+
+            // 粒子在局部空间发射，会被 ghost 的 localScale 放大。
+            // 所以尺寸要给「局部单位」—— 归一化坐标下 0.5 = 立绘半宽，
+            // 取 0.012~0.03 换算成屏幕大约就是 3~8 像素。
+            for (int k = 0; k < count; k++)
+            {
+                emit.position = outline[Random.Range(0, outline.Length)];
+                emit.startColor = new Color(1f, 1f, 1f, alpha * Random.Range(0.55f, 1f));
+                emit.startSize = Random.Range(0.012f, 0.03f);
+                emit.startLifetime = Random.Range(0.08f, 0.16f);
+                ghost.Emit(emit, 1);
+            }
+        }
+
+        /// <summary>找某只敌人对应的门口立绘渲染器（左/右门各一个）。</summary>
+        private SpriteRenderer FindDoorSprite(EnemyId id)
+        {
+            if (_enemyDirector == null)
+            {
+                return null;
+            }
+
+            var brain = _enemyDirector.GetBrain(id) as DoorEnemyBrain;
+            if (brain == null)
+            {
+                return null;
+            }
+
+            return brain.Side == Side.Left ? _enemySideLeft : _enemySideRight;
+        }
         private static SpriteRenderer MakeWorldSprite(string name, Vector3 pivotPoint,
             int sortingOrder)
         {
@@ -4161,6 +4457,18 @@ namespace NailongFNAF.UI
 
                 _usageBars[i] = image;
             }
+
+            // ── 开灯照到人的边缘红色脉冲 ──
+            //
+            // ⚠️ 必须建在这个函数的**最后**：SetAsLastSibling 只对当时的顺序生效，
+            // 如果在开头建、后面又建了时钟/电量/小地图，它反而会被压到最底下。
+            // 纯视觉层，raycastTarget=false，压最上面也不挡点击。
+            _revealPulse = MakeFullScreenImage("RevealPulse", new Color(1f, 0f, 0f, 0f));
+            _revealPulse.sprite = MakeEdgeGlowSprite();
+            _revealPulse.raycastTarget = false;
+            _revealPulse.transform.SetParent(hud.transform, false);
+            StretchToParent(_revealPulse.rectTransform);
+            _revealPulse.transform.SetAsLastSibling();
         }
 
         private void BuildDebugLayer()
@@ -5037,6 +5345,110 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>生成一张 4×4 的纯白贴图，配合 Image.color 就能当任意色块用。</summary>
+        /// <summary>
+        /// 生成「**四周红、中间透明**」的贴图，给开灯照到人的边缘脉冲用。
+        /// 从四边往里做二次衰减，四角取两边里更强的那个，所以角落最浓。
+        /// </summary>
+        private static Sprite MakeEdgeGlowSprite(int size = 128, float power = 2.6f)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            var px = new Color32[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float nx = Mathf.Min(x, size - 1 - x) / (size * 0.5f);
+                    float ny = Mathf.Min(y, size - 1 - y) / (size * 0.5f);
+                    float edge = Mathf.Min(nx, ny);
+                    float a = Mathf.Pow(1f - Mathf.Clamp01(edge), power);
+
+                    px[y * size + x] = new Color32(255, 40, 45, (byte)(Mathf.Clamp01(a) * 255f));
+                }
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply();
+
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        /// <summary>
+        /// 检查「开灯照到人」的上升沿，触发音效 + 边缘红脉冲。
+        ///
+        /// ⚠️ **只在门开着时触发红色脉冲**。
+        /// 门关着时门口显示的是雪花虚影，那已经是「信号不良」的软提示；
+        /// 再叠一圈红色边框会互相抢戏，而且门都关了还惊慌说不通。
+        /// </summary>
+        private void UpdateLightReveal(GameManager gm)
+        {
+            bool left = !gm.LeftDoorClosed && TryGetEnemyAtSide(gm, Side.Left, out _);
+            bool right = !gm.RightDoorClosed && TryGetEnemyAtSide(gm, Side.Right, out _);
+
+            bool justSaw = (left && !_sawEnemyLeft) || (right && !_sawEnemyRight);
+
+            _sawEnemyLeft = left;
+            _sawEnemyRight = right;
+
+            if (!justSaw)
+            {
+                return;
+            }
+
+            if (_audio != null)
+            {
+                _audio.PlayLightReveal();
+            }
+
+            _revealPulseTime = 0f;
+        }
+
+        /// <summary>
+        /// 推进边缘红脉冲：在 0.45 秒内闪 2 下，每下「猛亮 + 快速回落」。
+        /// 衰减用平方，所以回落比上升快得多 —— 是抽一下，不是匀速淡出。
+        /// </summary>
+        private void UpdateRevealPulse()
+        {
+            if (_revealPulse == null)
+            {
+                return;
+            }
+
+            // 调试：按住 F2 让边缘红光常亮，方便看效果 / 调浓度
+            if (Input.GetKey(KeyCode.F2))
+            {
+                _revealPulse.color = new Color(1f, 0f, 0f, 0.55f);
+                return;
+            }
+
+            if (_revealPulseTime < 0f)
+            {
+                return;
+            }
+
+            _revealPulseTime += Time.unscaledDeltaTime;
+
+            if (_revealPulseTime >= RevealPulseSeconds)
+            {
+                _revealPulseTime = -1f;
+                _revealPulse.color = new Color(1f, 0f, 0f, 0f);
+                return;
+            }
+
+            float t = _revealPulseTime / RevealPulseSeconds;
+            float beat = t * RevealPulseBeats;
+            float inBeat = beat - Mathf.Floor(beat);
+
+            float strength = 1f - inBeat;
+            strength *= strength;
+
+            float fadeOut = 1f - Mathf.Clamp01((t - 0.7f) / 0.3f);
+
+            _revealPulse.color = new Color(1f, 0f, 0f, 0.55f * strength * fadeOut);
+        }
         private static Sprite MakeSolidSprite()
         {
             var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false);

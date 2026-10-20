@@ -23,6 +23,15 @@ namespace NailongFNAF.Audio
         [SerializeField] private AudioClip _sfxFootstep;
         [SerializeField] private AudioClip _sfxPowerOut;
 
+        /// <summary>
+        /// 开灯那一刻**照到门口站着人**时的提示音。
+        ///
+        /// 和普通「开灯」音效分开：普通开灯不管有没有人都响，
+        /// 这个只在真的照到敌人的**上升沿**响一次（关着灯看不见人，开灯才发现）。
+        /// 音频素材还没做，留空就是静音，不影响后面接。
+        /// </summary>
+        [SerializeField] private AudioClip _sfxLightReveal;
+
         [Header("断电音乐（音乐盒，单独一条轨）")]
         [SerializeField] private AudioClip _powerOutMusic;
 
@@ -85,6 +94,14 @@ namespace NailongFNAF.Audio
         public void PlayLight(bool on)
         {
             Play(on ? _sfxLightOn : _sfxLightOff);
+        }
+
+        /// <summary>
+        /// 开灯照到门口有人时的提示音。素材缺失时静默 —— 视觉反馈仍然生效。
+        /// </summary>
+        public void PlayLightReveal()
+        {
+            Play(_sfxLightReveal);
         }
 
         public void PlayCameraSwitch()

@@ -150,20 +150,50 @@ namespace NailongFNAF.Tests
         // ---------------------------------------------------------------
 
         [Test]
-        public void 门关着时_门类敌人到门口会被挡回去()
+        public void 门关着时_门类敌人要等下一次移动机会才退走()
         {
+            // 照原版回合制：关门**不会**让它当场退走，
+            // 得等到它下一次「移动机会」（DoorGraceSeconds）才做决定。
+            const float turn = 3f;
             var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
-                EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, turn);
             var ctx = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
 
             AdvanceToStage(brain, ctx, 2);
             Assert.AreEqual(2, brain.Stage);
 
+            // 刚过 0.1 秒 —— 还在等机会，不该退
             brain.Tick(0.1f, ctx);
+            Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
+            Assert.IsFalse(brain.RetreatedThisTick);
 
-            Assert.AreEqual(0, brain.Stage);
+            // 累计过了一个回合 —— 这次机会用来退走
+            brain.Tick(turn, ctx);
+            Assert.AreEqual(0, brain.Stage, "移动机会到了，门关着就退走");
             Assert.IsFalse(brain.IsAttacking);
             Assert.IsTrue(brain.RetreatedThisTick);
+        }
+
+        [Test]
+        public void 门关着时_退走前一刻开门会被抓住()
+        {
+            // 新机制的关键：关门只是「拖到下一次机会」，
+            // 机会到来时门要是开着的，它就直接动手。
+            const float turn = 3f;
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, turn);
+
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+            AdvanceToStage(brain, closed, 2);
+
+            brain.Tick(1f, closed);        // 门关着，先等了一会儿
+            var opened = EnemyContext.Idle();   // 玩家把门打开了
+            brain.Tick(turn, opened);      // 机会到来时门是开的
+
+            Assert.IsTrue(brain.IsAttacking, "开门迎接移动机会 = 被抓住");
+            Assert.AreEqual(2, brain.Stage);
         }
 
         [Test]
@@ -562,8 +592,12 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage);
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
-            brain.Tick(0.1f, closed);
 
+            // 关门只是拖住它，要等它的下一次移动机会才退走（照原版回合制）
+            brain.Tick(0.1f, closed);
+            Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
+
+            brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(NailongMode.Stealing, brain.Mode, "被挡回后要回去偷电");
         }
@@ -632,8 +666,12 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage);
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
-            brain.Tick(0.1f, closed);
 
+            // 关门不再立刻退 —— 要等它下一次移动机会（照原版回合制）
+            brain.Tick(0.1f, closed);
+            Assert.AreEqual(2, brain.Stage, "还没到移动机会，继续站在门口");
+
+            brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(NailongMode.Stealing, brain.Mode, "被挡回后回去偷电");
         }

@@ -267,6 +267,16 @@ namespace NailongFNAF.EditorTools
                 dirty = true;
             }
 
+            // ⚠️ 立绘要**可读**：门关着时的雪花虚影是沿立绘的**不透明轮廓**
+            // 撒粒子（见 PrototypeScene.BuildGhostParticles），
+            // 那需要 CPU 读 alpha 通道来算出轮廓点。
+            // 只在没有粒子采样时打开 —— 会多占一份内存，但对几百 KB 的立绘可接受。
+            if (needsAlpha && !importer.isReadable)
+            {
+                importer.isReadable = true;
+                dirty = true;
+            }
+
             if (importer.mipmapEnabled)
             {
                 importer.mipmapEnabled = false;
