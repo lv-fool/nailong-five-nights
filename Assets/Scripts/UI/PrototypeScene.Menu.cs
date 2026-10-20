@@ -1,4 +1,4 @@
-﻿using NailongFNAF.Core;
+using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
@@ -851,6 +851,7 @@ namespace NailongFNAF.UI
             _endlessOverdrive = 0f;
 
             gm.Restart();
+            gm.SetNaibao(CreateNaibaoForNight(night));
             ClearJumpscare();
 
             _menuRoot.SetActive(false);
@@ -894,6 +895,7 @@ namespace NailongFNAF.UI
             bool resume = TryLoadEternalNight(out save);
 
             gm.Restart();
+            gm.SetNaibao(null);
             if (resume)
             {
                 if (gm.LoadSave(save))
@@ -1362,12 +1364,26 @@ namespace NailongFNAF.UI
             }
 
             gm.Restart();
+
+            // 自定义夜没有「第几夜」的概念，默认她已经过了引导期
+            gm.SetNaibao(new NaibaoDirector(false, null));
+
             ClearJumpscare();
 
             _menuRoot.SetActive(false);
             _menuOpen = false;
             _endShown = false;
             _caughtHoldTimer = 0f;
+        }
+
+        /// <summary>
+        /// 这一夜该让奶包干什么：第一夜她只负责说话（引导），第二夜起开始手欠。
+        /// 永夜暂时不接她（难度已经够乱，再加一个说不清是谁的锅的变量不划算），
+        /// 自定义夜按手欠处理。传 null 给 <see cref="GameManager.SetNaibao"/> 就是这一夜没有她。
+        /// </summary>
+        private static NaibaoDirector CreateNaibaoForNight(int night)
+        {
+            return new NaibaoDirector(night <= 0, null);
         }
 
         private void OnQuitClicked()

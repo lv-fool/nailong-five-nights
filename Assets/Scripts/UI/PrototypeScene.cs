@@ -640,6 +640,24 @@ namespace NailongFNAF.UI
         /// <summary>永夜模式专属的那一行 HUD（已撑多久 / 还差多少攒一次补给）。</summary>
         private Text _endlessText;
 
+        /// <summary>奶包那一整组（左上角立绘 + 说话框）。</summary>
+        private CanvasGroup _naibaoGroup;
+
+        /// <summary>奶包的立绘。</summary>
+        private Image _naibaoPortrait;
+
+        /// <summary>奶包正在说的那句话。</summary>
+        private Text _naibaoLine;
+
+        /// <summary>已经演到第几句了（跟 <see cref="GameManager.NaibaoCueSerial"/> 比）。</summary>
+        private int _naibaoSerial;
+
+        /// <summary>这一轮说话演到什么时候（用 unscaledTime，暂停也能收起）。</summary>
+        private float _naibaoHideAt;
+
+        /// <summary>立绘缓存：文件名 → 运行时切出来的 Sprite。</summary>
+        private readonly Dictionary<string, Sprite> _naibaoSprites = new Dictionary<string, Sprite>();
+
         /// <summary>左下角「电量 + Usage」整组。断电后收起来，跟原版一样只剩黑暗。</summary>
         private CanvasGroup _powerGroup;
 
@@ -3197,6 +3215,7 @@ namespace NailongFNAF.UI
             _powerText.text = "Power left: " + Mathf.CeilToInt(gm.Power.Level) + "%";
             UpdateUsageBars(gm.Power.UsageLevel);
             UpdateEndlessHud(gm);
+            UpdateNaibao(gm);
 
             // 断电了就没有「还剩多少电、用了几格」这回事了
             _powerGroup.alpha = gm.HasPowerOut ? 0f : 1f;
@@ -3210,6 +3229,104 @@ namespace NailongFNAF.UI
 
             UpdateDebugMapPins();
             UpdateDebugEnemyPositions();
+        }
+
+        /// <summary>
+        /// 奶包说话：她每来一次，<see cref="GameManager.NaibaoCueSerial"/> 就 +1。
+        /// 这里靠 serial 变化判断「这是新的一句」，换了就把立绘和台词换掉、亮起来；
+        /// 台词按这次动作的时长再留一会儿，超时淡出。
+        /// </summary>
+        private void UpdateNaibao(GameManager gm)
+        {
+            if (_naibaoGroup == null)
+            {
+                return;
+            }
+            bool alive = gm.Naibao != null && !gm.HasBeenCaught;
+            if (!alive)
+            {
+                _naibaoGroup.alpha = 0f;
+                return;
+            }
+
+            if (gm.NaibaoCueSerial != _naibaoSerial)
+            {
+                _naibaoSerial = gm.NaibaoCueSerial;
+                ShowNaibaoCue(gm.LastNaibaoCue);
+            }
+
+            float target = Time.unscaledTime < _naibaoHideAt ? 1f : 0f;
+            _naibaoGroup.alpha = Mathf.MoveTowards(_naibaoGroup.alpha, target,
+                Time.unscaledDeltaTime * 4f);
+        }
+
+        /// <summary>把一句奶包台词摆到屏幕上：换姿势、换台词、定什么时候收。</summary>
+        private void ShowNaibaoCue(NaibaoCue cue)
+        {
+            if (cue.Line == null)
+            {
+                return;
+            }
+
+            if (_naibaoLine != null)
+            {
+                _naibaoLine.text = cue.Line;
+            }
+
+            if (_naibaoPortrait != null)
+            {
+                Sprite sprite = NaibaoSprite(cue.Pose);
+                _naibaoPortrait.sprite = sprite;
+                _naibaoPortrait.enabled = sprite != null;
+            }
+
+            // 有持续时间的动作（抢监控、偷加耗电）多留一会儿，纯说话就留 6 秒
+            float hold = cue.Seconds > 0f ? cue.Seconds + 3.5f : 6f;
+            _naibaoHideAt = Time.unscaledTime + hold;
+        }
+
+        /// <summary>
+        /// 立绘走 <c>Resources.Load&lt;Texture2D&gt;</c> 而不是 <c>Load&lt;Sprite&gt;</c>：
+        /// 这些 PNG 是按普通贴图导入的，没有 Sprite 元数据，直接 Load&lt;Sprite&gt; 会拿到 null。
+        /// 切出来的 Sprite 缓存住，别每句台词都新建一个。
+        /// </summary>
+        private Sprite NaibaoSprite(NaibaoPose pose)
+        {
+            string file = NaibaoPoseFile(pose);
+            Sprite cached;
+            if (_naibaoSprites.TryGetValue(file, out cached))
+            {
+                return cached;
+            }
+
+            var texture = Resources.Load<Texture2D>("Naibao/" + file);
+            Sprite sprite = null;
+            if (texture != null)
+            {
+                texture.wrapMode = TextureWrapMode.Clamp;
+                sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height),
+                    new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
+            }
+
+            _naibaoSprites[file] = sprite;
+            return sprite;
+        }
+
+        private static string NaibaoPoseFile(NaibaoPose pose)
+        {
+            switch (pose)
+            {
+                case NaibaoPose.Guide:
+                    return "char_naibao_guide";
+                case NaibaoPose.Huffy:
+                    return "char_naibao_huffy";
+                case NaibaoPose.Smug:
+                    return "char_naibao_smug";
+                case NaibaoPose.Bored:
+                    return "char_naibao_bored";
+                default:
+                    return "char_naibao_peek";
+            }
         }
 
         /// <summary>
@@ -4136,6 +4253,61 @@ namespace NailongFNAF.UI
 
                 _usageBars[i] = image;
             }
+
+            BuildNaibao();
+        }
+
+        /// <summary>
+        /// 奶包：左上角一张立绘 + 一个说话框。
+        ///
+        /// 位置选左上不是随便挑的：时钟在右上、电量与 Usage 在左下、
+        /// 监控小地图在右下、手电筒在底中，四个角只剩这里是空的 ——
+        /// 摆这儿不挡门灯按钮，也不挡手电筒和小地图。
+        /// </summary>
+        private void BuildNaibao()
+        {
+            var go = new GameObject("Naibao", typeof(RectTransform), typeof(CanvasGroup));
+            go.transform.SetParent(_canvas.transform, false);
+            StretchToParent(go.GetComponent<RectTransform>());
+
+            _naibaoGroup = go.GetComponent<CanvasGroup>();
+            _naibaoGroup.alpha = 0f;
+            _naibaoGroup.blocksRaycasts = false;
+
+            // 说话框：深色半透明底，字在主色上才读得清
+            var box = new GameObject("NaibaoLine",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            box.transform.SetParent(go.transform, false);
+            PlaceRect(box.GetComponent<RectTransform>(), new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(292f, -46f), new Vector2(700f, 196f));
+
+            var boxImage = box.GetComponent<Image>();
+            boxImage.sprite = _buttonSprite;
+            boxImage.color = new Color(0.04f, 0.05f, 0.07f, 0.86f);
+            boxImage.raycastTarget = false;
+
+            Text nameLabel = MakeText(box.transform, "NaibaoName", "奶包",
+                TextAnchor.UpperLeft, 24, new Color(1f, 0.84f, 0.42f));
+            PlaceRect(nameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(20f, -12f), new Vector2(140f, 30f));
+
+            _naibaoLine = MakeText(box.transform, "NaibaoText", string.Empty,
+                TextAnchor.UpperLeft, 26, new Color(0.94f, 0.94f, 0.94f));
+            _naibaoLine.horizontalOverflow = HorizontalWrapMode.Wrap;
+            PlaceRect(_naibaoLine.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(20f, -48f), new Vector2(660f, 144f));
+
+            // 立绘：竖长条，贴左上角
+            var portrait = new GameObject("NaibaoPortrait",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            portrait.transform.SetParent(go.transform, false);
+            PlaceRect(portrait.GetComponent<RectTransform>(), new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(30f, -18f), new Vector2(244f, 530f));
+
+            _naibaoPortrait = portrait.GetComponent<Image>();
+            _naibaoPortrait.preserveAspect = true;
+            _naibaoPortrait.raycastTarget = false;
+            _naibaoPortrait.enabled = false;
         }
 
         private void BuildDebugLayer()

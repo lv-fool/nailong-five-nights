@@ -261,8 +261,78 @@ namespace NailongFNAF.Diagnostics
             else if (_step == 19 && elapsed > 26.0f)
             {
                 _step = 20;
+
+                // 第 1 夜：奶包只引导。引导第一句要 18 秒才到，探针直接把她推快一点。
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnNightClicked", new object[] { 0 });
+                ForceNaibaoOffline(20f);
+                Debug.Log("SMOKE: 第 1 夜已开局");
+            }
+            else if (_step == 20 && elapsed > 27.5f)
+            {
+                _step = 21;
+                Snap("14_naibao_guide");
+                ReportNaibao("引导");
+            }
+            else if (_step == 21 && elapsed > 28.5f)
+            {
+                _step = 22;
+
+                // 第 2 夜：改手欠。直接把她的计时推到第一次出手之后。
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnNightClicked", new object[] { 1 });
+                ForceNaibaoOffline(31f);
+                Debug.Log("SMOKE: 第 2 夜已开局");
+            }
+            else if (_step == 22 && elapsed > 30.2f)
+            {
+                _step = 23;
+                Snap("15_naibao_mischief");
+                ReportNaibao("手欠");
+            }
+            else if (_step == 23 && elapsed > 31.6f)
+            {
+                _step = 24;
                 Finish();
             }
+        }
+
+        /// <summary>把奶包的计时直接推 <paramref name="seconds"/> 秒，再把到点的出场应用上。</summary>
+        private void ForceNaibaoOffline(float seconds)
+        {
+            object gm = Instance("NailongFNAF.Core.GameManager");
+            object naibao = gm != null ? Get(gm, "Naibao") : null;
+            if (naibao == null)
+            {
+                Debug.LogError("SMOKE: 这一夜没有奶包");
+                return;
+            }
+
+            Invoke(naibao, "Tick", new object[] { seconds });
+            Invoke(gm, "TickNaibao", new object[] { 0.016f });
+        }
+
+        private void ReportNaibao(string title)
+        {
+            object gm = Instance("NailongFNAF.Core.GameManager");
+            object naibao = gm != null ? Get(gm, "Naibao") : null;
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object line = Get(scene, "_naibaoLine");
+            object group = Get(scene, "_naibaoGroup");
+            object cue = gm != null ? Get(gm, "LastNaibaoCue") : null;
+
+            string cueText = cue != null ? Get(cue, "Line") as string : null;
+            string pose = cue != null ? Get(cue, "Pose")?.ToString() : null;
+
+            Debug.Log("SMOKE: 奶包(" + title + ") 在场 = " + (naibao != null) +
+                      " 引导 = " + (naibao != null ? Get(naibao, "IsGuide") : null) +
+                      " 捣乱次数 = " + (naibao != null ? Get(naibao, "MischiefCount") : null) +
+                      " 姿势 = " + pose +
+                      " 台词 = [" + cueText + "]" +
+                      " 界面台词 = [" + (line != null ? Get(line, "text") : null) + "]" +
+                      " 组透明 = " + (group != null ? Get(group, "alpha") : null));
         }
 
         private void DriveActions()
