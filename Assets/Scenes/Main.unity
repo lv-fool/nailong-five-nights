@@ -320,7 +320,6 @@ MonoBehaviour:
   _sfxCameraSwitch: {fileID: 8300000, guid: 2cd1bd0533d000542adeca6773f52b71, type: 3}
   _sfxFootstep: {fileID: 8300000, guid: 60c5db299dbe95e449401f294719e97b, type: 3}
   _sfxPowerOut: {fileID: 8300000, guid: e93d27b4e029a1f41a671154f758dacc, type: 3}
-  _sfxLightReveal: {fileID: 0}
   _powerOutMusic: {fileID: 8300000, guid: 8e4a8e9f2f3bd3c4f8ab4deb7f8b3817, type: 3}
   _ambientVolume: 0.3
   _sfxVolume: 0.75

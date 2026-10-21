@@ -179,11 +179,24 @@ namespace NailongFNAF.UI
         /// </summary>
         private const float FlashlightButtonBottom = 172f;
 
-        /// <summary>断电时奶龙立绘的高度。</summary>
-        private const float BlackoutCharacterHeight = 880f;
+        /// <summary>
+        /// 断电时奶龙立绘的高度 = **门洞屏幕高度的多少倍**。
+        ///
+        /// ⚠️ 原来写死 880 像素，比门洞（运行时实测 493px）高了 78%，
+        /// 看起来像个巨人贴在左边墙上，完全不像从门里冒出来。
+        ///
+        /// 改成按门洞比例算：它站在门里，身高大约是门高的 0.92
+        /// （2.05m 门洞 × 0.92 ≈ 1.89m，和门口立绘 1.8m 同一量级）。
+        /// </summary>
+        private const float BlackoutHeightVsDoor = 0.92f;
 
-        /// <summary>断电时奶龙贴左边多远（UI 参考分辨率下的像素）。</summary>
-        private const float BlackoutAnchorX = 60f;
+        /// <summary>
+        /// 断电时奶龙立绘的横向位置 = **门洞中心的多少比例**（0 = 屏幕最左，1 = 最右）。
+        ///
+        /// 它要出现在左门那个位置，而不是画布左下角。
+        /// 具体值在运行时由门板的屏幕坐标算出来（见 ApplyBlackoutCharacter）。
+        /// </summary>
+        private const float BlackoutWidthVsDoor = 1.02f;
 
         /// <summary>拍点上脸亮到这个程度 —— 那一刻看得清清楚楚。</summary>
         private const float BlackoutLitAlpha = 0.96f;
@@ -1529,7 +1542,66 @@ namespace NailongFNAF.UI
             _blackoutCharacter.gameObject.SetActive(true);
             _blackoutCharacter.preserveAspect = true;
             _blackoutCharacter.sprite = sprite;
-            FitHeight(_blackoutCharacter.rectTransform, sprite, BlackoutCharacterHeight);
+
+            // 按**左门在屏幕上的真实位置和高度**摆放 ——
+            // 原来写死 880px 高、锚在画布左下角，比门洞高 78% 且偏到墙外，
+            // 看起来像个巨人贴在左边，不像从门里冒出来。
+            var door = _doorLeft3D;
+            var cam = Camera.main;
+            var canvasRect = (RectTransform)_canvas.transform;
+
+            float height;
+            Vector2 anchor;
+
+            if (door != null && cam != null)
+            {
+                Bounds b = door.bounds;
+                Vector3 low = cam.WorldToScreenPoint(
+                    new Vector3(b.center.x, b.min.y, b.center.z));
+                Vector3 high = cam.WorldToScreenPoint(
+                    new Vector3(b.center.x, b.max.y, b.center.z));
+
+                // 门的屏幕像素高度 → 占屏幕高度的比例 → 乘画布高。
+                // 这样和 CanvasScaler 怎么缩放无关，永远和门板同比例。
+                float doorFrac = Mathf.Abs(high.y - low.y) / Mathf.Max(1f, Screen.height);
+                height = doorFrac * canvasRect.rect.height * BlackoutHeightVsDoor;
+
+                // 门中心的屏幕 x → 画布本地 x。
+                // 屏幕归一化 (0..1) 乘以画布宽，再减半个画布 = 相对中心的本地坐标。
+                float doorCx = (low.x + high.x) * 0.5f;
+                float cxLocal = (doorCx / Mathf.Max(1f, Screen.width) - 0.5f) * canvasRect.rect.width;
+
+                // ⚠️ **纵向对齐门板底部**。
+                // pivot = 底边中点，所以 anchoredPosition.y 就是立绘底边的本地 y。
+                //
+                // ⚠️ 注意方向：WorldToScreenPoint 的 **y 从屏幕底部往上**，
+                // 所以数值**更小**的那个才是「屏幕上更低」的点。
+                // 但我们要的是立绘**站在门框底部**，也就是屏幕 y 较大的那个边界
+                // （门的下沿在屏幕上更靠下 = y 值更小？不 —— 门的下沿靠近地板，
+                //  在地面高度，屏幕 y 比门顶小）。
+                //
+                // 实测：门板顶 y=123、底 y=620。屏幕 y 大 = 屏幕上方。
+                // 所以 **Mathf.Max 才是门底**（620 比 123 更靠上？）
+                // —— 这正是当初搞反的地方，改成用相机把世界「门底」直接投出来最稳。
+                Vector3 doorBottomWorld = new Vector3(b.center.x, b.min.y, b.center.z);
+                float doorBottomScreen = cam.WorldToScreenPoint(doorBottomWorld).y;
+
+                // 屏幕归一化 (0..1) 乘画布高，再减半个画布高 = 相对画布中心的本地 y。
+                // ⚠️ 不能写成 (screenY - Screen.height*0.5) * 系数 ——
+                // 那样只在缩放恰好 1 时成立，CanvasScaler 缩放后整体会偏。
+                float bottomLocal = (doorBottomScreen / Mathf.Max(1f, Screen.height) - 0.5f)
+                                    * canvasRect.rect.height;
+
+                anchor = new Vector2(cxLocal * BlackoutWidthVsDoor, bottomLocal);
+            }
+            else
+            {
+                // 拿不到门/相机（理论上不会有）—— 退回画布高度的 55%
+                height = canvasRect.rect.height * 0.55f;
+                anchor = new Vector2(-canvasRect.rect.width * 0.28f, 0f);
+            }
+
+            FitHeight(_blackoutCharacter.rectTransform, sprite, height);
 
             float alpha;
             float shake;
@@ -1549,9 +1621,12 @@ namespace NailongFNAF.UI
             }
 
             _blackoutCharacter.color = new Color(1f, 1f, 1f, alpha);
+
+            // 用 anchor 定位（画布中心为原点），再叠抖动。
+            // 注意：抖动只加在渲染偏移上，不影响 height/anchor 的计算。
             _blackoutCharacter.rectTransform.anchoredPosition = new Vector2(
-                BlackoutAnchorX + Mathf.Sin(Time.time * 29f) * shake,
-                Mathf.Cos(Time.time * 23f) * shake);
+                anchor.x + Mathf.Sin(Time.time * 29f) * shake,
+                anchor.y + Mathf.Cos(Time.time * 23f) * shake);
         }
 
         /// <summary>按目标高度显示某个角色的立绘；没素材就退回该角色的代表色剪影。</summary>
@@ -4207,12 +4282,15 @@ namespace NailongFNAF.UI
             var go = new GameObject("BlackoutCharacter", typeof(RectTransform), typeof(Image));
             go.transform.SetParent(_canvas.transform, false);
 
+            // ⚠️ 锚点用**画布中心**（0.5, 0.5）而不是左下角 ——
+            // ApplyBlackoutCharacter 按门板屏幕坐标算位置，那是相对屏幕中心的，
+            // 锚在左下角会导致坐标系对不上。
             var rect = go.GetComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0f, 0f);
-            rect.anchorMax = new Vector2(0f, 0f);
-            rect.pivot = new Vector2(0f, 0f);
-            rect.anchoredPosition = new Vector2(BlackoutAnchorX, 0f);
-            rect.sizeDelta = new Vector2(600f, BlackoutCharacterHeight);
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0f);   // 底边中点 = 站在门框底部
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(600f, 880f);
 
             _blackoutCharacter = go.GetComponent<Image>();
             _blackoutCharacter.sprite = _solidSprite;
