@@ -26,6 +26,11 @@ namespace NailongFNAF.Audio
         /// <summary>
         /// 开灯那一刻**照到门口站着人**时的提示音。
         ///
+        /// ⚠️ 用的素材是**截过只留一段的版本**（sfx_light_reveal_once.wav）——
+        /// 原始 mp3 里有 8 组连续报警循环（周期 0.48 秒），
+        /// 直接播会响完一整串，听着像「持续报警」而不是「一下提示」。
+        /// 截取时末尾加了 15ms 淡出，避免截断处的咔哒声。
+        ///
         /// 和普通「开灯」音效分开：普通开灯不管有没有人都响，
         /// 这个只在真的照到敌人的**上升沿**响一次（关着灯看不见人，开灯才发现）。
         ///
@@ -36,7 +41,7 @@ namespace NailongFNAF.Audio
         private AudioClip _sfxLightReveal;
 
         /// <summary>提示音的 Resources 路径（不带扩展名）。</summary>
-        private const string LightRevealClipPath = "Audio/sfx_light_reveal";
+        private const string LightRevealClipPath = "Audio/sfx_light_reveal_once";
 
         [Header("断电音乐（音乐盒，单独一条轨）")]
         [SerializeField] private AudioClip _powerOutMusic;
