@@ -28,9 +28,15 @@ namespace NailongFNAF.Audio
         ///
         /// 和普通「开灯」音效分开：普通开灯不管有没有人都响，
         /// 这个只在真的照到敌人的**上升沿**响一次（关着灯看不见人，开灯才发现）。
-        /// 音频素材还没做，留空就是静音，不影响后面接。
+        ///
+        /// ⚠️ 走 <see cref="Resources.Load{T}(string)"/> 而不是序列化字段 ——
+        /// AudioManager 是运行时 AddComponent 造出来的（Main.unity 里没有它），
+        /// 序列化字段永远是 null。素材放 Assets/Resources/Audio/sfx_light_reveal.mp3。
         /// </summary>
-        [SerializeField] private AudioClip _sfxLightReveal;
+        private AudioClip _sfxLightReveal;
+
+        /// <summary>提示音的 Resources 路径（不带扩展名）。</summary>
+        private const string LightRevealClipPath = "Audio/sfx_light_reveal";
 
         [Header("断电音乐（音乐盒，单独一条轨）")]
         [SerializeField] private AudioClip _powerOutMusic;
@@ -97,11 +103,36 @@ namespace NailongFNAF.Audio
         }
 
         /// <summary>
-        /// 开灯照到门口有人时的提示音。素材缺失时静默 —— 视觉反馈仍然生效。
+        /// 开灯照到门口有人时的提示音。**只响一次**（不循环）。
+        ///
+        /// 素材缺失时静默 —— 边缘红脉冲的视觉反馈仍然生效，不会因为少个音频就失效。
         /// </summary>
         public void PlayLightReveal()
         {
-            Play(_sfxLightReveal);
+            if (_sfxLightReveal == null)
+            {
+                // 懒加载一次，之后缓存（和跳杀音效同一套路）
+                _sfxLightReveal = Resources.Load<AudioClip>(LightRevealClipPath);
+                if (_sfxLightReveal == null)
+                {
+                    return;
+                }
+            }
+
+            if (_sfx == null)
+            {
+                return;
+            }
+
+            // ⚠️ 这里**不用 PlayOneShot**（那是 Play() 的默认做法）——
+            // PlayOneShot 会叠着播，而且 Stop() 打不断它。
+            // 报警音有 3.9 秒，如果玩家在这期间关灯再开，就会两层音叠在一起。
+            // 走主通道 + Stop 先清场，保证任何时候只有一条在响。
+            _sfx.Stop();
+            _sfx.clip = _sfxLightReveal;
+            _sfx.loop = false;
+            _sfx.volume = _sfxVolume;
+            _sfx.Play();
         }
 
         public void PlayCameraSwitch()
