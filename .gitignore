@@ -76,3 +76,6 @@ __pycache__/
 .env.*.local
 *.token
 .ghtoken
+
+# 抠图预览（可再生，见 tools/cutout_naibao.py）
+奶包/preview/

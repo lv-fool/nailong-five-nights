@@ -53,7 +53,27 @@ namespace NailongFNAF.Core
         public bool RightDoorClosed { get; private set; }
         public bool LeftLightOn { get; private set; }
         public bool RightLightOn { get; private set; }
-        public bool MonitorUp { get; private set; }
+
+        /// <summary>
+        /// 监控是否升起。**不是简单的一个 bool**：奶包会「抢监控」几秒，
+        /// 那几秒里不管玩家怎么按，监控都得是升起的（见 <see cref="_naibaoMonitorTimer"/>）。
+        /// </summary>
+        public bool MonitorUp
+        {
+            get { return _naibaoMonitorTimer > 0f || _monitorPlayerIntent; }
+        }
+
+        /// <summary>玩家自己想要的监控状态（被奶包抢走时也记着，抢完还给他）。</summary>
+        private bool _monitorPlayerIntent;
+
+        /// <summary>奶包抢监控的剩余秒数。</summary>
+        private float _naibaoMonitorTimer;
+
+        /// <summary>奶包偷偷加一档用电的剩余秒数。</summary>
+        private float _naibaoUsageTimer;
+
+        /// <summary>「这口锅是不是奶包的」—— 她动过设备、玩家又在窗口内死掉，就算她头上。</summary>
+        private readonly NaibaoApology _naibaoApology = new NaibaoApology();
 
         /// <summary>
         /// 手电筒是否正亮着 —— **按住才亮，松手就灭**（不是点击切换）。
@@ -72,6 +92,28 @@ namespace NailongFNAF.Core
         /// 给隐藏成就判定用。每 <see cref="Restart"/> 一份新的。
         /// </summary>
         public NightStats Stats { get; private set; }
+
+        /// <summary>
+        /// 奶包。第 1 夜只说话引导，之后每夜手欠（加耗电 / 抢监控 / 关灯 / 嘲讽）。
+        /// 菜单在开局前调 <see cref="SetNaibao"/> 塞进来；永夜模式暂时不接她，为 null。
+        /// </summary>
+        public NaibaoDirector Naibao { get; private set; }
+
+        /// <summary>奶包最近一次出场 —— 表现层拿它决定显示哪张立绘、说哪句话。</summary>
+        public NaibaoCue LastNaibaoCue { get; private set; }
+
+        /// <summary>距 <see cref="LastNaibaoCue"/> 过了多少秒，表现层用它决定什么时候收起来。</summary>
+        public float LastNaibaoCueAge { get; private set; }
+
+        /// <summary>出场流水号：每来一次 +1，UI 靠它判断「这是新的一句」。</summary>
+        public int NaibaoCueSerial { get; private set; }
+
+        /// <summary>
+        /// 玩家死的那一刻就钉住的道歉（死因算她的才有值）。
+        /// 钉在 <see cref="MarkCaught"/> 上而不是现算：人死了之后计时不再走，
+        /// 但 UI 也不能指望「窗口还在」这种巧合。
+        /// </summary>
+        public string NaibaoApologyLine { get; private set; }
 
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
@@ -98,6 +140,9 @@ namespace NailongFNAF.Core
         public void MarkCaught()
         {
             HasBeenCaught = true;
+
+            // 死因归到奶包头上？那就把她这句道歉钉住，死亡面板会显示
+            NaibaoApologyLine = _naibaoApology.CulpableLine();
 
             // 结算彩蛋要看「死在第几个小时」——抓到的这一帧就把时刻钉住
             if (Stats != null && Clock != null)
@@ -162,6 +207,11 @@ namespace NailongFNAF.Core
 
             float dt = Time.deltaTime;
             LastGainAge += dt;
+            LastNaibaoCueAge += dt;
+            _naibaoApology.Tick(dt);
+
+            // 奶包：引导期到点说话，之后到点手欠。她只在玩家还能动的时候闹
+            TickNaibao(dt);
 
             Clock.Tick(dt);
 
@@ -214,8 +264,80 @@ namespace NailongFNAF.Core
             RightDoorClosed = false;
             LeftLightOn = false;
             RightLightOn = false;
-            MonitorUp = false;
+            _monitorPlayerIntent = false;
+            _naibaoMonitorTimer = 0f;
+            _naibaoUsageTimer = 0f;
             FlashlightOn = false;
+        }
+
+        /// <summary>
+        /// 推进奶包：先扣计时器，再让她决定要不要出场，最后把出场的效果落到设备上。
+        ///
+        /// 计时器每帧都扣（包括她不在、玩家不能动的时候），否则断电后
+        /// 「偷加的一档耗电」会一直挂着。
+        /// </summary>
+        private void TickNaibao(float dt)
+        {
+            if (_naibaoUsageTimer > 0f)
+            {
+                _naibaoUsageTimer -= dt;
+            }
+
+            if (_naibaoMonitorTimer > 0f)
+            {
+                _naibaoMonitorTimer -= dt;
+            }
+
+            if (Naibao == null || !CanOperate())
+            {
+                return;
+            }
+
+            Naibao.Tick(dt);
+
+            NaibaoCue cue;
+            while (Naibao.TryTakeCue(out cue))
+            {
+                ApplyNaibaoCue(cue);
+            }
+        }
+
+        /// <summary>把奶包这一次出场落到实际状态上，并留给表现层去演。</summary>
+        private void ApplyNaibaoCue(NaibaoCue cue)
+        {
+            switch (cue.Action)
+            {
+                case NaibaoAction.UsageSpike:
+                    _naibaoUsageTimer = cue.Seconds;
+                    break;
+
+                case NaibaoAction.MonitorGrab:
+                    _naibaoMonitorTimer = cue.Seconds;
+                    break;
+
+                case NaibaoAction.LightOff:
+                    if (RightLightOn)
+                    {
+                        RightLightOn = false;
+                    }
+                    else if (LeftLightOn)
+                    {
+                        LeftLightOn = false;
+                    }
+                    else
+                    {
+                        // 手欠落空：她伸手去关灯，结果你根本没开
+                        cue.Line = "我想关你一盏灯来着……你压根没开。";
+                    }
+                    break;
+            }
+
+            LastNaibaoCue = cue;
+            LastNaibaoCueAge = 0f;
+            NaibaoCueSerial++;
+
+            // 归因账本：她动了设备就记一笔，玩家在窗口内死掉就算她的锅（见 NaibaoApology）
+            _naibaoApology.Note(cue.Action);
         }
 
         /// <summary>重开一夜。</summary>
@@ -229,11 +351,22 @@ namespace NailongFNAF.Core
             LastGainAge = 0f;
             SetPaused(false);
 
+            // 奶包跟着这一局重来：菜单会在 Restart 之后重新塞一个，调试重开（R）走的是这个分支。
+            if (Naibao != null)
+            {
+                Naibao.Reset();
+            }
+            LastNaibaoCueAge = 0f;
+            _naibaoApology.Clear();
+            NaibaoApologyLine = null;
+
             LeftDoorClosed = false;
             RightDoorClosed = false;
             LeftLightOn = false;
             RightLightOn = false;
-            MonitorUp = false;
+            _monitorPlayerIntent = false;
+            _naibaoMonitorTimer = 0f;
+            _naibaoUsageTimer = 0f;
             FlashlightOn = false;
 
             CurrentView = ViewSide.Front;
@@ -253,6 +386,19 @@ namespace NailongFNAF.Core
         public void SetEndless(bool endless)
         {
             EndlessMode = endless;
+        }
+
+        /// <summary>
+        /// 安插奶包（下一局生效）。<paramref name="director"/> 传 null 表示这局没有她。
+        /// **要在 <see cref="Restart"/> 之后调**，因为 Restart 会清掉上一局的状态。
+        /// </summary>
+        public void SetNaibao(NaibaoDirector director)
+        {
+            Naibao = director;
+            LastNaibaoCue = default(NaibaoCue);
+            LastNaibaoCueAge = 0f;
+            _naibaoApology.Clear();
+            NaibaoApologyLine = null;
         }
 
         // ---------------------------------------------------------------
@@ -424,7 +570,8 @@ namespace NailongFNAF.Core
         {
             if (CanOperate())
             {
-                MonitorUp = !MonitorUp;
+                // 按的是「玩家想要的状态」，这样奶包抢监控的那两秒里也能先把意图翻过来
+                _monitorPlayerIntent = !MonitorUp;
                 NoteAction(PlayerAction.Camera);
 
                 if (Stats != null)
@@ -511,6 +658,13 @@ namespace NailongFNAF.Core
             }
 
             if (FlashlightOn)
+            {
+                usage++;
+            }
+
+            // 奶包偷偷拧上去的那一档。她不动你的东西，只让电表转快一点 ——
+            // 所以这里加的是「看不见的一格」，玩家只能从 Usage 表和掉电速度察觉
+            if (_naibaoUsageTimer > 0f)
             {
                 usage++;
             }

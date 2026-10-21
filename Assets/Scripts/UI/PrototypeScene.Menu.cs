@@ -1,4 +1,4 @@
-﻿using NailongFNAF.Core;
+using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
@@ -80,6 +80,11 @@ namespace NailongFNAF.UI
         private AudioSource _endQuoteAudio;
         private Button _endPrimaryButton;
         private Text _endPrimaryLabel;
+
+        /// <summary>死亡面板上的奶包道歉（只在「这局是她的锅」时出现）。</summary>
+        private CanvasGroup _endNaibaoGroup;
+        private Image _endNaibaoPortrait;
+        private Text _endNaibaoText;
 
         // 暂停面板
         private Text _pauseInfoText;
@@ -402,6 +407,88 @@ namespace NailongFNAF.UI
             _endQuoteAudio.loop = false;
             _endQuoteAudio.spatialBlend = 0f;
             _endQuoteAudio.volume = 0.95f;
+
+            BuildEndNaibaoApology();
+        }
+
+        /// <summary>
+        /// 死亡面板上的奶包：如果这局是她的锅，她在左下角站着道歉。
+        ///
+        /// 为什么不做成游戏里那张卡：死亡面板是一层几乎不透明的全屏黑，
+        /// 场景里的卡会被盖住 —— 只能画在面板自己身上。
+        /// </summary>
+        private void BuildEndNaibaoApology()
+        {
+            var go = new GameObject("EndNaibao", typeof(RectTransform), typeof(CanvasGroup));
+            go.transform.SetParent(_endView.transform, false);
+            StretchToParent(go.GetComponent<RectTransform>());
+
+            _endNaibaoGroup = go.GetComponent<CanvasGroup>();
+            _endNaibaoGroup.alpha = 0f;
+            _endNaibaoGroup.blocksRaycasts = false;
+
+            var portraitGo = new GameObject("EndNaibaoPortrait",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            portraitGo.transform.SetParent(go.transform, false);
+            PlaceRect(portraitGo.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(150f, 220f), new Vector2(160f, 344f));
+
+            _endNaibaoPortrait = portraitGo.GetComponent<Image>();
+            _endNaibaoPortrait.preserveAspect = true;
+            _endNaibaoPortrait.raycastTarget = false;
+
+            // 说话框：贴底一条，别压到上面三个按钮
+            var box = new GameObject("EndNaibaoLine",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            box.transform.SetParent(go.transform, false);
+            PlaceRect(box.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(470f, 112f), new Vector2(760f, 152f));
+
+            var boxImage = box.GetComponent<Image>();
+            boxImage.sprite = _buttonSprite;
+            boxImage.color = new Color(0.06f, 0.07f, 0.09f, 0.9f);
+            boxImage.raycastTarget = false;
+
+            Text nameLabel = MakeText(box.transform, "EndNaibaoName", "奶包",
+                TextAnchor.UpperLeft, 22, new Color(1f, 0.84f, 0.42f));
+            PlaceRect(nameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(18f, -10f), new Vector2(140f, 28f));
+
+            _endNaibaoText = MakeText(box.transform, "EndNaibaoText", string.Empty,
+                TextAnchor.UpperLeft, 24, new Color(0.94f, 0.94f, 0.94f));
+            _endNaibaoText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            PlaceRect(_endNaibaoText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(18f, -42f), new Vector2(724f, 104f));
+        }
+
+        /// <summary>死亡面板要不要摆出奶包的道歉（她没背锅就收起来）。</summary>
+        private void ShowEndNaibaoApology(GameManager gm)
+        {
+            if (_endNaibaoGroup == null)
+            {
+                return;
+            }
+
+            string line = gm != null ? gm.NaibaoApologyLine : null;
+            if (string.IsNullOrEmpty(line))
+            {
+                _endNaibaoGroup.alpha = 0f;
+                return;
+            }
+
+            if (_endNaibaoText != null)
+            {
+                _endNaibaoText.text = line;
+            }
+
+            if (_endNaibaoPortrait != null)
+            {
+                Sprite sprite = NaibaoSprite(NaibaoPose.Huffy);
+                _endNaibaoPortrait.sprite = sprite;
+                _endNaibaoPortrait.enabled = sprite != null;
+            }
+
+            _endNaibaoGroup.alpha = 1f;
         }
 
         /// <summary>
@@ -851,6 +938,7 @@ namespace NailongFNAF.UI
             _endlessOverdrive = 0f;
 
             gm.Restart();
+            gm.SetNaibao(CreateNaibaoForNight(night));
             ClearJumpscare();
 
             _menuRoot.SetActive(false);
@@ -894,6 +982,7 @@ namespace NailongFNAF.UI
             bool resume = TryLoadEternalNight(out save);
 
             gm.Restart();
+            gm.SetNaibao(null);
             if (resume)
             {
                 if (gm.LoadSave(save))
@@ -964,6 +1053,9 @@ namespace NailongFNAF.UI
             bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
             bool wasLast = !custom && current >= NightCount - 1;
             bool unlockedNext = false;
+
+            // 赢了就没有道歉这回事
+            ShowEndNaibaoApology(null);
 
             // 自定义夜不动解锁进度 —— 它不属于任何一夜
             if (!custom && !wasLast && current + 1 > UnlockedNight)
@@ -1165,6 +1257,9 @@ namespace NailongFNAF.UI
             // 跳杀完，那只敌人说一句话
             _endQuoteText.text = QuoteFor(_jumpscareEnemy);
             PlayEndQuoteVoice(_jumpscareEnemy);
+
+            // 这局要算她的锅，她在左下角道个歉
+            ShowEndNaibaoApology(gm);
         }
 
         /// <summary>
@@ -1206,6 +1301,9 @@ namespace NailongFNAF.UI
             // 永夜模式死法多半是被抓，台词照旧；没抓到就没台词
             _endQuoteText.text = QuoteFor(_jumpscareEnemy);
             PlayEndQuoteVoice(_jumpscareEnemy);
+
+            // 永夜模式她不全程在场，一律收起来
+            ShowEndNaibaoApology(null);
         }
 
         /// <summary>把「真实秒数」换算成游戏里的时长文案（每小时多少秒由时钟决定）。</summary>
@@ -1362,12 +1460,26 @@ namespace NailongFNAF.UI
             }
 
             gm.Restart();
+
+            // 自定义夜没有「第几夜」的概念，默认她已经过了引导期
+            gm.SetNaibao(new NaibaoDirector(false, null));
+
             ClearJumpscare();
 
             _menuRoot.SetActive(false);
             _menuOpen = false;
             _endShown = false;
             _caughtHoldTimer = 0f;
+        }
+
+        /// <summary>
+        /// 这一夜该让奶包干什么：第一夜她只负责说话（引导），第二夜起开始手欠。
+        /// 永夜暂时不接她（难度已经够乱，再加一个说不清是谁的锅的变量不划算），
+        /// 自定义夜按手欠处理。传 null 给 <see cref="GameManager.SetNaibao"/> 就是这一夜没有她。
+        /// </summary>
+        private static NaibaoDirector CreateNaibaoForNight(int night)
+        {
+            return new NaibaoDirector(night <= 0, null);
         }
 
         private void OnQuitClicked()
