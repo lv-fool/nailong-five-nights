@@ -901,14 +901,7 @@ namespace NailongFNAF.UI
 
         private void UpdateView(GameManager gm)
         {
-            // 通话中镜头停在原处：面板是模态的，背后还在跟鼠标转视角看着像穿帮
-            bool onCall = _naibaoCallGroup != null && _naibaoCallGroup.gameObject.activeSelf;
-
-            if (onCall)
-            {
-                // 什么都不改，_panTarget 保持上一帧的值
-            }
-            else if (CanOperate(gm))
+            if (CanOperate(gm))
             {
                 float width = Screen.width;
                 float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
@@ -3404,7 +3397,8 @@ namespace NailongFNAF.UI
 
             bool talking = gm.NaibaoTalking;
 
-            bool showPhone = gm.Naibao != null && !talking && !gm.HasPowerOut
+            // 通话时手机留在桌上不藏 —— 她还在那儿说话，藏起来反而怪
+            bool showPhone = gm.Naibao != null && !gm.HasPowerOut
                 && !gm.HasBeenCaught && !_menuOpen;
 
             UpdateNaibaoPhone(showPhone);
@@ -3418,6 +3412,12 @@ namespace NailongFNAF.UI
             if (!talking)
             {
                 _naibaoCallSerial = -1;
+
+                if (_naibaoPhone != null)
+                {
+                    _naibaoPhone.ShowIdle();
+                }
+
                 return;
             }
 
@@ -3435,8 +3435,14 @@ namespace NailongFNAF.UI
             _naibaoCallPortrait.sprite = portrait;
             _naibaoCallPortrait.enabled = portrait != null;
 
+            // 屏幕上那张脸跟着台词换：AI 生成的模型没有骨骼，换脸就是换网格
+            if (_naibaoPhone != null)
+            {
+                _naibaoPhone.SetFace(line.Pose);
+            }
+
             _naibaoCallText.text = line.Text;
-            _naibaoCallHint.text = "通话中 · 用电 +1 级 · 她这会儿不会动你的东西　"
+            _naibaoCallHint.text = "通话中 · 用电 +1 级 · 她不动手　"
                 + (call.Index + 1) + " / " + call.Count;
         }
 
@@ -4602,7 +4608,14 @@ namespace NailongFNAF.UI
             _naibaoPhoneHint.gameObject.SetActive(false);
         }
 
-        /// <summary>通话面板：她的立绘 + 台词 + 「继续 / 挂断」。</summary>
+        /// <summary>
+        /// 通话时压在底部的**字幕条**（不是模态面板）。
+        ///
+        /// 通话要能一边聊一边干活：门、灯、监控、手电筒全都照常点。
+        /// 所以这里没有全屏遮罩，背景图 `raycastTarget = false`，
+        /// 只有「继续 / 挂断」两个按钮吃点击；条子抬到 y=30 起，
+        /// 避开最底下那条 MONITOR 把手和它上面的手电筒。
+        /// </summary>
         private void BuildNaibaoCall()
         {
             var root = new GameObject("NaibaoCall",
@@ -4612,59 +4625,75 @@ namespace NailongFNAF.UI
 
             _naibaoCallGroup = root.GetComponent<CanvasGroup>();
             _naibaoCallGroup.alpha = 1f;
+            // 整条不吃点击，只是画在下面；按钮自己会抢
+            // 字幕条自己不该挡住世界里的点击，但**继续/挂断必须能点** ——
+            // 所以不用 CanvasGroup 整体屏蔽（那会把按钮一起屏蔽掉），
+            // 而是把条子背景、头像、文字的 raycastTarget 关掉，只留按钮
             _naibaoCallGroup.blocksRaycasts = true;
 
-            var dim = MakeFullScreenImage("NaibaoCallDim", new Color(0f, 0f, 0f, 0.62f), true);
-            dim.transform.SetParent(root.transform, false);
-            dim.transform.SetAsFirstSibling();
-
-            var panel = new GameObject("NaibaoCallPanel",
+            // 条子摆在**手电筒按钮上方**：底下那条 MONITOR 把手（y 0~28）、
+            // 左下角的电量读数（y 0~100）、手电筒（y 144~200）都不能被它压住，
+            // 否则「通话时也能正常操作」就成了空话。
+            var bar = new GameObject("NaibaoCallBar",
                 typeof(RectTransform), typeof(Image));
-            panel.transform.SetParent(root.transform, false);
-            PlaceRect(panel.GetComponent<RectTransform>(), new Vector2(0.5f, 0.5f),
-                new Vector2(0.5f, 0.5f), new Vector2(0f, 20f), new Vector2(1200f, 540f));
+            bar.transform.SetParent(root.transform, false);
+            var barRect = bar.GetComponent<RectTransform>();
+            barRect.anchorMin = new Vector2(0.19f, 0f);
+            barRect.anchorMax = new Vector2(0.81f, 0f);
+            barRect.pivot = new Vector2(0.5f, 0f);
+            barRect.offsetMin = new Vector2(0f, 206f);
+            barRect.offsetMax = new Vector2(0f, 302f);
 
-            var panelImage = panel.GetComponent<Image>();
-            panelImage.sprite = _buttonSprite;
-            panelImage.type = Image.Type.Sliced;
-            panelImage.color = new Color(0.05f, 0.06f, 0.08f, 0.97f);
-            panelImage.raycastTarget = true;
+            var barImage = bar.GetComponent<Image>();
+            barImage.sprite = _buttonSprite;
+            barImage.type = Image.Type.Sliced;
+            barImage.color = new Color(0.04f, 0.05f, 0.07f, 0.88f);
+            barImage.raycastTarget = false;
 
-            // 立绘在左，贴在面板边上
+            // 小头像：边上一点点，别占字
             var portraitGo = new GameObject("Portrait", typeof(RectTransform), typeof(Image));
-            portraitGo.transform.SetParent(panel.transform, false);
+            portraitGo.transform.SetParent(bar.transform, false);
             PlaceRect(portraitGo.GetComponent<RectTransform>(), new Vector2(0f, 0.5f),
-                new Vector2(0f, 0.5f), new Vector2(36f, 0f), new Vector2(300f, 470f));
+                new Vector2(0f, 0.5f), new Vector2(52f, 0f), new Vector2(80f, 80f));
 
             _naibaoCallPortrait = portraitGo.GetComponent<Image>();
             _naibaoCallPortrait.preserveAspect = true;
             _naibaoCallPortrait.raycastTarget = false;
 
-            Text nameLabel = MakeText(panel.transform, "Name", "奶包 · 通话中",
-                TextAnchor.UpperLeft, 26, new Color(1f, 0.84f, 0.42f));
+            Text nameLabel = MakeText(bar.transform, "Name", "奶包",
+                TextAnchor.MiddleLeft, 22, new Color(1f, 0.84f, 0.42f));
+            nameLabel.horizontalOverflow = HorizontalWrapMode.Overflow;
             PlaceRect(nameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(360f, -22f), new Vector2(420f, 34f));
+                new Vector2(108f, -14f), new Vector2(120f, 26f));
 
-            _naibaoCallHint = MakeText(panel.transform, "Hint", string.Empty,
-                TextAnchor.UpperLeft, 20, new Color(0.72f, 0.86f, 0.74f));
+            _naibaoCallHint = MakeText(bar.transform, "Hint", string.Empty,
+                TextAnchor.MiddleLeft, 18, new Color(0.68f, 0.82f, 0.70f));
+            _naibaoCallHint.horizontalOverflow = HorizontalWrapMode.Overflow;
             PlaceRect(_naibaoCallHint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(360f, -62f), new Vector2(800f, 28f));
+                new Vector2(168f, -14f), new Vector2(460f, 24f));
 
-            _naibaoCallText = MakeText(panel.transform, "Line", string.Empty,
-                TextAnchor.UpperLeft, 30, new Color(0.94f, 0.94f, 0.94f));
+            _naibaoCallText = MakeText(bar.transform, "Line", string.Empty,
+                TextAnchor.MiddleLeft, 25, new Color(0.96f, 0.96f, 0.96f));
             _naibaoCallText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            PlaceRect(_naibaoCallText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(360f, -104f), new Vector2(800f, 300f));
+            _naibaoCallText.verticalOverflow = VerticalWrapMode.Truncate;
+            // 台词占满条子的剩余宽度：**铺开**（anchorMin/Max 拉伸），不是定尺寸 ——
+            // 条子宽度本身跟着窗口走，写死宽度在别的分辨率下会漏字
+            var lineRect = _naibaoCallText.rectTransform;
+            lineRect.anchorMin = new Vector2(0f, 0f);
+            lineRect.anchorMax = new Vector2(1f, 1f);
+            lineRect.pivot = new Vector2(0.5f, 0.5f);
+            lineRect.offsetMin = new Vector2(108f, 10f);
+            lineRect.offsetMax = new Vector2(-186f, -40f);
 
-            var next = MakeButton(panel.transform, "Next", "继续",
-                new Vector2(1f, 0f), new Vector2(-40f, 96f), new Vector2(220f, 64f),
+            var next = MakeButton(bar.transform, "Next", "继续",
+                new Vector2(1f, 0.5f), new Vector2(-22f, 22f), new Vector2(132f, 36f),
                 OnNaibaoCallNextClicked);
-            next.GetComponentInChildren<Text>().fontSize = 26;
+            next.GetComponentInChildren<Text>().fontSize = 20;
 
-            var hangUp = MakeButton(panel.transform, "HangUp", "挂断",
-                new Vector2(1f, 0f), new Vector2(-40f, 24f), new Vector2(220f, 64f),
+            var hangUp = MakeButton(bar.transform, "HangUp", "挂断",
+                new Vector2(1f, 0.5f), new Vector2(-22f, -22f), new Vector2(132f, 36f),
                 OnNaibaoCallHangUpClicked);
-            hangUp.GetComponentInChildren<Text>().fontSize = 26;
+            hangUp.GetComponentInChildren<Text>().fontSize = 20;
 
             root.SetActive(false);
         }

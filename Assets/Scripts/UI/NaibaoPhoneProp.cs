@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using NailongFNAF.Gameplay;
 using UnityEngine;
 
 namespace NailongFNAF.UI
@@ -8,9 +10,10 @@ namespace NailongFNAF.UI
     /// 玩家转头把它转到画面中间时它会亮起来（自发光 + 一点点呼吸），
     /// 这时点它才接通；转开就暗下去。这样它像屋里的东西，而不是贴在屏幕上的按钮。
     ///
-    /// 模型：`Resources/NaibaoPhone/naibao_phone`（由 `奶包/naibao_relief_v2.glb`
-    /// 经 Blender 减面到 6 万面后导出，见 `.setup/conv_phone.py`）。原始模型高 1 米，
-    /// 这里按米缩到手机大小。
+    /// 屏上的人有**四张脸**：平常一张，通话时按台词换（笑 / 撇嘴 / 坏笑）。
+    /// 它们是四份独立的网格（AI 生成的模型没有骨骼和表情通道，换脸只能换网格），
+    /// 每份都经 Blender 减面到一万五千面，见 `.setup/conv_phone_faces.py`。
+    /// 原始模型高 1 米，这里按米缩到手机大小。
     /// </summary>
     public class NaibaoPhoneProp : MonoBehaviour
     {
@@ -26,9 +29,6 @@ namespace NailongFNAF.UI
         /// <summary>模型自身高 1 米，缩到 19 厘米。</summary>
         public const float Scale = 0.19f;
 
-        /// <summary>手机贴图（从 GLB 的 baseColor 里导出来的那一张）。</summary>
-        public const string TexturePath = "NaibaoPhone/naibao_phone_color";
-
         /// <summary>相机朝向和手机方向的夹角小于多少度算「转到它了」。</summary>
         public const float HighlightAngle = 15f;
 
@@ -41,8 +41,17 @@ namespace NailongFNAF.UI
         /// <summary>亮起来的颜色。</summary>
         private static readonly Color HighlightColor = new Color(1f, 0.82f, 0.42f, 1f);
 
-        private MeshRenderer[] _renderers;
-        private Material _material;
+        /// <summary>一张脸：网格 + 贴图在同一个 Resources 前缀下。</summary>
+        private struct Face
+        {
+            public string Name;
+            public GameObject Go;
+            public MeshRenderer[] Renderers;
+            public Material Material;
+        }
+
+        private readonly List<Face> _faces = new List<Face>();
+        private int _active = -1;
         private float _glow;
         private float _pulse;
         private bool _highlighted;
@@ -58,8 +67,7 @@ namespace NailongFNAF.UI
                 return null;
             }
 
-            var go = Instantiate(prefab);
-            go.name = "NaibaoPhone";
+            var go = new GameObject("NaibaoPhone");
             go.transform.SetParent(parent, false);
             go.transform.position = WorldPosition;
             go.transform.rotation = Quaternion.identity;
@@ -72,46 +80,159 @@ namespace NailongFNAF.UI
 
         private void Bind()
         {
-            AutoOrient();
+            // 四张脸各是一个子物体，同一时刻只开一张。
+            // 缺哪一张就跳过 —— 差分是锦上添花，不该让手机整台消失。
+            AddFace(ResourcePath, ResourcePath + "_color");
+            AddFace(ResourcePath + "_happy", ResourcePath + "_happy");
+            AddFace(ResourcePath + "_pout", ResourcePath + "_pout");
+            AddFace(ResourcePath + "_smirk", ResourcePath + "_smirk");
 
-            _renderers = GetComponentsInChildren<MeshRenderer>();
+            if (_faces.Count == 0)
+            {
+                Debug.LogWarning("[奶龙] 手机的四张脸一张都没加载出来");
+                return;
+            }
 
-            // 模型自带的那份材质是靠 FBX 里的贴图路径找图的，导出时没内嵌，
-            // 所以这里按「项目自己的 unlit 贴图 shader + 单独导出的贴图」重做一份：
-            // 办公室没有实时光照，用 Standard 会渲染成黑的。
+            ShowIdle();
+        }
+
+        private void AddFace(string modelPath, string texturePath)
+        {
+            var prefab = Resources.Load<GameObject>(modelPath);
+            if (prefab == null)
+            {
+                return;
+            }
+
+            var go = Instantiate(prefab);
+            go.name = "Face_" + System.IO.Path.GetFileName(modelPath);
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+
+            AlignToCamera(go.transform);
+
+            var renderers = go.GetComponentsInChildren<MeshRenderer>();
+            if (renderers.Length == 0)
+            {
+                Destroy(go);
+                return;
+            }
+
+            // FBX 里那份材质靠贴图路径找图，导出时没内嵌；这里按项目自己的
+            // unlit 贴图 shader 重做 —— 办公室没有实时光照，Standard 会渲染成黑的。
             var bankMaterial = Resources.Load<Material>("PanoMaterial");
             Shader shader = bankMaterial != null
                 ? bankMaterial.shader
                 : Shader.Find("NailongFNAF/UnlitTexture");
 
-            var texture = Resources.Load<Texture2D>(TexturePath);
-
+            Material material = null;
             if (shader == null)
             {
                 Debug.LogWarning("[奶龙] 找不到 unlit shader，手机可能渲染成粉红");
             }
             else
             {
-                _material = new Material(shader);
-                _material.name = "NaibaoPhoneMaterial";
+                material = new Material(shader);
+                material.name = "NaibaoPhone" + System.IO.Path.GetFileName(texturePath);
 
+                var texture = Resources.Load<Texture2D>(texturePath);
                 if (texture != null)
                 {
-                    _material.mainTexture = texture;
-                }
-                else
-                {
-                    Debug.LogWarning("[奶龙] 缺手机贴图 Resources/" + TexturePath);
+                    material.mainTexture = texture;
                 }
 
-                _material.SetColor("_Color", Color.white);
-
-                for (int i = 0; i < _renderers.Length; i++)
+                material.SetColor("_Color", Color.white);
+                for (int i = 0; i < renderers.Length; i++)
                 {
-                    _renderers[i].sharedMaterial = _material;
+                    renderers[i].sharedMaterial = material;
                 }
             }
 
+            go.SetActive(false);
+
+            _faces.Add(new Face
+            {
+                Name = modelPath,
+                Go = go,
+                Renderers = renderers,
+                Material = material,
+            });
+        }
+
+        /// <summary>
+        /// 换一张脸。同一张就不动 —— 每帧调也不会重建。
+        /// <paramref name="force"/> 给初始化用：第一次要连激活一起做。
+        /// </summary>
+        public void SetFace(NaibaoPose pose)
+        {
+            SetFaceIndex(IndexOf(pose));
+        }
+
+        /// <summary>平常那张脸（没在通话时就是它）。</summary>
+        public void ShowIdle()
+        {
+            SetFaceIndex(0);
+        }
+
+        private void SetFaceIndex(int index)
+        {
+            if (_faces.Count == 0)
+            {
+                return;
+            }
+
+            if (index < 0 || index >= _faces.Count)
+            {
+                index = 0;
+            }
+
+            if (index == _active)
+            {
+                return;
+            }
+
+            _active = index;
+            for (int i = 0; i < _faces.Count; i++)
+            {
+                _faces[i].Go.SetActive(i == index);
+            }
+        }
+
+        /// <summary>
+        /// 哪张脸对应哪种姿势。
+        ///
+        /// 现在只有三张「有表情」的网格（笑 / 撇嘴 / 坏笑），五种植装里有两种共用：
+        /// 得意和探身都用坏笑，不耐烦和垮脸都用撇嘴。
+        /// </summary>
+        private int IndexOf(NaibaoPose pose)
+        {
+            string want;
+            switch (pose)
+            {
+                case NaibaoPose.Huffy:
+                case NaibaoPose.Bored:
+                    want = ResourcePath + "_pout";
+                    break;
+                case NaibaoPose.Smug:
+                case NaibaoPose.Peek:
+                    want = ResourcePath + "_smirk";
+                    break;
+                default:
+                    want = ResourcePath + "_happy";
+                    break;
+            }
+
+            for (int i = 0; i < _faces.Count; i++)
+            {
+                if (_faces[i].Name == want)
+                {
+                    return i;
+                }
+            }
+
+            return 0;
         }
 
         /// <summary>
@@ -122,9 +243,9 @@ namespace NailongFNAF.UI
         /// 换一台机器就歪掉，所以这里直接量：**最长的轴抬成 +Y（立起来）**，
         /// **最薄的轴转成 -Z（冲着相机）**，剩下的轴自然就是屏幕的横轴。
         /// </summary>
-        private void AutoOrient()
+        private static void AlignToCamera(Transform child)
         {
-            var filter = GetComponentInChildren<MeshFilter>();
+            var filter = child.GetComponentInChildren<MeshFilter>();
             if (filter == null || filter.sharedMesh == null)
             {
                 return;
@@ -145,19 +266,15 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 模型自己的三根轴（世界方向）：filter 已经带着 FBX 导入时的旋转
             Quaternion modelRotation = filter.transform.rotation;
             Vector3 modelUp = modelRotation * AxisVector(upAxis);
             Vector3 modelThin = modelRotation * AxisVector(thinAxis);
-            // 想要的三根轴：立起来、屏幕朝相机（−Z）、另一根做横轴
-            Vector3 wantedUp = Vector3.up;
-            Vector3 wantedThin = Vector3.back;
 
             Quaternion from = Quaternion.LookRotation(modelThin, modelUp);
-            Quaternion to = Quaternion.LookRotation(wantedThin, wantedUp);
+            Quaternion to = Quaternion.LookRotation(Vector3.back, Vector3.up);
 
-            transform.rotation = to * Quaternion.Inverse(from);
-            transform.Rotate(Vector3.up, FlipYaw, Space.World);
+            child.rotation = to * Quaternion.Inverse(from);
+            child.Rotate(Vector3.up, FlipYaw, Space.World);
         }
 
         private static Vector3 AxisVector(int axis)
@@ -180,15 +297,21 @@ namespace NailongFNAF.UI
         /// </summary>
         public bool ContainsScreenPoint(Camera cam, Vector3 screenPoint)
         {
-            if (cam == null || _renderers == null || _renderers.Length == 0)
+            if (cam == null || _active < 0 || _active >= _faces.Count)
             {
                 return false;
             }
 
-            Bounds bounds = _renderers[0].bounds;
-            for (int i = 1; i < _renderers.Length; i++)
+            MeshRenderer[] renderers = _faces[_active].Renderers;
+            if (renderers.Length == 0)
             {
-                bounds.Encapsulate(_renderers[i].bounds);
+                return false;
+            }
+
+            Bounds bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
             }
 
             Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
@@ -226,12 +349,16 @@ namespace NailongFNAF.UI
                 ? 0.82f + 0.18f * Mathf.Sin(Time.unscaledTime * 3.4f)
                 : 0f;
 
-            if (_material != null)
+            // 高亮 = 往暖黄里推一点，而不是简单加亮：
+            // 加了亮度在这套黑房间里会像漏光，推色相才像「被盯上了」
+            Color tint = Color.Lerp(Color.white, HighlightColor, _glow * _pulse * 0.55f);
+
+            for (int i = 0; i < _faces.Count; i++)
             {
-                // 高亮 = 往暖黄里推一点，而不是简单加亮：
-                // 加了亮度在这套黑房间里会像漏光，推色相才像「被盯上了」
-                Color tint = Color.Lerp(Color.white, HighlightColor, _glow * _pulse * 0.55f);
-                _material.SetColor("_Color", tint);
+                if (_faces[i].Material != null)
+                {
+                    _faces[i].Material.SetColor("_Color", tint);
+                }
             }
 
             float scale = Scale * (1f + 0.02f * _glow * Mathf.Sin(Time.unscaledTime * 3.4f));
