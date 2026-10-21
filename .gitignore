@@ -70,6 +70,9 @@ __pycache__/
 # 本机安装/验证用的临时目录（Unity 安装包、测试结果、截图）
 /.setup/
 
+# 便携版 Blender（约 1.2 GB，装法见 tools/setup_blender.py，随时可重建）
+/.tools/
+
 # ===== 本地密钥（绝不能提交）=====
 .env
 .env.local
@@ -79,3 +82,6 @@ __pycache__/
 
 # 抠图预览（可再生，见 tools/cutout_naibao.py）
 奶包/preview/
+
+# 用户提供的原始模型（47 MB，source 在 奶包/，减面后的产物已入库）
+/奶包/*.glb

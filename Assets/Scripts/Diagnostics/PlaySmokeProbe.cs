@@ -324,11 +324,198 @@ namespace NailongFNAF.Diagnostics
             else if (_step == 25 && elapsed > 33.0f)
             {
                 _step = 26;
+
+                // 桌上那部手机：重新开第 1 夜，并把手机摆到正前方 ——
+                // 冒烟里没法移动鼠标，只能靠改位置让「转到它」这件事必然发生。
+                SetPhonePosition(new Vector3(0f, 1.30f, 0f));
+
+                object scene = Instance("NailongFNAF.UI.PrototypeScene");
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnNightClicked", new object[] { 0 });
+
+                Debug.Log("SMOKE: 第 1 夜重开，手机摆到正前方");
+            }
+            else if (_step == 26 && elapsed > 34.0f)
+            {
+                _step = 27;
+                SetPhonePosition(new Vector3(0.24f, 1.02f, 0.00f));
+            }
+            else if (_step == 27 && elapsed > 34.8f)
+            {
+                _step = 28;
+                SnapStraight("18_naibao_phone");
+                ReportPhone();
+            }
+            else if (_step == 28 && elapsed > 35.6f)
+            {
+                _step = 29;
+
+                object gm2 = Instance("NailongFNAF.Core.GameManager");
+                object started2 = Invoke(gm2, "StartNaibaoCall", new object[] { 0 });
+                Debug.Log("SMOKE: 接通 = " + started2);
+            }
+            else if (_step == 29 && elapsed > 36.8f)
+            {
+                _step = 30;
+                SnapStraight("17_naibao_call");
+            }
+            else if (_step == 30 && elapsed > 38.0f)
+            {
+                _step = 31;
+
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                object call = gm != null ? Get(gm, "NaibaoCall") : null;
+                object current = call != null ? Get(call, "Current") : null;
+
+                Debug.Log("SMOKE: 通话面板 当前句 = [" +
+                          (current != null ? Get(current, "Text") : null) + "] 序号 = " +
+                          (call != null ? Get(call, "Index") : null) +
+                          " 用电档 = " + (gm != null ? Invoke(gm, "CountUsageLevel", null) : null) +
+                          " 手机隐藏 = " + PhoneHidden());
+
                 Finish();
             }
         }
 
+        /// <summary>把手机各个 renderer 的世界包围盒打出来 —— 用来判断模型的长轴 / 朝向。</summary>
+        private static void DumpPhoneBounds()
+        {
+            Transform[] all = Resources.FindObjectsOfTypeAll<Transform>();
+            int phones = 0;
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].name == "NaibaoPhone")
+                {
+                    phones++;
+                    Debug.Log("SMOKE: 手机实例[" + phones + "] " + all[i].position.ToString("F3") +
+                              " 缩放 " + all[i].lossyScale.ToString("F3") +
+                              " 激活 " + all[i].gameObject.activeInHierarchy);
+                }
+            }
+
+            GameObject go = GameObject.Find("NaibaoPhone");
+            if (go == null)
+            {
+                Debug.Log("SMOKE: 找不到 NaibaoPhone 物体");
+                return;
+            }
+
+            Renderer[] renderers = go.GetComponentsInChildren<Renderer>();
+            Debug.Log("SMOKE: 手机 renderer 数 = " + renderers.Length);
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer r = renderers[i];
+                Bounds b = r.bounds;
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    Vector3 min = new Vector3(99999f, 99999f, 0f);
+                    Vector3 max = new Vector3(-99999f, -99999f, 0f);
+                    for (int c = 0; c < 8; c++)
+                    {
+                        Vector3 corner = b.center + new Vector3(
+                            (c & 1) == 0 ? -b.extents.x : b.extents.x,
+                            (c & 2) == 0 ? -b.extents.y : b.extents.y,
+                            (c & 4) == 0 ? -b.extents.z : b.extents.z);
+                        Vector3 sp = cam.WorldToScreenPoint(corner);
+                        min = Vector3.Min(min, sp);
+                        max = Vector3.Max(max, sp);
+                    }
+
+                    Debug.Log("SMOKE: 手机 屏幕矩形 = " + min.ToString("F0") + " .. " +
+                              max.ToString("F0") + "（画布 " + Screen.width + "x" + Screen.height +
+                              " fov " + cam.fieldOfView.ToString("F1") + "）");
+                }
+
+                Debug.Log("SMOKE: 手机 renderer[" + i + "] " + r.name +
+                          " 可见 = " + r.isVisible +
+                          " 材质 = " + (r.sharedMaterial != null ? r.sharedMaterial.shader.name : "null") +
+                          " 中心 = " + r.bounds.center.ToString("F3") +
+                          " 尺寸 = " + r.bounds.size.ToString("F3"));
+            }
+        }
+
+        /// <summary>把手机挪到某个世界坐标（并同步已经生成的那一个）。</summary>
+        private static void SetPhonePosition(Vector3 position)
+        {
+            NailongFNAF.UI.NaibaoPhoneProp.WorldPosition = position;
+
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object prop = scene != null ? Get(scene, "_naibaoPhone") : null;
+            object tr = prop != null ? Get(prop, "transform") : null;
+            if (tr != null)
+            {
+                Invoke(tr, "set_position", new object[] { position });
+            }
+        }
+
+        /// <summary>
+        /// 截图前先把视角掰回正前方 —— 冒烟里鼠标不在手里，视角会停在最左 / 最右，
+        /// 那样手机根本不在画面里。SetPan 是立即生效的，同一帧截就能拍到正面。
+        /// </summary>
+        private void SnapStraight(string name)
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object room = scene != null ? Get(scene, "_room") : null;
+            if (room != null)
+            {
+                Invoke(room, "SetPan", new object[] { 0f });
+            }
+
+            Snap(name);
+        }
+
+        /// <summary>把手机转到指定欧拉角（冒烟里用来挑朝向）。</summary>
+        private static void SetPhoneEuler(Vector3 euler)
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object prop = scene != null ? Get(scene, "_naibaoPhone") : null;
+            object tr = prop != null ? Get(prop, "transform") : null;
+            if (tr == null)
+            {
+                Debug.Log("SMOKE: 手机还没生成，没法转 " + euler);
+                return;
+            }
+
+            Invoke(tr, "set_rotation", new object[] { Quaternion.Euler(euler) });
+        }
+
+        /// <summary>手机这一组：在不在、亮没亮、提示字出来没有。</summary>
+        private static void ReportPhone()
+        {
+            DumpPhoneBounds();
+
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object prop = scene != null ? Get(scene, "_naibaoPhone") : null;
+            object propGo = prop != null ? Get(prop, "gameObject") : null;
+            object hint = scene != null ? Get(scene, "_naibaoPhoneHint") : null;
+            object hintGo = hint != null ? Get(hint, "gameObject") : null;
+
+            object tr2 = prop != null ? Get(prop, "transform") : null;
+            Debug.Log("SMOKE: 手机位置 = " +
+                      (tr2 != null ? Get(tr2, "position") : null) +
+                      " 缩放 = " + (tr2 != null ? Get(tr2, "lossyScale") : null) +
+                      " 相机 = " + (Camera.main != null ? Camera.main.transform.position.ToString() : "无") +
+                      " 朝向 = " + (Camera.main != null ? Camera.main.transform.forward.ToString() : "无"));
+
+            Debug.Log("SMOKE: 手机 生成 = " + (prop != null) +
+                      " 在场 = " + (propGo != null && (bool)Get(propGo, "activeSelf")) +
+                      " 亮起 = " + (scene != null ? Get(scene, "_naibaoPhoneHighlighted") : null) +
+                      " 提示 = [" + (hint != null ? Get(hint, "text") : null) + "]" +
+                      " 提示可见 = " + (hintGo != null && (bool)Get(hintGo, "activeSelf")));
+        }
+
         /// <summary>把奶包的计时直接推 <paramref name="seconds"/> 秒，再把到点的出场应用上。</summary>
+        /// <summary>通话面板打开时，桌上那部手机应当是藏起来的。</summary>
+        private static bool PhoneHidden()
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object button = scene != null ? Get(scene, "_naibaoPhone") : null;
+            object go = button != null ? Get(button, "gameObject") : null;
+            return go != null && !(bool)Get(go, "activeSelf");
+        }
+
         private void ForceNaibaoOffline(float seconds)
         {
             object gm = Instance("NailongFNAF.Core.GameManager");
