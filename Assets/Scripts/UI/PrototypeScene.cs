@@ -670,6 +670,26 @@ namespace NailongFNAF.UI
         private Image _jumpscareOverlay;
         private Image _jumpscareImage;
 
+        // ── 跳杀结束后的红屏蔓延 ──────────────────────────────────────
+
+        /// <summary>
+        /// 红屏蔓延进度：**0 = 全黑，1.2 = 全红**。
+        /// 由 <see cref="UpdateJumpscareShake"/> 在视频 / 静态图都结束后推进。
+        /// </summary>
+        private float _redSpread;
+
+        /// <summary>红屏从黑蔓延到全红要多久（秒）。</summary>
+        private const float RedSpreadSeconds = 0.9f;
+
+        /// <summary>
+        /// 蔓延终值。**必须 > 1** —— 像素到最近边的距离归一化后
+        /// 正中正好是 1，spread 要超过它才能把中心那块也吞掉。
+        /// </summary>
+        private const float RedSpreadFull = 1.2f;
+
+        /// <summary>红屏蔓延用的材质（跑 NailongFNAF/RedSpread）。</summary>
+        private Material _redSpreadMat;
+
         // ── 开灯照到人的反馈 ──────────────────────────────────────────
 
         /// <summary>边缘红色脉冲层（全屏，平时 alpha=0）。</summary>
@@ -2780,6 +2800,10 @@ namespace NailongFNAF.UI
             _jumpscareEnemy = id;
             _jumpscareTime = 0f;
 
+            // 每次跳杀都从「全黑、红还没开始」重启
+            _redSpread = 0f;
+            ApplyRedSpread();
+
             _jumpscareOverlay.gameObject.SetActive(true);
             _jumpscareOverlay.color = Color.black;
 
@@ -2832,6 +2856,8 @@ namespace NailongFNAF.UI
         private void ClearJumpscare()
         {
             _hasJumpscare = false;
+            _redSpread = 0f;                 // 下次跳杀重新从黑开始
+            ApplyRedSpread();
             StopJumpscareVideo();
             StopJumpscareSfx();
             _jumpscareOverlay.gameObject.SetActive(false);
@@ -3127,8 +3153,43 @@ namespace NailongFNAF.UI
 
             _jumpscareText.rectTransform.anchoredPosition = new Vector2(x, y);
 
-            float pulse = 0.5f + 0.5f * Mathf.Abs(Mathf.Sin(t * 8f));
-            _jumpscareOverlay.color = new Color(0.45f + 0.45f * pulse, 0.02f, 0.05f);
+            // ── 红屏蔓延 ──
+            //
+            // 视频 / 静态图都结束之后才走到这里。此时从**纯黑**开始，
+            // 红色从画面四周向中心推，最后铺满全屏 ——
+            // 和开灯照到人的边缘红脉冲是同一种形状语言，
+            // 玩家会觉得是「刚才那个提示的最终形态」。
+            //
+            // 用 MoveTowards 匀速推进，duration 由 RedSpreadSeconds 控制。
+            _redSpread = Mathf.MoveTowards(
+                _redSpread, RedSpreadFull,
+                RedSpreadFull / RedSpreadSeconds * Time.deltaTime);
+
+            ApplyRedSpread();
+        }
+
+        /// <summary>
+        /// 把蔓延进度写进材质。
+        ///
+        /// shader 缺失时退回纯色插值 —— 至少还能看见红屏，
+        /// 不会因为一个 shader 没打进包就变成一片黑。
+        /// </summary>
+        private void ApplyRedSpread()
+        {
+            if (_jumpscareOverlay == null)
+            {
+                return;
+            }
+
+            float k = Mathf.Clamp01(_redSpread / RedSpreadFull);
+
+            if (_redSpreadMat != null)
+            {
+                _redSpreadMat.SetFloat("_Spread", _redSpread);
+                return;
+            }
+
+            _jumpscareOverlay.color = new Color(0.72f * k, 0.03f * k, 0.06f * k, 1f);
         }
 
         // ---------------------------------------------------------------
@@ -4687,6 +4748,31 @@ namespace NailongFNAF.UI
         {
             _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", Color.black);
             _jumpscareOverlay.transform.SetAsLastSibling();
+
+            // 红屏蔓延材质：把遮罩改成「红从边缘向中心推」的渐变。
+            //
+            // ⚠️ 优先走 **Resources.Load**（和 PanoMaterial 同一套路）：
+            // Shader.Find 在发行版里会因为「没人引用」被剔除而返回 null，
+            // 而 Resources 下的材质资产是**一定会打进包**的，它引用的 shader 也跟着进。
+            // （UnityEditor.GraphicsSettings.alwaysIncludedShaders 那套在中国版
+            //   2022.3 上取不到类型，不指望它。）
+            var mat = Resources.Load<Material>("RedSpreadMaterial");
+
+            if (mat == null)
+            {
+                // 兜底：材质资产缺失时临时建一个（编辑器里够用）
+                var spreadShader = Shader.Find("NailongFNAF/RedSpread");
+                if (spreadShader != null)
+                {
+                    mat = new Material(spreadShader);
+                }
+            }
+
+            if (mat != null)
+            {
+                _redSpreadMat = mat;
+                _jumpscareOverlay.material = _redSpreadMat;
+            }
 
             // 跳杀立绘：等比缩放到完整可见且尽量大，居中铺在跳杀层上
             var imageGo = new GameObject("JumpscareImage", typeof(RectTransform), typeof(Image));
