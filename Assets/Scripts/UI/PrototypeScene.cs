@@ -707,6 +707,23 @@ namespace NailongFNAF.UI
         /// <summary>上一帧左右两侧「灯亮着 + 门开着 + 门口有人」。</summary>
         private bool _sawEnemyLeft;
         private bool _sawEnemyRight;
+
+        /// <summary>
+        /// 左 / 右门的提示音**冷却剩余秒数**。到 0 才能再响。
+        ///
+        /// 为什么按门分开：两扇门是两条独立通道，玩家可能在 2 秒内
+        /// 先照左门发现有人、再照右门发现也有人 —— 那两次都该有提示，
+        /// 共用同一个冷却会吞掉右边那次。
+        /// </summary>
+        private float _revealCooldownLeft;
+        private float _revealCooldownRight;
+
+        /// <summary>
+        /// 提示音冷却时长（秒）。
+        /// 报警音本身 0.48 秒，但玩家会反复开关灯试探；
+        /// 没有冷却的话每次开关都「叮」一声，很快就变成噪音。
+        /// </summary>
+        private const float RevealCooldownSeconds = 5f;
         private Text _jumpscareText;
         private RawImage _jumpscareVideoImage;
         private VideoPlayer _jumpscareVideo;
@@ -5206,20 +5223,48 @@ namespace NailongFNAF.UI
         ///
         /// **门开或关都会触发** —— 灯照亮的是门外走廊，门板挡人不挡光，
         /// 所以关门状态下开灯看到有人，同样是「那一下的惊吓」。
-        /// （曾经只在门开着时触发、门关着改用雪花虚影，
-        ///   实际观感不如统一的红边框干净，已改回。）
+        ///
+        /// **每扇门各有 5 秒音效冷却**（<see cref="RevealCooldownSeconds"/>）：
+        /// 视觉红脉冲每次都放（那是对玩家的即时反馈），
+        /// 但音效要掐一下 —— 玩家会反复开关灯试探，每次都响会变成噪音。
+        /// 冷却按门分开算，左右互不影响。
         /// </summary>
         private void UpdateLightReveal(GameManager gm)
         {
+            float dt = Time.unscaledDeltaTime;
+
+            if (_revealCooldownLeft > 0f)
+            {
+                _revealCooldownLeft = Mathf.Max(0f, _revealCooldownLeft - dt);
+            }
+
+            if (_revealCooldownRight > 0f)
+            {
+                _revealCooldownRight = Mathf.Max(0f, _revealCooldownRight - dt);
+            }
+
             bool left = TryGetEnemyAtSide(gm, Side.Left, out _);
             bool right = TryGetEnemyAtSide(gm, Side.Right, out _);
 
-            bool justSaw = (left && !_sawEnemyLeft) || (right && !_sawEnemyRight);
+            bool justSawLeft = left && !_sawEnemyLeft;
+            bool justSawRight = right && !_sawEnemyRight;
 
             _sawEnemyLeft = left;
             _sawEnemyRight = right;
 
-            if (!justSaw)
+            if (!justSawLeft && !justSawRight)
+            {
+                return;
+            }
+
+            // 红脉冲：每次都放（这是「你看到了」的即时视觉反馈，不该被吞）
+            _revealPulseTime = 0f;
+
+            // 音效：只在这一侧冷却好了才响
+            bool playLeft = justSawLeft && _revealCooldownLeft <= 0f;
+            bool playRight = justSawRight && _revealCooldownRight <= 0f;
+
+            if (!playLeft && !playRight)
             {
                 return;
             }
@@ -5229,7 +5274,15 @@ namespace NailongFNAF.UI
                 _audio.PlayLightReveal();
             }
 
-            _revealPulseTime = 0f;
+            if (playLeft)
+            {
+                _revealCooldownLeft = RevealCooldownSeconds;
+            }
+
+            if (playRight)
+            {
+                _revealCooldownRight = RevealCooldownSeconds;
+            }
         }
 
         /// <summary>
