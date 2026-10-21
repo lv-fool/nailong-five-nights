@@ -573,32 +573,6 @@ namespace NailongFNAF.UI
         private SpriteRenderer _enemySideRight;
         private SpriteRenderer _enemyFront;
 
-        /// <summary>
-        /// 「门关着但灯照到人」时的**轮廓雪花粒子**。
-        ///
-        /// 为什么用粒子：早先用一整块噪点贴图铺满立绘框，
-        /// 连**透明背景**都被雪花了，看起来像一块噪声板糊在门口。
-        /// 现在只在不透明区域的**边缘点**上撒粒子 —— 只有人形轮廓在闪。
-        /// </summary>
-        private ParticleSystem _ghostLeft;
-        private ParticleSystem _ghostRight;
-
-        /// <summary>虚影淡入淡出进度 0..1（每侧一个）。</summary>
-        private float _ghostAlphaLeft;
-        private float _ghostAlphaRight;
-
-        /// <summary>
-        /// 虚影淡入淡出速度（每秒）。
-        /// **10/秒 ≈ 0.1 秒到位** —— 灯一照到就窜出来，慢了没有惊吓感。
-        /// </summary>
-        private const float GhostFadeSpeed = 10f;
-
-        /// <summary>虚影峰值强度。</summary>
-        private const float GhostMaxAlpha = 0.5f;
-
-        /// <summary>已算好的轮廓点（按敌人缓存，贴图不变所以只算一次）。</summary>
-        private readonly Dictionary<EnemyId, Vector3[]> _ghostOutlineCache =
-            new Dictionary<EnemyId, Vector3[]>();
 
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
         private SpriteRenderer _doorLightLeft;
@@ -1192,17 +1166,15 @@ namespace NailongFNAF.UI
             bool leftPresent = TryGetEnemyAtSide(gm, Side.Left, out leftId);
             bool rightPresent = TryGetEnemyAtSide(gm, Side.Right, out rightId);
 
-            ShowWorldCharacter(_enemySideLeft, leftPresent, leftId, CharacterPose.Idle, Side.Left);
-            ShowWorldCharacter(_enemySideRight, rightPresent, rightId, CharacterPose.Idle, Side.Right);
-
-            // 门关着 + 灯亮 + 门口有人 → 轮廓雪花粒子（只勾勒人形，不糊背景）
-            Sprite leftArt = leftPresent ? ArtOf(leftId) : null;
-            Sprite rightArt = rightPresent ? ArtOf(rightId) : null;
-
-            UpdateGhostOverlay(_ghostLeft, ref _ghostAlphaLeft,
-                leftPresent && gm.LeftDoorClosed, leftId, leftArt);
-            UpdateGhostOverlay(_ghostRight, ref _ghostAlphaRight,
-                rightPresent && gm.RightDoorClosed, rightId, rightArt);
+            // ⚠️ **立绘只在门开着时显示**。
+            // 门关着时灯照样能照到人（那是「外面有人」的确认），
+            // 但只给边缘红脉冲提示，不把立绘画出来 ——
+            // 门板挡着还看得清清楚楚，等于门白关了。
+            // 想确认它走了没有，看红脉冲有没有出现就够。
+            ShowWorldCharacter(_enemySideLeft,
+                leftPresent && !gm.LeftDoorClosed, leftId, CharacterPose.Idle, Side.Left);
+            ShowWorldCharacter(_enemySideRight,
+                rightPresent && !gm.RightDoorClosed, rightId, CharacterPose.Idle, Side.Right);
 
             ApplyFrontCharacter3D(gm);
 
@@ -1211,15 +1183,8 @@ namespace NailongFNAF.UI
             ApplyDoorLight(_doorLightLeft, gm.LeftLightOn, breathe);
             ApplyDoorLight(_doorLightRight, gm.RightLightOn, breathe);
 
-            // 开灯照到人的上升沿 → 音效 + 边缘红脉冲（门关着的那侧不算）
+            // 开灯照到人的上升沿 → 音效 + 边缘红脉冲（门开或关都算）
             UpdateLightReveal(gm);
-        }
-
-        /// <summary>取某只敌人 Idle 立绘（轮廓提取要用它的 alpha 通道）。</summary>
-        private Sprite ArtOf(EnemyId id)
-        {
-            var art = FindCharacter(id);
-            return art != null ? art.Get(CharacterPose.Idle) : null;
         }
 
         private static void ApplyDoorLight(SpriteRenderer light, bool on, float breathe)
@@ -3752,10 +3717,6 @@ namespace NailongFNAF.UI
             _enemySideRight = MakeWorldSprite("EnemySideRight", DoorWorldCenterRight, SpriteSortEnemy);
             _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
 
-            // 雪花轮廓粒子：比立绘高一层，盖在它上面
-            _ghostLeft = MakeGhostParticles("GhostLeft", DoorWorldCenterLeft, SpriteSortEnemy + 1);
-            _ghostRight = MakeGhostParticles("GhostRight", DoorWorldCenterRight, SpriteSortEnemy + 1);
-            _ghostRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
 
             // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
             _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
@@ -3821,226 +3782,6 @@ namespace NailongFNAF.UI
         /// 世界空间 SpriteRenderer —— 不缩放到米制以外，靠 PPU 保证「像素 = 真实米」：
         /// 立绘字面是真实身高的像素（噜噜 ~1.7m 的 PNG），尺寸就是对的。
         /// </summary>
-        /// <summary>
-        /// 「门关着但灯照到人」时的**轮廓雪花粒子**。
-        ///
-        /// 早先用一张 96×96 噪点贴图铺满立绘框，结果连**透明背景**都被雪花了，
-        /// 看起来像一块噪声板糊在门口，而不是「人形轮廓在闪」。
-        /// 现在只在不透明区域的边缘点撒粒子，背景完全干净。
-        /// </summary>
-        private static ParticleSystem MakeGhostParticles(string name, Vector3 pivotPoint,
-            int sortingOrder)
-        {
-            var go = new GameObject(name);
-            go.transform.position = pivotPoint;
-            go.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
-
-            var ps = go.AddComponent<ParticleSystem>();
-
-            var main = ps.main;
-            main.playOnAwake = false;
-            main.loop = true;
-            main.duration = 10f;
-            // 短命 + 高密度 = 持续的静电闪烁。
-            // lifetime 短到 0.06~0.10 秒，配合每帧大量发射，
-            // 看起来就是「整片雪花在跳」而不是「一堆点慢慢移动」。
-            main.startLifetime = 0.1f;
-            main.startSpeed = 0f;          // 不动：原地闪才有「卡住的影像」感
-            main.startSize = 0.02f;
-            main.maxParticles = 4000;      // 要能铺满整个人形
-            main.simulationSpace = ParticleSystemSimulationSpace.Local;
-            main.startColor = new Color(1f, 1f, 1f, 0f);
-
-            // 不靠固定速率发射 —— 位置全由 UpdateGhostOverlay 自己给
-            var emission = ps.emission;
-            emission.enabled = false;
-
-            var shape = ps.shape;
-            shape.enabled = false;
-
-            var pr = go.GetComponent<ParticleSystemRenderer>();
-            pr.renderMode = ParticleSystemRenderMode.Billboard;
-            pr.sortingOrder = sortingOrder;
-            pr.material = MakeParticleMaterial();
-
-            go.SetActive(false);
-            return ps;
-        }
-
-        /// <summary>粒子材质：加法混合的白色亮点（不用纹理，越简单越稳）。</summary>
-        private static Material MakeParticleMaterial()
-        {
-            var shader = Shader.Find("Particles/Standard Unlit");
-            if (shader == null)
-            {
-                shader = Shader.Find("Sprites/Default");
-            }
-
-            if (shader == null)
-            {
-                return null;
-            }
-
-            var mat = new Material(shader);
-            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
-            mat.SetInt("_ZWrite", 0);
-            mat.renderQueue = 3000;
-            return mat;
-        }
-
-        /// <summary>
-        /// 从立绘 alpha 通道提取**所有不透明像素点**（归一化坐标）。
-        ///
-        /// 注意是**整个身体**，不是只有轮廓 —— 目标是「电视雪花屏」那种
-        /// 密实的静电噪声铺满人形，而不是沿边缘点几个亮点。
-        /// 透明区域天然被排除（alpha<=40 跳过），所以形状仍然贴合角色。
-        ///
-        /// 跳步采样控制在几千个点：够密才像噪声，太多则拖性能。
-        /// 结果按敌人缓存（贴图不变，算一次就够）。
-        /// </summary>
-        private Vector3[] GhostOutlineOf(EnemyId id, Sprite sprite)
-        {
-            Vector3[] cached;
-            if (_ghostOutlineCache.TryGetValue(id, out cached))
-            {
-                return cached;
-            }
-
-            if (sprite == null || sprite.texture == null || !sprite.texture.isReadable)
-            {
-                // 读不到像素（导入没开 Read/Write）→ 空表，粒子层自然不显示
-                _ghostOutlineCache[id] = new Vector3[0];
-                return _ghostOutlineCache[id];
-            }
-
-            var tex = sprite.texture;
-            int w = tex.width;
-            int h = tex.height;
-            var px = tex.GetPixels32();
-
-            var points = new List<Vector3>(4096);
-
-            // 采样密度：控制在 3000~6000 个点。
-            // 太少会像「撒了几粒盐」，太多粒子系统撑不住；
-            // 3000+ 配合短寿命闪烁，视觉上就是一整片雪花。
-            const int TargetPoints = 4000;
-            int step = Mathf.Max(1, Mathf.RoundToInt(Mathf.Sqrt((float)w * h / TargetPoints)));
-
-            for (int y = 0; y < h; y += step)
-            {
-                for (int x = 0; x < w; x += step)
-                {
-                    if (px[y * w + x].a <= 40)
-                    {
-                        continue;   // 透明区域跳过 → 形状仍贴合角色
-                    }
-
-                    // 归一化 -0.5..0.5 —— 粒子系统按立绘实际尺寸缩放，
-                    // 这样不用关心贴图原始多大
-                    float u = (x + 0.5f) / w - 0.5f;
-                    float v = (y + 0.5f) / h - 0.5f;
-
-                    points.Add(new Vector3(u, v, 0f));
-                }
-            }
-
-            var arr = points.ToArray();
-            _ghostOutlineCache[id] = arr;
-            return arr;
-        }
-
-        /// <summary>
-        /// 雪花虚影的淡入淡出 + 粒子发射。
-        /// **10/秒 ≈ 0.1 秒到位** —— 灯一照到就窜出来。
-        /// </summary>
-        private void UpdateGhostOverlay(ParticleSystem ghost, ref float alpha,
-            bool shouldShow, EnemyId id, Sprite sprite)
-        {
-            if (ghost == null)
-            {
-                return;
-            }
-
-            float target = shouldShow ? GhostMaxAlpha : 0f;
-            alpha = Mathf.MoveTowards(alpha, target, GhostFadeSpeed * Time.deltaTime);
-
-            if (alpha <= 0.001f)
-            {
-                if (ghost.gameObject.activeSelf)
-                {
-                    ghost.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                    ghost.gameObject.SetActive(false);
-                }
-                return;
-            }
-
-            if (!ghost.gameObject.activeSelf)
-            {
-                ghost.gameObject.SetActive(true);
-                ghost.Play();
-            }
-
-            var outline = GhostOutlineOf(id, sprite);
-            if (outline == null || outline.Length == 0)
-            {
-                return;
-            }
-
-            // ⚠️ 轮廓点是**归一化的 -0.5..0.5**（占立绘框的比例），
-            // 所以只要乘立绘的 localScale，就自动和它同尺寸、同镜像。
-            //
-            // 早先这里又乘了 sprite.bounds.size（那已经是米制，10 米），
-            // 结果粒子被放大到十几米 —— 屏幕上只剩几个巨大的白点，
-            // 完全看不出是雪花。归一化坐标千万不要再乘米制尺寸。
-            var sr = FindDoorSprite(id);
-            if (sr != null)
-            {
-                Vector3 s = sr.transform.localScale;
-                ghost.transform.localScale = new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), 1f);
-                ghost.transform.position = sr.transform.position;
-            }
-
-            // 每帧发射量：按轮廓点数的一个比例，控制在几十~两百之间。
-            // 目标不是「够用」，而是「密到看不出单个粒子」——
-            // 那就是雪花屏的观感。
-            int count = Mathf.Clamp(
-                Mathf.CeilToInt(outline.Length * 0.09f * (alpha / GhostMaxAlpha)), 10, 220);
-
-            var emit = new ParticleSystem.EmitParams();
-            emit.applyShapeToPosition = false;
-
-            // 粒子在局部空间发射，会被 ghost 的 localScale 放大。
-            // 所以尺寸要给「局部单位」—— 归一化坐标下 0.5 = 立绘半宽，
-            // 取 0.012~0.03 换算成屏幕大约就是 3~8 像素。
-            for (int k = 0; k < count; k++)
-            {
-                emit.position = outline[Random.Range(0, outline.Length)];
-                emit.startColor = new Color(1f, 1f, 1f, alpha * Random.Range(0.55f, 1f));
-                // 尺寸给得很小（归一化空间，会被 localScale 放大）：
-                // 要的是「细碎噪点」，不是「发光小球」
-                emit.startSize = Random.Range(0.006f, 0.016f);
-                emit.startLifetime = Random.Range(0.05f, 0.1f);
-                ghost.Emit(emit, 1);
-            }
-        }
-
-        /// <summary>找某只敌人对应的门口立绘渲染器（左/右门各一个）。</summary>
-        private SpriteRenderer FindDoorSprite(EnemyId id)
-        {
-            if (_enemyDirector == null)
-            {
-                return null;
-            }
-
-            var brain = _enemyDirector.GetBrain(id) as DoorEnemyBrain;
-            if (brain == null)
-            {
-                return null;
-            }
-
-            return brain.Side == Side.Left ? _enemySideLeft : _enemySideRight;
-        }
         private static SpriteRenderer MakeWorldSprite(string name, Vector3 pivotPoint,
             int sortingOrder)
         {
@@ -5377,14 +5118,15 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 检查「开灯照到人」的上升沿，触发音效 + 边缘红脉冲。
         ///
-        /// ⚠️ **只在门开着时触发红色脉冲**。
-        /// 门关着时门口显示的是雪花虚影，那已经是「信号不良」的软提示；
-        /// 再叠一圈红色边框会互相抢戏，而且门都关了还惊慌说不通。
+        /// **门开或关都会触发** —— 灯照亮的是门外走廊，门板挡人不挡光，
+        /// 所以关门状态下开灯看到有人，同样是「那一下的惊吓」。
+        /// （曾经只在门开着时触发、门关着改用雪花虚影，
+        ///   实际观感不如统一的红边框干净，已改回。）
         /// </summary>
         private void UpdateLightReveal(GameManager gm)
         {
-            bool left = !gm.LeftDoorClosed && TryGetEnemyAtSide(gm, Side.Left, out _);
-            bool right = !gm.RightDoorClosed && TryGetEnemyAtSide(gm, Side.Right, out _);
+            bool left = TryGetEnemyAtSide(gm, Side.Left, out _);
+            bool right = TryGetEnemyAtSide(gm, Side.Right, out _);
 
             bool justSaw = (left && !_sawEnemyLeft) || (right && !_sawEnemyRight);
 
