@@ -3385,7 +3385,7 @@ namespace NailongFNAF.UI
         /// 桌上那部手机与通话面板。
         ///
         /// 手机是**钉在世界里**的 3D 物件：转头把它转到画面中间，它才亮起来、也才点得动。
-        /// 只在「有奶包、没在通话、没断电、没被抓、菜单没开」时露面；
+        /// 只在「有奶包、没在通话、没断电、没被抓、菜单没开、监控没升起」时露面；
         /// 通话面板按 <see cref="GameManager.NaibaoCallSerial"/> 变化重画，翻页只改字不改布局。
         /// </summary>
         private void UpdateNaibaoCall(GameManager gm)
@@ -3397,9 +3397,11 @@ namespace NailongFNAF.UI
 
             bool talking = gm.NaibaoTalking;
 
-            // 通话时手机留在桌上不藏 —— 她还在那儿说话，藏起来反而怪
+            // 通话时手机留在桌上不藏 —— 她还在那儿说话，藏起来反而怪。
+            // 但监控升起来的时候整块画面都被监控盖住，桌上那部手机和「点一下 · 和她说话」
+            // 都不该再透出来（玩家这时候也点不到它）。
             bool showPhone = gm.Naibao != null && !gm.HasPowerOut
-                && !gm.HasBeenCaught && !_menuOpen;
+                && !gm.HasBeenCaught && !_menuOpen && !gm.MonitorUp;
 
             UpdateNaibaoPhone(showPhone);
             UpdateNaibaoPhoneHint(showPhone, talking);
@@ -3537,7 +3539,7 @@ namespace NailongFNAF.UI
         /// </summary>
         private void HandleNaibaoPhoneClick(GameManager gm)
         {
-            if (!_naibaoPhoneHighlighted || _naibaoPhone == null || gm.NaibaoTalking)
+            if (!_naibaoPhoneHighlighted || _naibaoPhone == null || gm.NaibaoTalking || gm.MonitorUp)
             {
                 return;
             }
