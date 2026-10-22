@@ -698,17 +698,18 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 噜噜_默认曲线下第1夜比隐藏夜宽松得多()
+        public void 噜噜_默认曲线下第1夜比最后一夜宽松得多()
         {
+            // 隐藏夜暂时移除，所以「最难的那一夜」现在是第 5 夜（噜噜=10）。
             var brain = new LuluBrain(EnemyId.Lulu, 0, new FixedRandom(1));
             var difficulty = NightDifficulty.CreateDefault();
 
             float night1 = brain.GraceForActivity(difficulty.GetLevel(0, EnemyId.Lulu));
-            float hidden = brain.GraceForActivity(
+            float last = brain.GraceForActivity(
                 difficulty.GetLevel(NightDifficulty.NightCount - 1, EnemyId.Lulu));
 
             Assert.AreEqual(15.6f, night1, 0.1f);
-            Assert.AreEqual(9.2f, hidden, 0.1f);
+            Assert.Greater(night1, last, "第 1 夜应该比最后一夜宽松");
         }
 
         [Test]

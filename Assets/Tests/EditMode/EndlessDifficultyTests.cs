@@ -44,9 +44,11 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 档位封顶在第六夜()
+        public void 档位封顶在最后一夜()
         {
-            int cap = 6 - 1;
+            // 不再写死 6 —— 隐藏夜移除后总夜数是 5，
+            // 硬编码会让这条测试在改夜数时莫名其妙地红。
+            int cap = NailongFNAF.Gameplay.NightDifficulty.NightCount - 1;
 
             Assert.AreEqual(cap, EndlessDifficulty.TierFor(999f, 999f));
         }

@@ -19,8 +19,14 @@ namespace NailongFNAF.UI
     /// </summary>
     public partial class PrototypeScene
     {
-        /// <summary>夜晚总数：第 1~5 夜 + 隐藏夜（第 6 夜）。</summary>
-        public const int NightCount = 6;
+        /// <summary>
+        /// 夜晚总数：**第 1~5 夜**。
+        ///
+        /// 隐藏夜（原第 6 夜）暂时移除（用户 2026-10-22 定）——
+        /// 内容还没做完，留着只会让人点进去看到半成品。
+        /// 要恢复就把这里改回 6、<see cref="NightName"/> 的隐藏夜分支一起加回来。
+        /// </summary>
+        public const int NightCount = 5;
 
         /// <summary>解锁进度存档键：存「已解锁到第几夜」，0 起。</summary>
         public const string UnlockKey = "nailong.unlockedNight";
@@ -108,10 +114,15 @@ namespace NailongFNAF.UI
             get { return Mathf.Clamp(PlayerPrefs.GetInt(UnlockKey, 0), 0, NightCount - 1); }
         }
 
-        /// <summary>夜晚显示名：第 1~5 夜，最后一夜叫「隐藏夜」。</summary>
+        /// <summary>
+        /// 夜晚显示名：第 1~5 夜。
+        ///
+        /// 隐藏夜暂时移除，所以不再有「第 6 夜 · 隐藏夜」这个特例 ——
+        /// 现在最后一个就是「第 5 夜」。
+        /// </summary>
         private static string NightName(int index)
         {
-            return index >= NightCount - 1 ? "第 6 夜 · 隐藏夜" : "第 " + (index + 1) + " 夜";
+            return "第 " + (index + 1) + " 夜";
         }
 
         // ---------------------------------------------------------------
@@ -1185,7 +1196,8 @@ namespace NailongFNAF.UI
                 unlockedNext = true;
             }
 
-            // 通关隐藏夜 → 解锁自定义夜（照 FNAF 1 的第 7 夜）
+            // 通关最后一夜 → 解锁自定义夜（照 FNAF 1 的第 7 夜）。
+            // 隐藏夜移除后，「最后一夜」就是第 5 夜 —— 这里靠 NightCount 自动跟随。
             if (wasLast && !CustomNightUnlocked)
             {
                 PlayerPrefs.SetInt(CustomUnlockedKey, 1);

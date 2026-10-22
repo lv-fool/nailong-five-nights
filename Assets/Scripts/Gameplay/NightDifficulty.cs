@@ -10,11 +10,13 @@ namespace NailongFNAF.Gameplay
     /// </summary>
     public sealed class NightDifficulty
     {
-        /// <summary>总夜数：五夜 + 隐藏夜。</summary>
-        public const int NightCount = 6;
-
-        /// <summary>隐藏夜的序号（0 起）。通关第 5 夜解锁。</summary>
-        public const int HiddenNightIndex = 5;
+        /// <summary>
+        /// 总夜数：**五夜**。
+        ///
+        /// 隐藏夜暂时移除（用户 2026-10-22 定），所以这里从 6 降到 5。
+        /// 要恢复就把 NightCount 改回 6、并把 HiddenNightIndex 加回来。
+        /// </summary>
+        public const int NightCount = 5;
 
         private readonly int[] _levels;
 
@@ -57,7 +59,11 @@ namespace NailongFNAF.Gameplay
             //     活动度 0 = 整夜不动，奶龙是偷电捣乱的核心，任何一夜都不能歇着
             // ⚠️ 原版是有回落的（邦尼夜3=0 < 夜2=3），不是每夜递增 ——
             //   改测试时别想当然地要求单调。
-            // 噜噜走手电筒（不是门类），保留我们的曲线：1/2/4/7/10/16。
+            // 噜噜走手电筒（不是门类），保留我们的曲线：1/2/4/7/10。
+            //
+            // ⚠️ **隐藏夜（原第 6 夜）已暂时移除**（用户 2026-10-22 定），
+            // 原来那行 12/10/16/4 先注释掉留着 —— 恢复时把 NightCount 改回 6、
+            // 解开下面这行、并把 HiddenNightIndex 加回来即可。
             //
             //        夜   牛来 袋鼠 噜噜 奶龙
             SetRow(difficulty, 0, 0, 0, 1, 1);
@@ -65,7 +71,7 @@ namespace NailongFNAF.Gameplay
             SetRow(difficulty, 2, 5, 0, 4, 1);
             SetRow(difficulty, 3, 4, 2, 7, 2);
             SetRow(difficulty, 4, 7, 5, 10, 3);
-            SetRow(difficulty, 5, 12, 10, 16, 4);
+            // SetRow(difficulty, 5, 12, 10, 16, 4);   // 隐藏夜 —— 暂时移除
 
             return difficulty;
         }
