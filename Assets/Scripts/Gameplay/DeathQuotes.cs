@@ -5,15 +5,15 @@ using UnityEngine;
 namespace NailongFNAF.Gameplay
 {
     /// <summary>
-    /// 跳杀后那句台词的**可编辑副本**。
+    /// 跳杀后台词的**随机池**，按敌人分开。
     ///
-    /// 存在 <c>Assets/Resources/death_quotes.json</c>，由编辑器窗口
+    /// 存 <c>Assets/Resources/death_quotes.json</c>，由编辑器窗口
     /// 「奶龙 / 11. 编辑跳杀台词」读写。运行时从 Resources 读；
-    /// 文件不存在（或某个敌人没写）就退回 <see cref="QuoteFor"/> 里那套默认文案 ——
-    /// 所以删掉这个 json 也不会让结算画面变成空白。
+    /// 文件不存在（或某只敌人没写 / 池子空）就退回
+    /// <see cref="DefaultPool"/> 里那套默认文案 —— 删掉这个 json 也不会让结算画面变空白。
     ///
-    /// 为什么放 Resources 而不是写回源码：台词是文案，不该逼着编辑器去改 .cs；
-    /// 而且和项目里 monitor_layout.json / occluders.json 的做法一致。
+    /// 为什么是「池」而不是一句：同一只敌人被抓两次说一模一样的话很假。
+    /// 池子里每句都可编辑，每次被抓**随机抽一句**（且尽量不和上一句重复）。
     /// </summary>
     [Serializable]
     public sealed class DeathQuotes
@@ -21,46 +21,66 @@ namespace NailongFNAF.Gameplay
         /// <summary>Resources 里的路径（不带扩展名）。</summary>
         public const string ResourcePath = "death_quotes";
 
-        /// <summary>一条台词：敌人代号 + 文本。</summary>
+        /// <summary>某只敌人的台词池。</summary>
         [Serializable]
-        public class Entry
+        public class Pool
         {
             public string Id;
-            public string Text;
+            public List<string> Lines = new List<string>();
         }
 
-        public List<Entry> Quotes = new List<Entry>();
+        public List<Pool> Quotes = new List<Pool>();
 
         /// <summary>
-        /// 每只敌人被抓到后的**默认**台词。
+        /// 每只敌人的**默认**台词池（给 2~3 句）。
         /// 调子跟美术一样是「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。
         ///
         /// ⚠️ 这是兜底值：json 里有就用 json 的，没有才用这里。
-        /// 编辑器窗口的「重置为默认」也是读这张表。
+        /// 编辑器窗口的「恢复默认」也是读这张表。
         /// </summary>
-        public static string DefaultFor(EnemyId id)
+        public static string[] DefaultPool(EnemyId id)
         {
             switch (id)
             {
                 case EnemyId.Nailong:
-                    return "「电量我收下啦～下次记得省着点用哦。」";
+                    return new[]
+                    {
+                        "「电量我收下啦～下次记得省着点用哦。」",
+                        "「灯也是耗电的呀，你忘了吗？」",
+                        "「我只是想看看你，顺便把电带走。」",
+                    };
 
                 case EnemyId.Niulai:
-                    return "「门关得挺快嘛……可惜我比门快。」";
+                    return new[]
+                    {
+                        "「门关得挺快嘛……可惜我比门快。」",
+                        "「你按关门键的手，抖了一下呢。」",
+                        "「门后面是走廊，我知道得比你清楚。」",
+                    };
 
                 case EnemyId.Daishu:
-                    return "「你刚才没开灯吧？那你怎么知道门外是谁呢。」";
+                    return new[]
+                    {
+                        "「你刚才没开灯吧？那你怎么知道门外是谁呢。」",
+                        "「我一直在那儿站着，只是你看不见。」",
+                        "「下回记得先开灯，再决定怕不怕。」",
+                    };
 
                 case EnemyId.Lulu:
-                    return "「手电筒呢？这次好像闪得不够亮呀。」";
+                    return new[]
+                    {
+                        "「手电筒呢？这次好像闪得不够亮呀。」",
+                        "「你照过来的时候，我已经在动了。」",
+                        "「别眨眼，眨一下我就不在原地了。」",
+                    };
 
                 default:
-                    return string.Empty;
+                    return new string[0];
             }
         }
 
-        /// <summary>取某只敌人的台词：json 里有就用 json，否则退回默认。</summary>
-        public string For(EnemyId id)
+        /// <summary>取某只敌人的台词池（json 优先，没有就默认）。</summary>
+        public List<string> PoolFor(EnemyId id)
         {
             string code = id.Code();
 
@@ -68,47 +88,100 @@ namespace NailongFNAF.Gameplay
             {
                 for (int i = 0; i < Quotes.Count; i++)
                 {
-                    var e = Quotes[i];
-                    if (e != null && e.Id == code && !string.IsNullOrEmpty(e.Text))
+                    var p = Quotes[i];
+                    if (p != null && p.Id == code && p.Lines != null && p.Lines.Count > 0)
                     {
-                        return e.Text;
+                        return p.Lines;
                     }
                 }
             }
 
-            return DefaultFor(id);
+            return new List<string>(DefaultPool(id));
         }
 
-        /// <summary>写一条台词（编辑器窗口用）。</summary>
-        public void Set(EnemyId id, string text)
+        /// <summary>
+        /// 随机抽一句。**尽量不和 <paramref name="avoid"/> 重复** ——
+        /// 池子里不止一句时，连续两次被抓不会听到同一句话。
+        ///
+        /// 池子只有一句时只能重复（没办法）；空池返回空串。
+        /// </summary>
+        public string RandomLineFor(EnemyId id, string avoid = null)
+        {
+            List<string> pool = PoolFor(id);
+
+            if (pool == null || pool.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var candidates = new List<string>(pool.Count);
+
+            for (int i = 0; i < pool.Count; i++)
+            {
+                string line = pool[i];
+
+                if (string.IsNullOrEmpty(line))
+                {
+                    continue;
+                }
+
+                if (avoid != null && line == avoid)
+                {
+                    continue;
+                }
+
+                candidates.Add(line);
+            }
+
+            // 全是避免项（池子只有一句）→ 退回整池随机
+            if (candidates.Count == 0)
+            {
+                candidates = pool;
+            }
+
+            if (candidates.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return candidates[UnityEngine.Random.Range(0, candidates.Count)];
+        }
+
+        /// <summary>写一只敌人的整池（编辑器窗口用）。</summary>
+        public void SetPool(EnemyId id, List<string> lines)
         {
             if (Quotes == null)
             {
-                Quotes = new List<Entry>();
+                Quotes = new List<Pool>();
             }
 
             string code = id.Code();
+            var copy = lines != null ? new List<string>(lines) : new List<string>();
 
             for (int i = 0; i < Quotes.Count; i++)
             {
                 if (Quotes[i] != null && Quotes[i].Id == code)
                 {
-                    Quotes[i].Text = text;
+                    Quotes[i].Lines = copy;
                     return;
                 }
             }
 
-            Quotes.Add(new Entry { Id = code, Text = text });
+            Quotes.Add(new Pool { Id = code, Lines = copy });
         }
 
-        /// <summary>把四只敌人全填成默认值（编辑器窗口的「重置」用）。</summary>
+        /// <summary>把四只敌人全填成默认池（编辑器窗口的「重置」用）。</summary>
         public void ResetToDefaults()
         {
-            Quotes = new List<Entry>();
+            Quotes = new List<Pool>();
 
             foreach (var id in EnemyIds.All)
             {
-                Quotes.Add(new Entry { Id = id.Code(), Text = DefaultFor(id) });
+                Quotes.Add(new Pool
+                {
+                    Id = id.Code(),
+                    Lines = new List<string>(DefaultPool(id))
+                });
             }
         }
 
@@ -124,27 +197,49 @@ namespace NailongFNAF.Gameplay
             var sb = new System.Text.StringBuilder();
             sb.Append(Header);
 
-            bool first = true;
+            bool firstPool = true;
 
             if (Quotes != null)
             {
-                foreach (var e in Quotes)
+                foreach (var p in Quotes)
                 {
-                    if (e == null || string.IsNullOrEmpty(e.Id))
+                    if (p == null || string.IsNullOrEmpty(p.Id))
                     {
                         continue;
                     }
 
-                    if (!first)
+                    if (!firstPool)
                     {
                         sb.Append(',');
                     }
 
-                    first = false;
+                    firstPool = false;
 
-                    sb.Append("{\"id\":\"").Append(Escape(e.Id))
-                      .Append("\",\"text\":\"").Append(Escape(e.Text ?? string.Empty))
-                      .Append("\"}");
+                    sb.Append("{\"id\":\"").Append(Escape(p.Id)).Append("\",\"lines\":[");
+
+                    bool firstLine = true;
+
+                    if (p.Lines != null)
+                    {
+                        foreach (var line in p.Lines)
+                        {
+                            if (line == null)
+                            {
+                                continue;
+                            }
+
+                            if (!firstLine)
+                            {
+                                sb.Append(',');
+                            }
+
+                            firstLine = false;
+
+                            sb.Append('"').Append(Escape(line)).Append('"');
+                        }
+                    }
+
+                    sb.Append("]}");
                 }
             }
 
@@ -164,9 +259,8 @@ namespace NailongFNAF.Gameplay
 
             try
             {
-                // 项目里没引 Newtonsoft，用 Unity 内置的 JsonUtility —— 但它不认
-                // List&lt;自定义类&gt; 的顶层包装，所以这里手写一个轻量解析：
-                // 只找 "id" 和 "text" 两个键，够用且不引入依赖。
+                // 项目没引 Newtonsoft；JsonUtility 不认 List&lt;自定义类&gt; 的顶层包装，
+                // 所以这里手写一个只认 "id" / "lines" 的轻量解析 —— 够用且不引新依赖。
                 var quotes = new DeathQuotes();
 
                 int i = 0;
@@ -185,16 +279,61 @@ namespace NailongFNAF.Gameplay
                         continue;
                     }
 
-                    int textKey = raw.IndexOf("\"text\"", idEnd, StringComparison.Ordinal);
-                    if (textKey < 0)
+                    int linesKey = raw.IndexOf("\"lines\"", idEnd, StringComparison.Ordinal);
+                    if (linesKey < 0)
                     {
                         break;
                     }
 
-                    string text = ReadStringAfterKey(raw, textKey, out int textEnd);
+                    int arrayOpen = raw.IndexOf('[', linesKey);
+                    if (arrayOpen < 0)
+                    {
+                        break;
+                    }
 
-                    quotes.Set(ParseId(id), text ?? string.Empty);
-                    i = textEnd;
+                    var lines = new List<string>();
+                    int cursor = arrayOpen + 1;
+
+                    while (cursor < raw.Length)
+                    {
+                        int q = raw.IndexOf('"', cursor);
+                        if (q < 0)
+                        {
+                            break;
+                        }
+
+                        string line = ReadQuoted(raw, q, out int closing);
+                        if (line == null)
+                        {
+                            break;
+                        }
+
+                        lines.Add(line);
+
+                        int next = closing;
+                        while (next < raw.Length && char.IsWhiteSpace(raw[next]))
+                        {
+                            next++;
+                        }
+
+                        if (next >= raw.Length)
+                        {
+                            cursor = raw.Length;
+                            break;
+                        }
+
+                        if (raw[next] == ',')
+                        {
+                            cursor = next + 1;
+                            continue;
+                        }
+
+                        cursor = next;
+                        break;
+                    }
+
+                    quotes.SetPool(ParseId(id), lines);
+                    i = cursor;
                 }
 
                 result = quotes;
@@ -222,8 +361,15 @@ namespace NailongFNAF.Gameplay
                 return null;
             }
 
+            return ReadQuoted(raw, open, out endIndex);
+        }
+
+        private static string ReadQuoted(string raw, int quoteIndex, out int endIndex)
+        {
+            endIndex = quoteIndex + 1;
+
             var sb = new System.Text.StringBuilder();
-            int i = open + 1;
+            int i = quoteIndex + 1;
 
             while (i < raw.Length)
             {
@@ -255,7 +401,6 @@ namespace NailongFNAF.Gameplay
             return null;
         }
 
-        /// <summary>代号 → 敌人。认不出来就当作没有（返回 Niulai 只为满足 out 语义）。</summary>
         private static EnemyId ParseId(string code)
         {
             foreach (var id in EnemyIds.All)

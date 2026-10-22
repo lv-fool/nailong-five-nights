@@ -7,21 +7,23 @@ using UnityEngine;
 namespace NailongFNAF.EditorTools
 {
     /// <summary>
-    /// 编辑跳杀后那句台词的窗口 —— 菜单「奶龙 / 11. 编辑跳杀台词」。
+    /// 编辑跳杀后台词的窗口 —— 菜单「奶龙 / 11. 编辑跳杀台词」。
     ///
-    /// 每只敌人一个输入框，改完点保存写到 <c>Assets/Resources/death_quotes.json</c>。
-    /// 运行时 <see cref="NailongFNAF.UI.PrototypeScene"/> 从那里读，
-    /// 文件不存在就退回 <see cref="DeathQuotes.DefaultFor"/> 的写死文案。
+    /// 每只敌人一个**台词池**：可以加行、删行、逐行改、上下移动。
+    /// 每次被抓从池里随机抽一句（运行时避开上一句，见 PrototypeScene.QuoteFor）。
     ///
-    /// 为什么做成窗口而不是直接改源码：台词是文案，改一个词不该逼人
-    /// 在 .cs 里翻半天、还容易和别人的改动撞在一起。
+    /// 改完点保存写到 <c>Assets/Resources/death_quotes.json</c>；
+    /// 运行时的 PrototypeScene 从那里读，文件不存在就退回
+    /// <see cref="DeathQuotes.DefaultPool"/> 的写死文案。
     /// </summary>
     public class DeathQuoteEditorWindow : EditorWindow
     {
         /// <summary>放 Resources 下，运行时才能 Resources.Load 到。</summary>
         private const string JsonPath = "Assets/Resources/death_quotes.json";
 
-        private readonly Dictionary<EnemyId, string> _texts = new Dictionary<EnemyId, string>();
+        /// <summary>每只敌人一个可变列表（编辑期间用）。</summary>
+        private readonly Dictionary<EnemyId, List<string>> _pools =
+            new Dictionary<EnemyId, List<string>>();
 
         private Vector2 _scroll;
         private bool _dirty;
@@ -31,14 +33,14 @@ namespace NailongFNAF.EditorTools
         public static void Open()
         {
             var window = GetWindow<DeathQuoteEditorWindow>(false, "跳杀台词", true);
-            window.minSize = new Vector2(620f, 480f);
+            window.minSize = new Vector2(680f, 560f);
             window.LoadFromDisk();
             window.Show();
         }
 
         private void OnEnable()
         {
-            if (_texts.Count == 0)
+            if (_pools.Count == 0)
             {
                 LoadFromDisk();
             }
@@ -46,7 +48,6 @@ namespace NailongFNAF.EditorTools
 
         private void OnDisable()
         {
-            // 关窗口时如果还有没保存的改动，问一句 —— 免得白改
             if (_dirty && !EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 if (EditorUtility.DisplayDialog("跳杀台词",
@@ -59,19 +60,22 @@ namespace NailongFNAF.EditorTools
 
         private void LoadFromDisk()
         {
-            _texts.Clear();
+            _pools.Clear();
             _dirty = false;
 
             var loaded = ReadJson();
 
             foreach (var id in EnemyIds.All)
             {
-                _texts[id] = loaded != null
-                    ? loaded.For(id)
-                    : DeathQuotes.DefaultFor(id);
+                _pools[id] = loaded != null
+                    ? loaded.PoolFor(id)
+                    : new List<string>(DeathQuotes.DefaultPool(id));
             }
 
-            _status = loaded != null ? "已读取 " + JsonPath : "还没存过档，显示的是默认台词";
+            _status = loaded != null
+                ? "已读取 " + JsonPath
+                : "还没存过档，显示的是默认台词";
+
             Repaint();
         }
 
@@ -96,14 +100,13 @@ namespace NailongFNAF.EditorTools
         private void SaveToDisk()
         {
             var data = new DeathQuotes();
-            data.ResetToDefaults();   // 先把四条都填上，再覆盖
 
             foreach (var id in EnemyIds.All)
             {
-                string text;
-                if (_texts.TryGetValue(id, out text))
+                List<string> lines;
+                if (_pools.TryGetValue(id, out lines))
                 {
-                    data.Set(id, text);
+                    data.SetPool(id, lines);
                 }
             }
 
@@ -121,10 +124,12 @@ namespace NailongFNAF.EditorTools
         {
             EditorGUILayout.Space(6);
 
-            EditorGUILayout.LabelField("跳杀后结算画面显示的那句话", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("跳杀后结算画面显示的那句话（每只一个随机池）", EditorStyles.boldLabel);
+
             EditorGUILayout.HelpBox(
-                "调子建议保持「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。\n"
-                + "留空表示这一夜用默认文案。改完记得点保存。",
+                "每次被抓从池里**随机抽一句**，并避开这一只上一句说过的话。\n"
+                + "空行会被忽略；只有一句时只能重复。\n"
+                + "调子建议保持「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。",
                 MessageType.Info);
 
             EditorGUILayout.Space(8);
@@ -133,37 +138,105 @@ namespace NailongFNAF.EditorTools
 
             foreach (var id in EnemyIds.All)
             {
-                EditorGUILayout.LabelField(LabelFor(id), EditorStyles.boldLabel);
-
-                string current = _texts.ContainsKey(id) ? _texts[id] : string.Empty;
-
-                var style = new GUIStyle(EditorStyles.textArea);
-                style.wordWrap = true;
-
-                string edited = EditorGUILayout.TextArea(current, style,
-                    GUILayout.MinHeight(52f));
-
-                if (edited != current)
+                if (!_pools.ContainsKey(id))
                 {
-                    _texts[id] = edited;
-                    _dirty = true;
+                    _pools[id] = new List<string>();
                 }
+
+                List<string> pool = _pools[id];
+
+                bool changed = false;
 
                 EditorGUILayout.BeginHorizontal();
 
+                EditorGUILayout.LabelField(
+                    LabelFor(id) + "   （" + CountNonEmpty(pool) + " 句）",
+                    EditorStyles.boldLabel);
+
+                GUILayout.FlexibleSpace();
+
                 if (GUILayout.Button("恢复默认", GUILayout.Width(90f)))
                 {
-                    _texts[id] = DeathQuotes.DefaultFor(id);
+                    _pools[id] = new List<string>(DeathQuotes.DefaultPool(id));
                     _dirty = true;
                     GUI.FocusControl(null);
+                    changed = true;
                 }
 
-                GUILayout.Label("默认：" + DeathQuotes.DefaultFor(id),
-                    EditorStyles.miniLabel);
+                if (GUILayout.Button("＋ 加一句", GUILayout.Width(90f)))
+                {
+                    pool.Add(string.Empty);
+                    _dirty = true;
+                    GUI.FocusControl(null);
+                    changed = true;
+                }
 
                 EditorGUILayout.EndHorizontal();
 
-                EditorGUILayout.Space(10);
+                if (!changed)
+                {
+                    for (int i = 0; i < pool.Count; i++)
+                    {
+                        EditorGUILayout.BeginHorizontal();
+
+                        GUILayout.Label((i + 1) + ".", GUILayout.Width(24f));
+
+                        string current = pool[i] ?? string.Empty;
+
+                        var style = new GUIStyle(EditorStyles.textField);
+                        style.wordWrap = true;
+
+                        string edited = EditorGUILayout.TextField(current, style);
+
+                        if (edited != current)
+                        {
+                            pool[i] = edited;
+                            _dirty = true;
+                        }
+
+                        if (GUILayout.Button("↑", GUILayout.Width(26f)) && i > 0)
+                        {
+                            string tmp = pool[i - 1];
+                            pool[i - 1] = pool[i];
+                            pool[i] = tmp;
+                            _dirty = true;
+                            GUI.FocusControl(null);
+                            changed = true;
+                        }
+                        else if (GUILayout.Button("↓", GUILayout.Width(26f)) && i < pool.Count - 1)
+                        {
+                            string tmp = pool[i + 1];
+                            pool[i + 1] = pool[i];
+                            pool[i] = tmp;
+                            _dirty = true;
+                            GUI.FocusControl(null);
+                            changed = true;
+                        }
+                        else if (GUILayout.Button("✕", GUILayout.Width(26f)))
+                        {
+                            pool.RemoveAt(i);
+                            _dirty = true;
+                            GUI.FocusControl(null);
+                            changed = true;
+                        }
+
+                        EditorGUILayout.EndHorizontal();
+
+                        if (changed)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (pool.Count == 0)
+                {
+                    EditorGUILayout.LabelField("（空池 —— 这只被抓时不出声）", EditorStyles.miniLabel);
+                }
+
+                EditorGUILayout.Space(12);
+                EditorGUILayout.LabelField(string.Empty, GUI.skin.horizontalSlider);
+                EditorGUILayout.Space(4);
             }
 
             EditorGUILayout.EndScrollView();
@@ -194,7 +267,7 @@ namespace NailongFNAF.EditorTools
             {
                 foreach (var id in EnemyIds.All)
                 {
-                    _texts[id] = DeathQuotes.DefaultFor(id);
+                    _pools[id] = new List<string>(DeathQuotes.DefaultPool(id));
                 }
 
                 _dirty = true;
@@ -205,8 +278,27 @@ namespace NailongFNAF.EditorTools
 
             EditorGUILayout.Space(4);
 
-            EditorGUILayout.LabelField(_dirty ? "● 有未保存的改动" : _status,
-                EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(_dirty ? "● 有未保存的改动" : _status, EditorStyles.miniLabel);
+        }
+
+        /// <summary>池子里非空行数。</summary>
+        private static int CountNonEmpty(List<string> pool)
+        {
+            if (pool == null)
+            {
+                return 0;
+            }
+
+            int n = 0;
+            foreach (var line in pool)
+            {
+                if (!string.IsNullOrEmpty(line))
+                {
+                    n++;
+                }
+            }
+
+            return n;
         }
 
         private static string LabelFor(EnemyId id)

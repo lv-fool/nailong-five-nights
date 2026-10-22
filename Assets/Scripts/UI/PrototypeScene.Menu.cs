@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
@@ -9,7 +10,7 @@ namespace NailongFNAF.UI
     /// 开始界面 + 关卡（夜晚）选择 + 进度解锁 —— <see cref="PrototypeScene"/> 的菜单部分。
     ///
     /// 流程（对齐 FNAF 1 的入口习惯）：
-    ///   标题页 → 点「开始游戏」→ 关卡选择（第 1~5 夜 + 隐藏夜第 6 夜）
+    ///   标题页 → 点「开始游戏」→ 关卡选择（第 1~5 夜）
     ///   → 选一夜 → 进办公室开始那一夜。
     ///   撑到 6 点 → 结算面板「通关」→ 解锁下一夜（存档）→ 可继续下一夜或回标题。
     ///   被抓 / 断电被抓 → 结算面板「失败」→ 重试本夜或回标题。
@@ -1500,26 +1501,40 @@ namespace NailongFNAF.UI
             _endQuoteAudio.Play();
         }
 
+        /// <summary>上一条说出去的台词（按敌人分），用来避免连续两次说同一句。</summary>
+        private static readonly Dictionary<EnemyId, string> _lastQuote =
+            new Dictionary<EnemyId, string>();
+
         /// <summary>
-        /// 每只敌人被抓到后的台词。
+        /// 每只敌人被抓到后从**台词池**里随机抽一句。
         ///
         /// **优先读 Assets/Resources/death_quotes.json** —— 那是由编辑器窗口
         /// 「奶龙 / 11. 编辑跳杀台词」维护的；文件不存在或某只没写，
-        /// 就退回 <see cref="DeathQuotes.DefaultFor"/> 里那套写死的文案。
+        /// 就退回 <see cref="DeathQuotes.DefaultPool"/> 里那套写死的文案。
         ///
-        /// 所以改台词有两条路：菜单窗口（推荐，不用碰代码），
-        /// 或者直接改 DeathQuotes.DefaultFor()。
+        /// 抽的时候会避开这一只**上一次说过的那句**，免得连续两次被抓听到同样的话。
+        /// 池子只有一句时只能重复（没办法）。
         /// </summary>
         private static string QuoteFor(EnemyId id)
         {
             DeathQuotes quotes = LoadDeathQuotes();
 
-            if (quotes != null)
+            if (quotes == null)
             {
-                return quotes.For(id);
+                quotes = new DeathQuotes();   // 纯默认池
             }
 
-            return DeathQuotes.DefaultFor(id);
+            string previous;
+            _lastQuote.TryGetValue(id, out previous);
+
+            string line = quotes.RandomLineFor(id, previous);
+
+            if (!string.IsNullOrEmpty(line))
+            {
+                _lastQuote[id] = line;
+            }
+
+            return line;
         }
 
         /// <summary>缓存的台词表 —— 只在第一次用时读一次 Resources。</summary>
