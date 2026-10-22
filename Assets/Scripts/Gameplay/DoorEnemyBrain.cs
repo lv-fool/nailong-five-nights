@@ -85,6 +85,28 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         private bool _doorWasClosed;
 
+        // ── 进攻失败后的「随机游走」 ──────────────────────────────────
+        //
+        // 被门挡回来时**不直接回出生地**，而是随机传送到某个机位，
+        // 再按活动度决定游走几步才重新开始往门口摸。
+        //
+        // 为什么这么做（照 FNAF 1 的观感）：原版里邦尼被你关门挡一次之后
+        // 不会老实回起点，它会换个房间继续晃 —— 这让玩家觉得它一直在楼里，
+        // 而不是每挡一次就重置进度、可以精准预测。
+
+        /// <summary>还要随机游走几步（0 = 正常往门口推进）。</summary>
+        public int WanderStepsLeft { get; private set; }
+
+        /// <summary>
+        /// 进攻失败后随机游走的**步数**（按活动度折算 1~5 步）。
+        /// 活动度越高，被挡回来之后晃得越久、越难预测。
+        /// </summary>
+        private int WanderStepsForActivity()
+        {
+            int steps = 1 + (int)((ActivityLevel / (float)MaxActivityLevel) * 4f);
+            return steps < 1 ? 1 : (steps > 5 ? 5 : steps);
+        }
+
         /// <summary>
         /// 最后一搏期间门被打开过 —— 下一帧要把 2 秒清零重计。
         ///
@@ -218,6 +240,37 @@ namespace NailongFNAF.Gameplay
 
         protected override void Advance(EnemyContext ctx)
         {
+            // ── 游走期：不往门口推进，而是在路径上随机换位 ──
+            //
+            // 被门挡回来之后它会「在楼里晃几步」，晃完才重新往门口摸。
+            // 这让玩家没法靠「刚挡回去 = 安全一阵」来精确预测。
+            if (WanderStepsLeft > 0)
+            {
+                WanderStepsLeft--;
+
+                if (HasCameraPath)
+                {
+                    // 随机跳到一个**不同的**格子，避开出生地（第 0 格）
+                    int slots = _cameraPath.Length;
+                    if (slots > 1)
+                    {
+                        int prev = Stage;
+                        int pick = 1 + Rng.Range(0, slots - 1);
+
+                        // 原地不动会很怪 —— 撞上了就往前挪一格（到头了往回挪）
+                        if (pick == prev)
+                        {
+                            pick = pick + 1 < slots ? pick + 1 : (pick > 1 ? pick - 1 : 1);
+                        }
+
+                        Stage = pick;
+                    }
+                }
+
+                DoorTimer = 0f;
+                return;
+            }
+
             Stage = Stage + 1;
 
             if (Stage >= MaxStage)
@@ -340,12 +393,48 @@ namespace NailongFNAF.Gameplay
             Retreat();
         }
 
+        /// <summary>
+        /// 进攻失败（被门挡回来）：**不直接回出生地**，而是随机传送 + 随机游走。
+        ///
+        /// 原版观感：邦尼被关门挡一次之后不会老实回起点，它会换个房间继续晃。
+        /// 这让玩家觉得它一直在楼里，而不是每挡一次就重置进度、可以精准预测。
+        ///
+        /// 具体做法：
+        ///   1. 随机跳到路径上的某个机位（不是第 0 格 = 不是出生地）
+        ///   2. 记下「还要晃几步」（按活动度 1~5 步）
+        ///   3. 游走期间每步都在路径上随机换位，不往门口推进
+        ///   4. 晃完了才恢复正常推进
+        /// </summary>
         public override void Retreat()
         {
             base.Retreat();
             DoorTimer = 0f;
             LastChanceTimer = 0f;
             _doorWasClosed = false;
+
+            // 只有配了机位路径的（袋鼠 / 牛来 / 奶龙进攻态）才谈得上「游走」。
+            // 没路径的老三档实现只能回 Stage 0，保持原样。
+            if (!HasCameraPath)
+            {
+                WanderStepsLeft = 0;
+                return;
+            }
+
+            // 随机跳到路径上的某个格子。
+            // ⚠️ **避开第 0 格**（= 出生地 / 路径起点），
+            // 用户明确要求「出生地不会被返回」。
+            int slots = _cameraPath.Length > 1 ? _cameraPath.Length : 1;
+            if (slots > 1)
+            {
+                Stage = 1 + Rng.Range(0, slots - 1);   // 1 .. length-1
+            }
+            else
+            {
+                Stage = 0;
+            }
+
+            MoveTimer = 0f;
+            WanderStepsLeft = WanderStepsForActivity();
         }
     }
 }

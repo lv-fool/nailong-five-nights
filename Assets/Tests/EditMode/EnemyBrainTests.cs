@@ -196,6 +196,73 @@ namespace NailongFNAF.Tests
         //   2. 该退走时 IsAttacking 必须是 false（残留会让它「退了照样跳杀」）
         // ---------------------------------------------------------------
 
+        // ---------------------------------------------------------------
+        // 进攻失败 → 随机传送 + 随机游走（不回出生地）
+        // ---------------------------------------------------------------
+
+        [Test]
+        public void 被门挡回后_随机传送到非出生地的机位()
+        {
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Right,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, 3f,
+                new[] { 0, 1, 5, 3, 4 });
+
+            var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
+            AdvanceToStage(brain, closed, brain.MaxStage);
+            Assert.AreEqual(brain.MaxStage, brain.Stage);
+
+            brain.Retreat();
+
+            Assert.AreNotEqual(0, brain.Stage, "不该回出生地（第 0 格）");
+            Assert.GreaterOrEqual(brain.Stage, 1);
+            Assert.Less(brain.Stage, brain.MaxStage);
+            Assert.Greater(brain.WanderStepsLeft, 0, "退走后应该开始游走");
+        }
+
+        [Test]
+        public void 游走步数随活动度增加()
+        {
+            var low = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 1,
+                new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, 3f,
+                new[] { 0, 1, 5, 3, 4 });
+            low.Retreat();
+
+            var high = new DoorEnemyBrain(EnemyId.Niulai, Side.Right,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, 3f,
+                new[] { 0, 1, 5, 3, 4 });
+            high.Retreat();
+
+            Assert.Less(low.WanderStepsLeft, high.WanderStepsLeft,
+                "活动度越高，游走步数应该越多");
+            Assert.GreaterOrEqual(low.WanderStepsLeft, 1);
+            Assert.LessOrEqual(high.WanderStepsLeft, 5);
+        }
+
+        [Test]
+        public void 游走期间不推进到门口_且不回出生地()
+        {
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Right,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, 3f,
+                new[] { 0, 1, 5, 3, 4 });
+
+            var idle = EnemyContext.Idle();
+            brain.Retreat();
+
+            int steps = brain.WanderStepsLeft;
+            for (int i = 0; i < steps; i++)
+            {
+                brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, idle);
+
+                Assert.Less(brain.Stage, brain.MaxStage, "游走期间不该到门口");
+                Assert.AreNotEqual(0, brain.Stage, "游走期间不回出生地");
+            }
+
+            Assert.AreEqual(0, brain.WanderStepsLeft, "游走步数应该用完了");
+        }
+
         [Test]
         public void 退走后不会残留动手标记()
         {
