@@ -68,30 +68,85 @@ namespace NailongFNAF.Gameplay
         /// 取这次通话的台词。<paramref name="night"/> 是第几夜（0 起），
         /// <paramref name="callIndex"/> 是这一夜第几次接通（0 起）。
         /// </summary>
+        /// <summary>
+        /// 台词表（json 优先，缺了就用 <see cref="NaibaoCallLines"/> 里的默认）。
+        ///
+        /// 静态缓存：一次通话要取整组词，不能每次读 Resources。
+        /// 编辑器窗口保存后会调 <see cref="InvalidateLinesCache"/>。
+        /// </summary>
+        private static NaibaoCallLines _lines;
+        private static bool _linesLoaded;
+
+        public static NaibaoCallLines Lines
+        {
+            get
+            {
+                if (_linesLoaded)
+                {
+                    return _lines;
+                }
+
+                _linesLoaded = true;
+
+                var asset = UnityEngine.Resources.Load<UnityEngine.TextAsset>(NaibaoCallLines.ResourcePath);
+
+                if (asset != null)
+                {
+                    NaibaoCallLines parsed;
+                    if (NaibaoCallLines.TryParse(asset.text, out parsed))
+                    {
+                        _lines = parsed;
+                        return _lines;
+                    }
+                }
+
+                _lines = new NaibaoCallLines();   // 纯默认
+                return _lines;
+            }
+        }
+
+        /// <summary>编辑器里改了 json 之后让缓存失效（窗口保存时调）。</summary>
+        public static void InvalidateLinesCache()
+        {
+            _lines = null;
+            _linesLoaded = false;
+        }
+
+        /// <summary>
+        /// 取这次通话的台词。<paramref name="night"/> 是第几夜（0 起），
+        /// <paramref name="callIndex"/> 是这一夜第几次接通（0 起）。
+        ///
+        /// **台词内容从 NaibaoCallLines 读**（「奶龙 / 13. 编辑奶包通话台词」维护），
+        /// 这个函数只负责「哪一夜该用哪一组」。
+        /// </summary>
         public static NaibaoCallLine[] ForCall(int night, bool guide, int callIndex)
         {
+            NaibaoCallLines table = Lines;
+
             if (guide)
             {
-                return callIndex <= 0 ? GuideFirst : GuideAgain;
+                return callIndex <= 0
+                    ? table.CallLinesFor(NaibaoCallLines.KeyGuideFirst)
+                    : table.CallLinesFor(NaibaoCallLines.KeyGuideAgain);
             }
 
             // 同一夜第二次之后就不给新词了：剧情是慢慢给的，不是一次说完
             if (callIndex >= 1)
             {
-                return Repeat;
+                return table.CallLinesFor(NaibaoCallLines.KeyRepeat);
             }
 
             if (night <= 2)
             {
-                return NightEarly;
+                return table.CallLinesFor(NaibaoCallLines.KeyNightEarly);
             }
 
             if (night <= 4)
             {
-                return NightMiddle;
+                return table.CallLinesFor(NaibaoCallLines.KeyNightMiddle);
             }
 
-            return NightLate;
+            return table.CallLinesFor(NaibaoCallLines.KeyNightLate);
         }
 
         private static NaibaoCallLine Line(string text, NaibaoPose pose)
