@@ -3825,6 +3825,62 @@ namespace NailongFNAF.UI
             return hour == 0 ? "12 AM" : hour + " AM";
         }
 
+        /// <summary>
+        /// 右门口站着谁（没人返回 NONE）。
+        ///
+        /// 右门是牛来与奶龙共用的通道，后来者要在走廊排队。
+        /// 调试时看到「奶龙卡在最后一格」，一查就知道是不是被这个挡住了。
+        /// </summary>
+        private string DescribeRightDoorHolder()
+        {
+            if (_enemyDirector == null)
+            {
+                return "-";
+            }
+
+            foreach (var id in EnemyIds.All)
+            {
+                var door = _enemyDirector.GetBrain(id) as DoorEnemyBrain;
+                if (door == null || door.Side != Side.Right || door.IsAttacking)
+                {
+                    continue;
+                }
+
+                if (door.Stage >= door.MaxStage)
+                {
+                    return id.Code().ToUpperInvariant();
+                }
+            }
+
+            return "NONE";
+        }
+
+        /// <summary>
+        /// 奶龙现在在干什么 —— 特别是「在走廊给牛来让位」这个状态。
+        /// 它被挡住时不会自己说出来，只能靠这行看出来。
+        /// </summary>
+        private string DescribeNailongQueue(NailongBrain nailong)
+        {
+            if (nailong.Mode != NailongMode.Approaching)
+            {
+                return "STEALING(cam " + nailong.CameraIndex + ")";
+            }
+
+            if (nailong.IsAttacking)
+            {
+                return "ATTACKING";
+            }
+
+            // 差一步到门口、而门口已经被别人占着 —— 就是「排队中」
+            if (nailong.Stage + 1 >= nailong.MaxStage && DescribeRightDoorHolder() != "NONE"
+                && DescribeRightDoorHolder() != "NAILONG")
+            {
+                return "QUEUED(stage " + nailong.Stage + "/" + nailong.MaxStage
+                    + ", waiting for " + DescribeRightDoorHolder() + ")";
+            }
+
+            return "APPROACHING(stage " + nailong.Stage + "/" + nailong.MaxStage + ")";
+        }
         private string BuildDebugInfo(GameManager gm)
         {
             var sb = new StringBuilder();
@@ -3857,6 +3913,22 @@ namespace NailongFNAF.UI
               .Append("    LIGHT L ").Append(gm.LeftLightOn ? "ON" : "OFF")
               .Append("    LIGHT R ").Append(gm.RightLightOn ? "ON" : "OFF")
               .Append('\n');
+
+            // 右门占用者 + 奶龙排队状态。
+            // 右门是牛来和奶龙共用的，后来者会停在走廊等 ——
+            // 没有这一行的话，奶龙停在最后一格看起来就像「卡住了」。
+            if (_enemyDirector != null)
+            {
+                sb.Append("RIGHT DOOR HOLDER ").Append(DescribeRightDoorHolder()).Append("    ");
+
+                var nailong = _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain;
+                if (nailong != null)
+                {
+                    sb.Append("NAILONG ").Append(DescribeNailongQueue(nailong));
+                }
+
+                sb.Append('\n');
+            }
 
             if (_hasJumpscare)
             {

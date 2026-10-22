@@ -531,18 +531,33 @@ namespace NailongFNAF.Gameplay
                 }
             }
 
-            // 已经突破了：等监控放下（或本来就没升起）才真正动手
-            if (_breachingEnemy.HasValue && !game.MonitorUp)
+            // 已经突破了：真正动手。
+            //
+            // ⚠️ **只有门类敌人（袋鼠 / 牛来）才等监控放下** ——
+            // 那个等待是为了「玩家正开着监控被抓住」这种演出（照 FNAF 1：
+            // 看监控时被邦尼摸进来，抬头的瞬间才发现）。
+            //
+            // 噜噜和奶龙**不受监控状态影响**，突破当场就动手：
+            //   · 噜噜走正门、靠手电筒防守，和监控没关系
+            //   · 奶龙已经转成进攻态，它的威胁本来就绕开了「看监控」这一层
+            // 让它们陪等只会让玩家以为「开着监控就安全」，是个误导。
+            if (_breachingEnemy.HasValue)
             {
-                _attackFired = true;
-                game.MarkCaught();
+                bool waitsForMonitor = _breachingEnemy.Value != EnemyId.Lulu
+                    && _breachingEnemy.Value != EnemyId.Nailong;
 
-                if (Attacked != null)
+                if (!waitsForMonitor || !game.MonitorUp)
                 {
-                    Attacked(_breachingEnemy.Value);
-                }
+                    _attackFired = true;
+                    game.MarkCaught();
 
-                _breachingEnemy = null;
+                    if (Attacked != null)
+                    {
+                        Attacked(_breachingEnemy.Value);
+                    }
+
+                    _breachingEnemy = null;
+                }
             }
         }
     }
