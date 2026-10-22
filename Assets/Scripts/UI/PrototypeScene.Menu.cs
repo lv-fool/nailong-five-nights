@@ -228,40 +228,151 @@ namespace NailongFNAF.UI
         /// 调完点「开始」。设置会存档（<see cref="CustomNightConfig"/>），下次进来还是上次的数。
         /// 照 FNAF 1 的第 7 夜：通关隐藏夜才解锁（按钮在标题页就锁着）。
         /// </summary>
+        /// <summary>
+        /// 自定义夜：照 FNAF 1 原版那屏布局 —— **四列横排**。
+        ///
+        ///   名字（Freddy / Bonnie / Chica / Foxy）
+        ///   立绘方框
+        ///   A.I. Level
+        ///   ⟨ 20 ⟩
+        ///
+        /// 底下一条难度图例，右下一个 READY。
+        /// 早先是四行竖排，改横排是为了照原版、也为了让立绘有地方放。
+        /// </summary>
         private void BuildCustomView()
         {
             _customView = MakeFullScreenPanel("CustomView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
 
-            MakeLabel(_customView.transform, "自定义夜", 52, new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.5f, 0.82f), new Vector2(0.5f, 0.82f), new Vector2(0f, 0f), new Vector2(900f, 90f));
-            MakeLabel(_customView.transform, "每只敌人的活动度 0 ~ 20 —— 全 20 通关有成就。", 20,
-                new Color(0.55f, 0.55f, 0.6f),
-                new Vector2(0.5f, 0.74f), new Vector2(0.5f, 0.74f), new Vector2(0f, 0f), new Vector2(1100f, 40f));
+            MakeLabel(_customView.transform, "自定义夜", 50, new Color(0.95f, 0.95f, 0.95f),
+                new Vector2(0.5f, 0.90f), new Vector2(0.5f, 0.90f), new Vector2(0f, 0f), new Vector2(900f, 80f));
+
+            // 四列均分：中心在 0.5 左右对称分布
+            const float colSpread = 0.34f;   // 最左/最右列距中心多远
+            float[] colX = new float[EnemyIds.All.Length];
+
+            for (int i = 0; i < EnemyIds.All.Length; i++)
+            {
+                float t = EnemyIds.All.Length > 1
+                    ? (i / (float)(EnemyIds.All.Length - 1) - 0.5f) * 2f
+                    : 0f;
+
+                colX[i] = 0.5f + t * colSpread;
+            }
 
             for (int i = 0; i < EnemyIds.All.Length; i++)
             {
                 EnemyId id = EnemyIds.All[i];
-                float y = 0.66f - i * 0.10f;
+                float x = colX[i];
 
-                // 名字 + 一句话提示（走哪边）
-                MakeLabel(_customView.transform, CustomEnemyLabel(id), 26, new Color(0.85f, 0.85f, 0.9f),
-                    new Vector2(0.34f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(360f, 60f));
+                // 名字
+                MakeLabel(_customView.transform, CustomEnemyName(id), 30, Color.white,
+                    new Vector2(x, 0.80f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(260f, 50f));
 
+                // 立绘方框
+                MakeCustomPortrait(id, new Vector2(x, 0.63f));
+
+                // A.I. Level
+                MakeLabel(_customView.transform, "A.I. Level", 22, new Color(0.85f, 0.85f, 0.88f),
+                    new Vector2(x, 0.44f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(220f, 36f));
+
+                // ⟨ 20 ⟩
                 MakeStepperButton(_customView.transform, "−",
-                    new Vector2(0.56f, y), () => OnCustomStep(id, -1));
-                _customLevelTexts[(int)id] = MakeLabel(_customView.transform, "0", 34, Color.white,
-                    new Vector2(0.63f, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(90f, 60f));
+                    new Vector2(x - 0.055f, 0.36f), () => OnCustomStep(id, -1));
+                _customLevelTexts[(int)id] = MakeLabel(_customView.transform, "0", 40, Color.white,
+                    new Vector2(x, 0.36f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(100f, 60f));
                 MakeStepperButton(_customView.transform, "+",
-                    new Vector2(0.70f, y), () => OnCustomStep(id, 1));
+                    new Vector2(x + 0.055f, 0.36f), () => OnCustomStep(id, 1));
             }
 
-            // 最后一行在 0.36，按钮 84px ≈ 0.093 —— 间隔必须留够 0.10，别再压边
+            // 底部难度图例（照原版那句 (0-2)easy (3-6)med …）
+            MakeLabel(_customView.transform, CustomDifficultyLegend(), 20,
+                new Color(0.78f, 0.78f, 0.82f),
+                new Vector2(0.36f, 0.14f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(900f, 40f));
+
+            // 右下 READY（= 开始）
             MakeMenuButton(_customView.transform, "开始", Vector2.zero,
-                new Vector2(0.5f, 0.26f), OnCustomStartClicked);
+                new Vector2(0.86f, 0.14f), OnCustomStartClicked);
+
+            // 左上返回
             MakeMenuButton(_customView.transform, "返回", Vector2.zero,
-                new Vector2(0.5f, 0.16f), OpenTitle);
+                new Vector2(0.10f, 0.92f), OpenTitle);
 
             _customView.SetActive(false);
+        }
+
+        /// <summary>四档难度图例，照原版那行字。</summary>
+        private static string CustomDifficultyLegend()
+        {
+            return "(0-2) 简单     (3-6) 中等     (7-12) 困难     (13-20) 极限";
+        }
+
+        /// <summary>
+        /// 自定义夜那一列顶上的名字。
+        /// 只写名字（不带「走哪边」）—— 横排没地方塞后缀，塞了就撑破列宽。
+        /// </summary>
+        private static string CustomEnemyName(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai:
+                    return "牛来";
+                case EnemyId.Daishu:
+                    return "袋鼠";
+                case EnemyId.Lulu:
+                    return "噜噜";
+                case EnemyId.Nailong:
+                    return "奶龙";
+                default:
+                    return id.Code();
+            }
+        }
+
+        /// <summary>
+        /// 自定义夜每列的立绘方框。
+        ///
+        /// 用 Stare（正对镜头那张）—— 它最能代表「这只东西正看着你」，
+        /// 也刚好是原版那屏的构图。素材缺失时退回 Idle，再缺就是一块暗色占位。
+        /// </summary>
+        private void MakeCustomPortrait(EnemyId id, Vector2 anchor)
+        {
+            const float w = 168f;
+            const float h = 188f;
+
+            var go = new GameObject("Portrait", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(_customView.transform, false);
+
+            var rect = (RectTransform)go.transform;
+            PlaceRect(rect, anchor, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(w, h));
+
+            var image = go.GetComponent<Image>();
+            image.sprite = MakeRoundedSprite();
+            image.color = new Color(0.10f, 0.10f, 0.13f, 1f);
+            image.type = Image.Type.Simple;
+            image.raycastTarget = false;
+
+            var art = FindCharacter(id);
+            Sprite sprite = art != null ? art.Get(CharacterPose.Stare) : null;
+
+            if (sprite == null)
+            {
+                return;   // 没素材就留一块暗框，别让界面缺一格看起来像坏了
+            }
+
+            // 立绘叠在方框里，按高度装满、居中 —— 原版那些头像也是撑满的
+            var artGo = new GameObject("Art", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            artGo.transform.SetParent(go.transform, false);
+
+            var artRect = (RectTransform)artGo.transform;
+            artRect.anchorMin = new Vector2(0.5f, 0.5f);
+            artRect.anchorMax = new Vector2(0.5f, 0.5f);
+            artRect.pivot = new Vector2(0.5f, 0.5f);
+            artRect.anchoredPosition = Vector2.zero;
+
+            var artImage = artGo.GetComponent<Image>();
+            artImage.sprite = sprite;
+            artImage.preserveAspect = true;
+            artImage.raycastTarget = false;
+            FitHeight(artRect, sprite, h);
         }
 
         /// <summary>自定义夜每行的小标题：名字 + 走哪边。</summary>
