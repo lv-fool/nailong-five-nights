@@ -133,6 +133,7 @@ namespace NailongFNAF.Gameplay
         private int _guideStep;
         private int _mischiefCount;
         private bool _finished;
+        private bool _talking;
 
         /// <summary>
         /// 建一个奶包。<paramref name="guide"/> = true 时是第 1 夜的引导模式，
@@ -169,10 +170,41 @@ namespace NailongFNAF.Gameplay
             get { return _elapsed; }
         }
 
+        /// <summary>玩家是不是正在跟她通话。通话期间她既不出手，也不算时间。</summary>
+        public bool IsTalking
+        {
+            get { return _talking; }
+        }
+
+        /// <summary>
+        /// 接通电话：她停下来听你说（并听自己说），手上的事也放下。
+        /// 已经排在队列里、还没演的那一次出场会被丢掉 —— 否则挂了断还在说上一句。
+        /// </summary>
+        public void BeginTalk()
+        {
+            _talking = true;
+            _pending.Clear();
+        }
+
+        /// <summary>
+        /// 挂断：她重新开始盘算，但要等满一个间隔才出手。
+        /// 不能挂完立刻闹 —— 那样「打电话换平安」就永远是亏的。
+        /// </summary>
+        public void EndTalk()
+        {
+            if (!_talking)
+            {
+                return;
+            }
+
+            _talking = false;
+            _nextMischiefAt = _elapsed + NextGap();
+        }
+
         /// <summary>推进时间。到点就把该出的场排进队列，等外面用 <see cref="TryTakeCue"/> 取。</summary>
         public void Tick(float deltaSeconds)
         {
-            if (deltaSeconds <= 0f || _finished)
+            if (deltaSeconds <= 0f || _finished || _talking)
             {
                 return;
             }
@@ -235,6 +267,7 @@ namespace NailongFNAF.Gameplay
             _guideStep = 0;
             _mischiefCount = 0;
             _finished = false;
+            _talking = false;
             _nextMischiefAt = MischiefFirstDelay;
         }
 

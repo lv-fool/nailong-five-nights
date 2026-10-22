@@ -7,6 +7,10 @@ Shader "NailongFNAF/UnlitTexture"
     Properties
     {
         _MainTex ("Texture", 2D) = "white" {}
+
+        // 可选色调：默认白色（不改变任何现有材质的外观），
+        // 奶包那部手机靠它做「转到它 -> 亮起来」的高亮。
+        _Color ("Tint", Color) = (1,1,1,1)
     }
 
     SubShader
@@ -35,6 +39,7 @@ Shader "NailongFNAF/UnlitTexture"
             };
 
             sampler2D _MainTex;
+            fixed4 _Color;
 
             v2f vert (appdata v)
             {
@@ -46,7 +51,7 @@ Shader "NailongFNAF/UnlitTexture"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                return tex2D(_MainTex, i.uv);
+                return tex2D(_MainTex, i.uv) * _Color;
             }
             ENDCG
         }

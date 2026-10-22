@@ -115,6 +115,21 @@ namespace NailongFNAF.Core
         /// </summary>
         public string NaibaoApologyLine { get; private set; }
 
+        /// <summary>当前这一通电话（没在通话时为 null）。</summary>
+        public NaibaoCall NaibaoCall { get; private set; }
+
+        /// <summary>是不是正跟她通着话。</summary>
+        public bool NaibaoTalking
+        {
+            get { return NaibaoCall != null && !NaibaoCall.Ended; }
+        }
+
+        /// <summary>通话流水号：接通、翻页、挂断都会 +1，UI 靠它判断要不要重画。</summary>
+        public int NaibaoCallSerial { get; private set; }
+
+        /// <summary>这一夜接过几次电话（决定她给不给新词）。</summary>
+        public int NaibaoCallCount { get; private set; }
+
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
         {
@@ -290,6 +305,8 @@ namespace NailongFNAF.Core
 
             if (Naibao == null || !CanOperate())
             {
+                // 断电或被抓：电话自然断线，别让「通话中」的用电格子挂在身上
+                EndNaibaoCall();
                 return;
             }
 
@@ -359,6 +376,8 @@ namespace NailongFNAF.Core
             LastNaibaoCueAge = 0f;
             _naibaoApology.Clear();
             NaibaoApologyLine = null;
+            NaibaoCall = null;
+            NaibaoCallCount = 0;
 
             LeftDoorClosed = false;
             RightDoorClosed = false;
@@ -399,6 +418,77 @@ namespace NailongFNAF.Core
             LastNaibaoCueAge = 0f;
             _naibaoApology.Clear();
             NaibaoApologyLine = null;
+            NaibaoCall = null;
+            NaibaoCallCount = 0;
+        }
+
+        // ---------------------------------------------------------------
+        // 桌上那部手机：跟她通话（通话期间她不出手，电表多走一格）
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// 接通电话。返回 false 表示这一下没打通（没她 / 已断电 / 已被抓 / 已经在通话）。
+        /// <paramref name="night"/> 是第几夜（0 起），决定她这次给什么词。
+        /// </summary>
+        public bool StartNaibaoCall(int night)
+        {
+            if (Naibao == null || NaibaoCall != null || !CanOperate())
+            {
+                return false;
+            }
+
+            NaibaoCall call = new NaibaoCall(
+                NaibaoPhoneScript.ForCall(night, Naibao.IsGuide, NaibaoCallCount));
+
+            if (call.Count <= 0)
+            {
+                return false;
+            }
+
+            NaibaoCall = call;
+            NaibaoCallCount++;
+            NaibaoCallSerial++;
+
+            // 接通就让她撒手：抢着的监控立刻还回去（玩家的意图本来就没被改），
+            // 挂在身上的「偷加一档」也一并熄掉
+            _naibaoMonitorTimer = 0f;
+            _naibaoUsageTimer = 0f;
+            Naibao.BeginTalk();
+
+            return true;
+        }
+
+        /// <summary>念下一句。念完了就自动挂断。没在通话返回 false。</summary>
+        public bool AdvanceNaibaoCall()
+        {
+            if (NaibaoCall == null)
+            {
+                return false;
+            }
+
+            NaibaoCallSerial++;
+            if (!NaibaoCall.Advance())
+            {
+                EndNaibaoCall();
+            }
+
+            return true;
+        }
+
+        /// <summary>挂断。</summary>
+        public void EndNaibaoCall()
+        {
+            if (NaibaoCall == null)
+            {
+                return;
+            }
+
+            NaibaoCall = null;
+            NaibaoCallSerial++;
+            if (Naibao != null)
+            {
+                Naibao.EndTalk();
+            }
         }
 
         // ---------------------------------------------------------------
@@ -665,6 +755,12 @@ namespace NailongFNAF.Core
             // 奶包偷偷拧上去的那一档。她不动你的东西，只让电表转快一点 ——
             // 所以这里加的是「看不见的一格」，玩家只能从 Usage 表和掉电速度察觉
             if (_naibaoUsageTimer > 0f)
+            {
+                usage++;
+            }
+
+            // 跟她说电话也是要钱的：通话期间整条线路多走一格（挂断就还回来）
+            if (NaibaoTalking)
             {
                 usage++;
             }

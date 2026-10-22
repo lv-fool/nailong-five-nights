@@ -703,6 +703,26 @@ namespace NailongFNAF.UI
         /// <summary>立绘缓存：文件名 → 运行时切出来的 Sprite。</summary>
         private readonly Dictionary<string, Sprite> _naibaoSprites = new Dictionary<string, Sprite>();
 
+        /// <summary>桌上那部手机（世界里的 3D 物件，转到它、点它才接通）。</summary>
+        private NaibaoPhoneProp _naibaoPhone;
+
+        /// <summary>手机上方的提示字（每帧按手机的世界位置投影过去）。</summary>
+        private Text _naibaoPhoneHint;
+
+        /// <summary>她这会儿是不是被转到了画面中间（亮了才能点）。</summary>
+        private bool _naibaoPhoneHighlighted;
+
+        /// <summary>通话面板整组（立绘 + 台词 + 按钮）。</summary>
+        private CanvasGroup _naibaoCallGroup;
+
+        /// <summary>通话面板里的立绘、字、提示。</summary>
+        private Image _naibaoCallPortrait;
+        private Text _naibaoCallText;
+        private Text _naibaoCallHint;
+
+        /// <summary>已经画到第几次通话变化（跟 <see cref="GameManager.NaibaoCallSerial"/> 比）。</summary>
+        private int _naibaoCallSerial = -1;
+
         /// <summary>左下角「电量 + Usage」整组。断电后收起来，跟原版一样只剩黑暗。</summary>
         private CanvasGroup _powerGroup;
 
@@ -898,6 +918,7 @@ namespace NailongFNAF.UI
 
             UpdateView(gm);
             HandleMonitorHotspot(gm);
+            TryNaibaoPhoneClick(gm);
             UpdateVisuals(gm);
             UpdateHud(gm);
             UpdateJumpscareShake();
@@ -1001,6 +1022,12 @@ namespace NailongFNAF.UI
             }
 
             gm.SetView(view);
+        }
+
+        /// <summary>点桌上的手机接通奶包 —— 得先把她转到画面中间（那时手机亮着）。</summary>
+        private void TryNaibaoPhoneClick(GameManager gm)
+        {
+            HandleNaibaoPhoneClick(gm);
         }
 
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
@@ -3488,6 +3515,7 @@ namespace NailongFNAF.UI
             UpdateUsageBars(gm.Power.UsageLevel);
             UpdateEndlessHud(gm);
             UpdateNaibao(gm);
+            UpdateNaibaoCall(gm);
 
             // 断电了就没有「还剩多少电、用了几格」这回事了
             _powerGroup.alpha = gm.HasPowerOut ? 0f : 1f;
@@ -3597,6 +3625,192 @@ namespace NailongFNAF.UI
             if (hold > 0f)
             {
                 _naibaoHideAt = Time.unscaledTime + hold;
+            }
+        }
+
+        /// <summary>
+        /// 桌上那部手机与通话面板。
+        ///
+        /// 手机是**钉在世界里**的 3D 物件：转头把它转到画面中间，它才亮起来、也才点得动。
+        /// 只在「有奶包、没在通话、没断电、没被抓、菜单没开、监控没升起」时露面；
+        /// 通话面板按 <see cref="GameManager.NaibaoCallSerial"/> 变化重画，翻页只改字不改布局。
+        /// </summary>
+        private void UpdateNaibaoCall(GameManager gm)
+        {
+            if (_naibaoCallGroup == null)
+            {
+                return;
+            }
+
+            bool talking = gm.NaibaoTalking;
+
+            // 通话时手机留在桌上不藏 —— 她还在那儿说话，藏起来反而怪。
+            // 但监控升起来的时候整块画面都被监控盖住，桌上那部手机和「点一下 · 和她说话」
+            // 都不该再透出来（玩家这时候也点不到它）。
+            bool showPhone = gm.Naibao != null && !gm.HasPowerOut
+                && !gm.HasBeenCaught && !_menuOpen && !gm.MonitorUp;
+
+            UpdateNaibaoPhone(showPhone);
+            UpdateNaibaoPhoneHint(showPhone, talking);
+
+            if (_naibaoCallGroup.gameObject.activeSelf != talking)
+            {
+                _naibaoCallGroup.gameObject.SetActive(talking);
+            }
+
+            if (!talking)
+            {
+                _naibaoCallSerial = -1;
+
+                if (_naibaoPhone != null)
+                {
+                    _naibaoPhone.ShowIdle();
+                }
+
+                return;
+            }
+
+            if (gm.NaibaoCallSerial == _naibaoCallSerial)
+            {
+                return;
+            }
+
+            _naibaoCallSerial = gm.NaibaoCallSerial;
+
+            NaibaoCall call = gm.NaibaoCall;
+            NaibaoCallLine line = call.Current;
+
+            Sprite portrait = NaibaoSprite(line.Pose);
+            _naibaoCallPortrait.sprite = portrait;
+            _naibaoCallPortrait.enabled = portrait != null;
+
+            // 屏幕上那张脸跟着台词换：AI 生成的模型没有骨骼，换脸就是换网格
+            if (_naibaoPhone != null)
+            {
+                _naibaoPhone.SetFace(line.Pose);
+            }
+
+            _naibaoCallText.text = line.Text;
+            _naibaoCallHint.text = "通话中 · 用电 +1 级 · 她不动手　"
+                + (call.Index + 1) + " / " + call.Count;
+        }
+
+        /// <summary>
+        /// 手机露不露面、亮不亮。
+        ///
+        /// 「亮」的判据是**水平转角**：把相机朝向和「相机 → 手机」都压到水平面上量夹角，
+        /// 小于 <see cref="NaibaoPhoneProp.HighlightAngle"/> 度才算对上。
+        /// 不量垂直方向 —— 玩家只能左右转头、不能低头，手机摆在腰以下的桌沿上，
+        /// 量三维夹角会永远差二十几度，那就永远亮不起来了。
+        /// </summary>
+        private void UpdateNaibaoPhone(bool showPhone)
+        {
+            Camera cam = _room != null ? _room.Camera : null;
+
+            if (!showPhone)
+            {
+                _naibaoPhoneHighlighted = false;
+
+                if (_naibaoPhone != null && _naibaoPhone.gameObject.activeSelf)
+                {
+                    _naibaoPhone.gameObject.SetActive(false);
+                }
+
+                return;
+            }
+
+            if (_naibaoPhone == null && cam != null)
+            {
+                _naibaoPhone = NaibaoPhoneProp.Spawn(transform);
+            }
+
+            if (_naibaoPhone == null)
+            {
+                _naibaoPhoneHighlighted = false;
+                return;
+            }
+
+            if (!_naibaoPhone.gameObject.activeSelf)
+            {
+                _naibaoPhone.gameObject.SetActive(true);
+            }
+
+            bool highlighted = false;
+            if (cam != null)
+            {
+                Vector3 toPhone = NaibaoPhoneProp.WorldPosition - cam.transform.position;
+                Vector3 flatToPhone = new Vector3(toPhone.x, 0f, toPhone.z);
+                Vector3 look = cam.transform.forward;
+                Vector3 flatLook = new Vector3(look.x, 0f, look.z);
+
+                float angle = Vector3.Angle(flatLook, flatToPhone);
+                highlighted = angle <= NaibaoPhoneProp.HighlightAngle;
+            }
+
+            _naibaoPhoneHighlighted = highlighted;
+            _naibaoPhone.SetHighlighted(highlighted);
+        }
+
+        /// <summary>把那行「点一下」的字摆到手机上方 —— 它是屏幕上的字，位置跟着世界里的手机走。</summary>
+        private void UpdateNaibaoPhoneHint(bool showPhone, bool talking)
+        {
+            if (_naibaoPhoneHint == null)
+            {
+                return;
+            }
+
+            bool show = showPhone && _naibaoPhoneHighlighted && !talking;
+
+            Vector2 canvasPos;
+            if (show && TryProjectToCanvas(
+                    NaibaoPhoneProp.WorldPosition + Vector3.up * 0.16f, out canvasPos))
+            {
+                _naibaoPhoneHint.text = "点一下 · 和她说话";
+                PlaceRect(_naibaoPhoneHint.rectTransform, new Vector2(0.5f, 0.5f),
+                    new Vector2(0.5f, 0.5f), canvasPos, new Vector2(280f, 40f));
+            }
+            else
+            {
+                show = false;
+            }
+
+            if (_naibaoPhoneHint.gameObject.activeSelf != show)
+            {
+                _naibaoPhoneHint.gameObject.SetActive(show);
+            }
+        }
+
+        /// <summary>
+        /// 点手机接通。只认「已经点亮 + 鼠标真的落在手机上」——
+        /// 免得玩家在屏幕右边乱点就接通了，那部手机也就不是屋里的东西了。
+        /// </summary>
+        private void HandleNaibaoPhoneClick(GameManager gm)
+        {
+            if (!_naibaoPhoneHighlighted || _naibaoPhone == null || gm.NaibaoTalking || gm.MonitorUp)
+            {
+                return;
+            }
+
+            if (!Input.GetMouseButtonUp(0))
+            {
+                return;
+            }
+
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                return;
+            }
+
+            Camera cam = _room != null ? _room.Camera : null;
+            if (!_naibaoPhone.ContainsScreenPoint(cam, Input.mousePosition))
+            {
+                return;
+            }
+
+            int night = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
+            if (gm.StartNaibaoCall(night))
+            {
+                _naibaoCallSerial = -1;
             }
         }
 
@@ -4659,6 +4873,8 @@ namespace NailongFNAF.UI
 
             // ── 奶包 UI（朋友的分支，和红脉冲层不冲突，放在它后面）──
             BuildNaibao();
+            BuildNaibaoPhoneHint();
+            BuildNaibaoCall();
         }
 
         /// <summary>
@@ -4713,6 +4929,128 @@ namespace NailongFNAF.UI
             _naibaoPortrait.raycastTarget = false;
             _naibaoPortrait.enabled = false;
 
+        }
+
+        /// <summary>
+        /// 手机上方那行小字：转到它的时候告诉玩家「能点」。
+        ///
+        /// 手机本体是 3D 物件（<see cref="NaibaoPhoneProp"/>），这行字是 UGUI ——
+        /// 每帧按手机的世界位置投影过来，所以它跟着手机，不跟着屏幕。
+        /// </summary>
+        private void BuildNaibaoPhoneHint()
+        {
+            _naibaoPhoneHint = MakeText(_canvas.transform, "NaibaoPhoneHint", string.Empty,
+                TextAnchor.MiddleCenter, 22, new Color(1f, 0.86f, 0.52f, 0.95f));
+            _naibaoPhoneHint.horizontalOverflow = HorizontalWrapMode.Overflow;
+            PlaceRect(_naibaoPhoneHint.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(0f, 0f), new Vector2(280f, 40f));
+            _naibaoPhoneHint.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// 通话时压在底部的**字幕条**（不是模态面板）。
+        ///
+        /// 通话要能一边聊一边干活：门、灯、监控、手电筒全都照常点。
+        /// 所以这里没有全屏遮罩，背景图 `raycastTarget = false`，
+        /// 只有「继续 / 挂断」两个按钮吃点击；条子抬到 y=30 起，
+        /// 避开最底下那条 MONITOR 把手和它上面的手电筒。
+        /// </summary>
+        private void BuildNaibaoCall()
+        {
+            var root = new GameObject("NaibaoCall",
+                typeof(RectTransform), typeof(CanvasGroup));
+            root.transform.SetParent(_canvas.transform, false);
+            StretchToParent(root.GetComponent<RectTransform>());
+
+            _naibaoCallGroup = root.GetComponent<CanvasGroup>();
+            _naibaoCallGroup.alpha = 1f;
+            // 整条不吃点击，只是画在下面；按钮自己会抢
+            // 字幕条自己不该挡住世界里的点击，但**继续/挂断必须能点** ——
+            // 所以不用 CanvasGroup 整体屏蔽（那会把按钮一起屏蔽掉），
+            // 而是把条子背景、头像、文字的 raycastTarget 关掉，只留按钮
+            _naibaoCallGroup.blocksRaycasts = true;
+
+            // 条子摆在**手电筒按钮上方**：底下那条 MONITOR 把手（y 0~28）、
+            // 左下角的电量读数（y 0~100）、手电筒（y 144~200）都不能被它压住，
+            // 否则「通话时也能正常操作」就成了空话。
+            var bar = new GameObject("NaibaoCallBar",
+                typeof(RectTransform), typeof(Image));
+            bar.transform.SetParent(root.transform, false);
+            var barRect = bar.GetComponent<RectTransform>();
+            barRect.anchorMin = new Vector2(0.19f, 0f);
+            barRect.anchorMax = new Vector2(0.81f, 0f);
+            barRect.pivot = new Vector2(0.5f, 0f);
+            barRect.offsetMin = new Vector2(0f, 206f);
+            barRect.offsetMax = new Vector2(0f, 302f);
+
+            var barImage = bar.GetComponent<Image>();
+            barImage.sprite = _buttonSprite;
+            barImage.type = Image.Type.Sliced;
+            barImage.color = new Color(0.04f, 0.05f, 0.07f, 0.88f);
+            barImage.raycastTarget = false;
+
+            // 小头像：边上一点点，别占字
+            var portraitGo = new GameObject("Portrait", typeof(RectTransform), typeof(Image));
+            portraitGo.transform.SetParent(bar.transform, false);
+            PlaceRect(portraitGo.GetComponent<RectTransform>(), new Vector2(0f, 0.5f),
+                new Vector2(0f, 0.5f), new Vector2(52f, 0f), new Vector2(80f, 80f));
+
+            _naibaoCallPortrait = portraitGo.GetComponent<Image>();
+            _naibaoCallPortrait.preserveAspect = true;
+            _naibaoCallPortrait.raycastTarget = false;
+
+            Text nameLabel = MakeText(bar.transform, "Name", "奶包",
+                TextAnchor.MiddleLeft, 22, new Color(1f, 0.84f, 0.42f));
+            nameLabel.horizontalOverflow = HorizontalWrapMode.Overflow;
+            PlaceRect(nameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(108f, -14f), new Vector2(120f, 26f));
+
+            _naibaoCallHint = MakeText(bar.transform, "Hint", string.Empty,
+                TextAnchor.MiddleLeft, 18, new Color(0.68f, 0.82f, 0.70f));
+            _naibaoCallHint.horizontalOverflow = HorizontalWrapMode.Overflow;
+            PlaceRect(_naibaoCallHint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(168f, -14f), new Vector2(460f, 24f));
+
+            _naibaoCallText = MakeText(bar.transform, "Line", string.Empty,
+                TextAnchor.MiddleLeft, 25, new Color(0.96f, 0.96f, 0.96f));
+            _naibaoCallText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _naibaoCallText.verticalOverflow = VerticalWrapMode.Truncate;
+            // 台词占满条子的剩余宽度：**铺开**（anchorMin/Max 拉伸），不是定尺寸 ——
+            // 条子宽度本身跟着窗口走，写死宽度在别的分辨率下会漏字
+            var lineRect = _naibaoCallText.rectTransform;
+            lineRect.anchorMin = new Vector2(0f, 0f);
+            lineRect.anchorMax = new Vector2(1f, 1f);
+            lineRect.pivot = new Vector2(0.5f, 0.5f);
+            lineRect.offsetMin = new Vector2(108f, 10f);
+            lineRect.offsetMax = new Vector2(-186f, -40f);
+
+            var next = MakeButton(bar.transform, "Next", "继续",
+                new Vector2(1f, 0.5f), new Vector2(-22f, 22f), new Vector2(132f, 36f),
+                OnNaibaoCallNextClicked);
+            next.GetComponentInChildren<Text>().fontSize = 20;
+
+            var hangUp = MakeButton(bar.transform, "HangUp", "挂断",
+                new Vector2(1f, 0.5f), new Vector2(-22f, -22f), new Vector2(132f, 36f),
+                OnNaibaoCallHangUpClicked);
+            hangUp.GetComponentInChildren<Text>().fontSize = 20;
+
+            root.SetActive(false);
+        }
+
+        private void OnNaibaoCallNextClicked()
+        {
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.AdvanceNaibaoCall();
+            }
+        }
+
+        private void OnNaibaoCallHangUpClicked()
+        {
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.EndNaibaoCall();
+            }
         }
 
         private void BuildDebugLayer()
