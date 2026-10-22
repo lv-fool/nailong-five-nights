@@ -161,6 +161,7 @@ namespace NailongFNAF.EditorTools
                 var angry = LoadSprite("char_" + code + "_angry");
                 var jumpscare = LoadSprite("char_" + code + "_jumpscare");
                 var blackout = LoadSprite("char_" + code + "_blackout");
+                var steal = LoadSprite("char_" + code + "_steal");
 
                 // 按房间的专属姿势：char_<代号>_mon_1a / _mon_1b / … 有就接，没有留空
                 var roomPoses = new Sprite[PrototypeScene.RoomCodeCount];
@@ -182,7 +183,7 @@ namespace NailongFNAF.EditorTools
 
                 if (idle == null && stare == null && peek == null && startled == null
                     && angry == null && jumpscare == null && blackout == null
-                    && !anyRoomPose)
+                    && steal == null && !anyRoomPose)
                 {
                     continue;
                 }
@@ -197,6 +198,7 @@ namespace NailongFNAF.EditorTools
                     Angry = angry,
                     Jumpscare = jumpscare,
                     Blackout = blackout,
+                    Steal = steal,
                     RoomPoses = roomPoses
                 });
             }

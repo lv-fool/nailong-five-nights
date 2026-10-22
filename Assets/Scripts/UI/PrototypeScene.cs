@@ -45,7 +45,10 @@ namespace NailongFNAF.UI
             Startled = 4,
 
             /// <summary>怒视。</summary>
-            Angry = 5
+            Angry = 5,
+
+            /// <summary>偷电时那副呆样（奶龙专用）。没给就退回 Idle。</summary>
+            Steal = 6
         }
 
         /// <summary>一个角色的立绘。缺哪张哪张留空，运行时退回色块占位。</summary>
@@ -69,6 +72,14 @@ namespace NailongFNAF.UI
 
             /// <summary>断电后「收电费」用的那张。没给就退回 Jumpscare。</summary>
             public Sprite Blackout;
+
+            /// <summary>
+            /// 偷电时的样子（圆滚滚地蹲在某个机位偷电）。没给就退回 Idle。
+            ///
+            /// 和 <see cref="Stare"/> 分开：Stare 是「被监控照到、抬头瞪你」，
+            /// 而偷电是「自以为没人看见」，用一张呆滞的姿势更符合这个状态。
+            /// </summary>
+            public Sprite Steal;
 
             /// <summary>
             /// **按房间的专属姿势**：下标 = 机位号，值 = 那张立绘。
@@ -114,6 +125,11 @@ namespace NailongFNAF.UI
 
                     case CharacterPose.Jumpscare:
                         return Fallback(Jumpscare);
+
+                    case CharacterPose.Steal:
+                        // 偷电那张没给就退 Idle（不是 Stare —— 偷电是「自以为没人看见」，
+                        // 用瞪眼那张不合适）
+                        return Steal != null ? Steal : Idle;
 
                     default:
                         return Idle;
@@ -1714,10 +1730,21 @@ namespace NailongFNAF.UI
 
             if (art != null)
             {
-                sprite = art.GetRoomPose(cameraIndex);
+                // ⚠️ **先看调用方要的姿态，再看房间专属图**。
+                //
+                // 原先反了：先 GetRoomPose()、再用 fallbackPose 兜底 ——
+                // 而 GetRoomPose 内部会一路兜到 Idle，永远不为 null，
+                // 所以 fallbackPose 从来没用上（奶龙的偷电图就这么一直显示不出来）。
+                //
+                // 现在的顺序：
+                //   · 明确指定了非 Idle 的姿态（偷电 / 探头 / 受惊…）→ 就用它
+                //   · 只给了 Idle（普通站立）→ 优先用这个房间画好的专属图
+                Sprite wanted = fallbackPose != CharacterPose.Idle
+                    ? art.Get(fallbackPose)
+                    : null;
 
-                // GetRoomPose 在没专属图时已经退到 Idle；如果连 Idle 都没有，
-                // 再退到调用方要的姿态（如噜噜的 Peek）
+                sprite = wanted != null ? wanted : art.GetRoomPose(cameraIndex);
+
                 if (sprite == null)
                 {
                     sprite = art.Get(fallbackPose);
@@ -1892,7 +1919,11 @@ namespace NailongFNAF.UI
                 && count < ids.Length)
             {
                 ids[count] = EnemyId.Nailong;
-                poses[count] = nailong.IsApproaching ? CharacterPose.Idle : CharacterPose.Stare;
+                // 偷电态用「圆滚滚的呆样」，进攻态才换成正经立绘 ——
+                // 玩家一眼就能看出「它现在是在偷电还是在逼近」。
+                poses[count] = nailong.IsApproaching
+                    ? CharacterPose.Idle
+                    : (nailong.IsBeingWatched ? CharacterPose.Stare : CharacterPose.Steal);
                 count++;
             }
 
