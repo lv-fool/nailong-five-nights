@@ -128,6 +128,11 @@ namespace NailongFNAF.Gameplay
             Stage = 0;
             MoveTimer = 0f;
             RetreatedThisTick = true;
+
+            // ⚠️ **必须清掉动手标记** —— 否则「已经动手 → 又被挡回去」之后
+            // IsAttacking 会一直是 true，下一帧 EnemyDirector 立刻判突破，
+            // 玩家会看到它明明退走了却照样跳杀。
+            IsAttacking = false;
         }
 
         /// <summary>

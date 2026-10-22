@@ -80,8 +80,19 @@ namespace NailongFNAF.Gameplay
             get { return Stage >= MaxStage && DoorTimer >= DoorGraceSeconds; }
         }
 
-        /// <summary>上一帧门是不是关着 —— 用来检测「从关变开」的那个上升沿。</summary>
+        /// <summary>
+        /// 上一帧门是不是关着 —— 用来检测「从关变开」的那个上升沿。
+        /// </summary>
         private bool _doorWasClosed;
+
+        /// <summary>
+        /// 最后一搏期间门被打开过 —— 下一帧要把 2 秒清零重计。
+        ///
+        /// 单独记一个标记而不是直接清零，是因为「检测上升沿」和「清零计时」
+        /// 发生在 OnTick 的不同阶段（先攒移动机会、再走最后一搏），
+        /// 中间隔着 return；用标记能保证不管哪一步返回都不会漏掉这次重置。
+        /// </summary>
+        private bool _doorWasOpenedWhileLastChance;
 
         /// <summary>
         /// 沿路停留的监控机位（下标）—— 照 FNAF 1 的房间顺序。
@@ -247,7 +258,29 @@ namespace NailongFNAF.Gameplay
             // 否则一步 Tick(3f) 会直接把 2 秒的最后一搏一起冲过去、当场退走。
             float remaining = dt;
 
-            if (DoorTimer < DoorGraceSeconds)
+            // 每帧先更新「门这一帧是开还是关」，供最后一搏检测上升沿用。
+            // 必须在攒移动机会之前更新，否则「攒满那一帧门刚好打开」会漏判。
+            bool doorClosedNow = ctx.IsDoorClosed(Side);
+
+            if (doorClosedNow && !_doorWasClosed && DoorTimer >= DoorGraceSeconds)
+            {
+                // 已经在最后一搏里、门又关上 → 不重置，继续走（下面正常累计）
+            }
+            else if (!doorClosedNow && _doorWasClosed && DoorTimer >= DoorGraceSeconds)
+            {
+                // 门刚被打开 → 标记「下一帧清零重计」
+                _doorWasOpenedWhileLastChance = true;
+            }
+
+            _doorWasClosed = doorClosedNow;
+
+            // 记录「这一帧是不是刚好攒满」—— 只有这一帧才做「门开着就动手」的判定。
+            //
+            // ⚠️ 不能写成「攒满后只要门开着就动手」：那样玩家在最后一搏中途开门，
+            // 下一帧就会被判定动手，和「开门重置 2 秒」的设计自相矛盾。
+            bool justFilled = DoorTimer < DoorGraceSeconds;
+
+            if (justFilled)
             {
                 float need = DoorGraceSeconds - DoorTimer;
                 float spend = remaining < need ? remaining : need;
@@ -262,24 +295,32 @@ namespace NailongFNAF.Gameplay
                 }
             }
 
-            // ── 第二阶段：「最后一搏」2 秒 ──
-            //
-            // 规则（用户 2026-10-22 定）：
-            //   · 攒满移动机会后开始计这 2 秒
-            //   · 期间**门被打开的那一刻**重置计时（从关变开 = 上升沿）
-            //   · 2 秒走完时看门：关着 → 退走，开着 → 动手
-            //
-            // ⚠️ 是「上升沿重置」而不是「门开着就一直重置」——
-            // 后者会让门开着时永远走不完这 2 秒，它永远不动手，变成无敌。
             bool closed = ctx.IsDoorClosed(Side);
 
-            // 门刚被打开 → 这 2 秒作废，重新计
-            if (!closed && _doorWasClosed)
+            // ── 攒满的那一刻：门开着就**立刻动手** ──
+            //
+            // 这里的语义是「它扑上来了」—— 移动机会刚到、门又开着，
+            // 没有理由再等 2 秒。2 秒缓冲只服务于「门关着」的情况。
+            if (justFilled && !closed)
             {
-                LastChanceTimer = 0f;
+                IsAttacking = true;
+                return;
             }
 
-            _doorWasClosed = closed;
+            // ── 门关着：进入「最后一搏」2 秒 ──
+            //
+            // 规则（用户 2026-10-22 定）：
+            //   · 攒满移动机会、且门关着 → 开始计这 2 秒
+            //   · 期间**门被打开的那一刻**重置计时（从关变开 = 上升沿）
+            //   · 2 秒走完门还关着 → 退走
+            //
+            // 「门被打开就重置」的含义：玩家在最后关头开门，它反而要重来一遍，
+            // 于是「反复开关门」变成一场有代价的赌博，而不是无脑按住关门。
+            if (_doorWasOpenedWhileLastChance)
+            {
+                LastChanceTimer = 0f;
+                _doorWasOpenedWhileLastChance = false;
+            }
 
             // 用**剩余**的 dt（见第一阶段注释），不是整份 dt
             LastChanceTimer += remaining;
@@ -289,17 +330,14 @@ namespace NailongFNAF.Gameplay
                 return;   // 这 2 秒还没走完，继续站着
             }
 
-            // 2 秒走完，按此刻门的开关做决定
+            // 2 秒走完、门一直关着 → 退走
+            //
+            // ⚠️ 这里**不能**再补一句 IsAttacking = true —— 早先改逻辑时
+            // 残留了一行无条件赋值，导致「退走」和「动手」同时发生：
+            // Stage 归零（看着像走了）、IsAttacking 却是 true（下一帧立刻判突破），
+            // 玩家会看到它明明退了、却照样跳杀。
             LastChanceTimer = 0f;
-
-            if (closed)
-            {
-                Retreat();   // 门关着 → 这次机会用来退走
-                return;
-            }
-
-            // 门开着 → 动手
-            IsAttacking = true;
+            Retreat();
         }
 
         public override void Retreat()
