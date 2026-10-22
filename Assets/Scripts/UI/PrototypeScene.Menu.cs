@@ -1261,7 +1261,11 @@ namespace NailongFNAF.UI
                 if (current == 0) TryUnlock(AchievementCatalog.FirstNight, newly);
                 if (current == 2) TryUnlock(AchievementCatalog.HalfWay, newly);
                 if (current == 4) TryUnlock(AchievementCatalog.FiveNights, newly);
-                if (wasLast) TryUnlock(AchievementCatalog.HiddenNight, newly);
+
+                // 隐藏夜暂时移除，这条成就一起撤掉 ——
+                // 否则通关第 5 夜会同时跳「把过去锁在门后」和「让影子先走」两条。
+                // 恢复隐藏夜时取消注释。
+                // if (wasLast) TryUnlock(AchievementCatalog.HiddenNight, newly);
 
                 // 断电后仍撑到 6 点（断电演出没抓到人）
                 if (gm.HasPowerOut) TryUnlock(AchievementCatalog.BlackoutSurvivor, newly);

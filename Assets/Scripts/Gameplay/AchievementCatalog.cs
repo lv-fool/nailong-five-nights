@@ -52,7 +52,14 @@ namespace NailongFNAF.Gameplay
         /// <summary>通关第 5 夜。</summary>
         public const string FiveNights = "five_nights";
 
-        /// <summary>通关隐藏夜（第 6 夜）。</summary>
+        /// <summary>
+        /// 通关隐藏夜（原第 6 夜）。
+        ///
+        /// ⚠️ **隐藏夜已暂时移除（用户 2026-10-22 定），这条成就先不进
+        /// <see cref="All"/>** —— 否则它会永远显示成「???」拿不到，
+        /// 而且文案还写着已经不存在的一夜。
+        /// 恢复隐藏夜时把它加回 <see cref="All"/> 即可。
+        /// </summary>
         public const string HiddenNight = "hidden_night";
 
         /// <summary>任意一夜通关时剩余电量 ≥ 30%。</summary>
@@ -113,7 +120,8 @@ namespace NailongFNAF.Gameplay
             new Def(FirstNight, "多出来的呼吸", "通关第 1 夜"),
             new Def(HalfWay, "手臂比门先累", "通关第 3 夜"),
             new Def(FiveNights, "把过去锁在门后", "通关第 5 夜"),
-            new Def(HiddenNight, "让影子先走", "通关隐藏夜（第 6 夜）"),
+            // 隐藏夜暂时移除，这条跟着一起撤 —— 恢复时取消注释。
+            // new Def(HiddenNight, "让影子先走", "通关隐藏夜（第 6 夜）"),
             new Def(PowerSaver, "还剩一口气", "通关任意一夜时剩余电量不低于 30%"),
             new Def(BlackoutSurvivor, "它松了手", "断电之后仍撑到早上 6 点"),
             new Def(LuluMaster, "小孩怕的是光", "单夜用手电筒逼退噜噜 3 次"),
