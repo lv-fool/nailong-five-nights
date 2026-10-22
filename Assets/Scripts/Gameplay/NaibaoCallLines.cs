@@ -36,11 +36,17 @@ namespace NailongFNAF.Gameplay
         public const string KeyNightLate = "night_late";
         public const string KeyRepeat = "repeat";
 
+        /// <summary>
+        /// 自定义夜专用 —— 那一局没有「第几夜」，玩家自己拧的难度，
+        /// 她的话也该是另一套（吐槽你自找的）。
+        /// </summary>
+        public const string KeyCustom = "custom";
+
         /// <summary>所有键，按界面显示顺序。</summary>
         public static readonly string[] Keys =
         {
             KeyGuideFirst, KeyGuideAgain, KeyNightEarly,
-            KeyNightMiddle, KeyNightLate, KeyRepeat
+            KeyNightMiddle, KeyNightLate, KeyRepeat, KeyCustom
         };
 
         /// <summary>一句：说什么、什么表情。</summary>
@@ -72,6 +78,7 @@ namespace NailongFNAF.Gameplay
                 case KeyNightMiddle: return "第 4~5 夜";
                 case KeyNightLate: return "第 6 夜之后";
                 case KeyRepeat: return "同一夜第二次之后（短版）";
+                case KeyCustom: return "自定义夜（你自己拧的难度）";
                 default: return key;
             }
         }
@@ -85,6 +92,8 @@ namespace NailongFNAF.Gameplay
                     return "新手教学 —— 解释手机、门灯、手电筒，最后埋一句「我不是从这边打给你的」。";
                 case KeyRepeat:
                     return "同一夜已经打过一次，不再重复剧情，只给短版。";
+                case KeyCustom:
+                    return "自定义夜没有「第几夜」，这一组只管那一局。可以吐槽玩家自找的难度。";
                 default:
                     return "这一夜第一次接通时按顺序念完。";
             }
@@ -164,6 +173,14 @@ namespace NailongFNAF.Gameplay
                     {
                         Make("说过了。你又要我再讲一遍？", NaibaoPose.Huffy),
                         Make("……好吧。左边那个是袋鼠，右边那个是牛来，正门是小孩。名字我记不清，反正都是冲你来的。", NaibaoPose.Bored),
+                    };
+
+                case KeyCustom:
+                    return new[]
+                    {
+                        Make("今晚这一局，是你自己调的。", NaibaoPose.Smug),
+                        Make("我又没逼你把他们全开到二十。你自己想试试，对吧？", NaibaoPose.Huffy),
+                        Make("行吧。那我就在这儿看着——反正我也只能看着。", NaibaoPose.Guide),
                     };
 
                 default:

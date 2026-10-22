@@ -121,7 +121,27 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         public static NaibaoCallLine[] ForCall(int night, bool guide, int callIndex)
         {
+            return ForCall(night, guide, callIndex, false);
+        }
+
+        /// <summary>
+        /// 取这次通话的台词，**带自定义夜标记**。
+        ///
+        /// ⚠️ 自定义夜必须走这个重载：那一局没有「第几夜」的概念，
+        /// <c>night</c> 保留的是上一次进入的夜晚（1~5 随机），
+        /// 照它选档会让台词随机落到 early / middle / late —— 玩家听着莫名其妙。
+        /// </summary>
+        public static NaibaoCallLine[] ForCall(int night, bool guide, int callIndex, bool custom)
+        {
             NaibaoCallLines table = Lines;
+
+            // 自定义夜优先：它不属于任何一夜
+            if (custom)
+            {
+                return table.CallLinesFor(callIndex <= 0
+                    ? NaibaoCallLines.KeyCustom
+                    : NaibaoCallLines.KeyRepeat);
+            }
 
             if (guide)
             {

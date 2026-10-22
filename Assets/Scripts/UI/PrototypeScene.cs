@@ -3808,7 +3808,9 @@ namespace NailongFNAF.UI
             }
 
             int night = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
-            if (gm.StartNaibaoCall(night))
+            bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
+
+            if (gm.StartNaibaoCall(night, custom))
             {
                 _naibaoCallSerial = -1;
             }

@@ -430,7 +430,13 @@ namespace NailongFNAF.Core
         /// 接通电话。返回 false 表示这一下没打通（没她 / 已断电 / 已被抓 / 已经在通话）。
         /// <paramref name="night"/> 是第几夜（0 起），决定她这次给什么词。
         /// </summary>
-        public bool StartNaibaoCall(int night)
+        /// <param name="custom">
+        /// 这一局是不是**自定义夜**。自定义夜没有「第几夜」的概念，
+        /// <paramref name="night"/> 保留的是上一次进入的夜晚 —— 照它选档会让
+        /// 台词随机落到 early / middle / late，玩家听着莫名其妙。
+        /// 所以这里显式传进来，让台词走自定义夜那一组。
+        /// </param>
+        public bool StartNaibaoCall(int night, bool custom = false)
         {
             if (Naibao == null || NaibaoCall != null || !CanOperate())
             {
@@ -438,7 +444,7 @@ namespace NailongFNAF.Core
             }
 
             NaibaoCall call = new NaibaoCall(
-                NaibaoPhoneScript.ForCall(night, Naibao.IsGuide, NaibaoCallCount));
+                NaibaoPhoneScript.ForCall(night, Naibao.IsGuide, NaibaoCallCount, custom));
 
             if (call.Count <= 0)
             {
