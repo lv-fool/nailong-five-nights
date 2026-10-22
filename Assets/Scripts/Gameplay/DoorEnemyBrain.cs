@@ -54,6 +54,36 @@ namespace NailongFNAF.Gameplay
         public float DoorTimer { get; protected set; }
 
         /// <summary>
+        /// 「最后一搏」窗口（秒）—— 移动机会攒满后才开始算。
+        ///
+        /// 规则（按用户 2026-10-22 定）：
+        /// <list type="number">
+        /// <item>到门口后先攒满 <see cref="DoorGraceSeconds"/>（一个移动机会）。</item>
+        /// <item>攒满后**不立刻决定**，而是再进入 2 秒的缓冲期。</item>
+        /// <item>这 2 秒里门**一旦被打开就立刻重置**，重新计时 —— 玩家还有补救机会。</item>
+        /// <item>2 秒走完：门还开着 → 动手；门关着 → 退走。</item>
+        /// </list>
+        ///
+        /// 为什么加这一段：原来的实现里「攒满就立刻判」，
+        /// 玩家在最后一刻开门会被立刻抓住、关门的瞬间也可能刚好撞上判定，
+        /// 手感像「不给反应」。多这 2 秒既是给玩家的宽限，
+        /// 也让「在门口反复开关门」变成一个有代价的赌博。
+        /// </summary>
+        public const float LastChanceSeconds = 2f;
+
+        /// <summary>「最后一搏」已经走了多久（秒）。只在 <see cref="DoorTimer"/> 攒满后才累计。</summary>
+        public float LastChanceTimer { get; protected set; }
+
+        /// <summary>是否已经进入「最后一搏」阶段（移动机会攒满了）。</summary>
+        public bool InLastChance
+        {
+            get { return Stage >= MaxStage && DoorTimer >= DoorGraceSeconds; }
+        }
+
+        /// <summary>上一帧门是不是关着 —— 用来检测「从关变开」的那个上升沿。</summary>
+        private bool _doorWasClosed;
+
+        /// <summary>
         /// 沿路停留的监控机位（下标）—— 照 FNAF 1 的房间顺序。
         /// 空表表示没配路径，走默认三档。
         /// ⚠️ 不是 readonly：奶龙是构造之后再调 <see cref="SetCameraPath"/> 补上的。
@@ -208,28 +238,67 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
-            // 到门口之后开始累计「一次移动机会」的时长
-            DoorTimer += dt;
-
-            // 还没到下一次机会 —— 不管门开还是门关，都先站着等。
+            // ── 第一阶段：攒够一个「移动机会」 ──
             // 用 DoorGraceSeconds（= 该角色自己的移动机会间隔）而不是
-            // MoveIntervalSeconds：后者是「走廊推进」的掷骰间隔，
-            // 两者在原版里是同一个数，但这里语义上要用门口那个。
+            // MoveIntervalSeconds：后者是「走廊推进」的掷骰间隔。
+            //
+            // ⚠️ dt 可能一次很大（测试里会一步 Tick(3f)）——
+            // 攒满之后**剩下的那点时间要留给第二阶段**，不能整份都吃掉，
+            // 否则一步 Tick(3f) 会直接把 2 秒的最后一搏一起冲过去、当场退走。
+            float remaining = dt;
+
             if (DoorTimer < DoorGraceSeconds)
             {
-                return;
+                float need = DoorGraceSeconds - DoorTimer;
+                float spend = remaining < need ? remaining : need;
+
+                DoorTimer += spend;
+                remaining -= spend;
+
+                // 还在攒 —— 门开还是门关都先站着，不做决定
+                if (DoorTimer < DoorGraceSeconds)
+                {
+                    return;
+                }
             }
 
-            // 机会到了，根据此刻门的开关做决定
-            DoorTimer = 0f;
+            // ── 第二阶段：「最后一搏」2 秒 ──
+            //
+            // 规则（用户 2026-10-22 定）：
+            //   · 攒满移动机会后开始计这 2 秒
+            //   · 期间**门被打开的那一刻**重置计时（从关变开 = 上升沿）
+            //   · 2 秒走完时看门：关着 → 退走，开着 → 动手
+            //
+            // ⚠️ 是「上升沿重置」而不是「门开着就一直重置」——
+            // 后者会让门开着时永远走不完这 2 秒，它永远不动手，变成无敌。
+            bool closed = ctx.IsDoorClosed(Side);
 
-            if (ctx.IsDoorClosed(Side))
+            // 门刚被打开 → 这 2 秒作废，重新计
+            if (!closed && _doorWasClosed)
             {
-                Retreat();   // 门关着：这次机会用来退走
+                LastChanceTimer = 0f;
+            }
+
+            _doorWasClosed = closed;
+
+            // 用**剩余**的 dt（见第一阶段注释），不是整份 dt
+            LastChanceTimer += remaining;
+
+            if (LastChanceTimer < LastChanceSeconds)
+            {
+                return;   // 这 2 秒还没走完，继续站着
+            }
+
+            // 2 秒走完，按此刻门的开关做决定
+            LastChanceTimer = 0f;
+
+            if (closed)
+            {
+                Retreat();   // 门关着 → 这次机会用来退走
                 return;
             }
 
-            // 门开着：这次机会用来动手
+            // 门开着 → 动手
             IsAttacking = true;
         }
 
@@ -237,6 +306,8 @@ namespace NailongFNAF.Gameplay
         {
             base.Retreat();
             DoorTimer = 0f;
+            LastChanceTimer = 0f;
+            _doorWasClosed = false;
         }
     }
 }
