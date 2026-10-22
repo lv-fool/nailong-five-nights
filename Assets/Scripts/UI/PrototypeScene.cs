@@ -1888,13 +1888,17 @@ namespace NailongFNAF.UI
             var nailong = _enemyDirector.GetBrain(EnemyId.Nailong) as NailongBrain;
             if (nailong != null && !nailong.IsAttacking
                 && nailong.Stage < nailong.MaxStage
-                && nailong.CameraIndex == cam
+                && NailongCameraOf(nailong) == cam
                 && count < ids.Length)
             {
                 ids[count] = EnemyId.Nailong;
                 poses[count] = nailong.IsApproaching ? CharacterPose.Idle : CharacterPose.Stare;
                 count++;
             }
+
+            // 说明：奶龙有机位用 NailongCameraOf() 取，别直接读 CameraIndex ——
+            // 那个字段只在「成功推进」时才同步（见 NailongBrain.Advance），
+            // 掷骰失败的那几秒它还是旧值，玩家切机位就会看到奶龙停在原来的房间。
 
             // 门类敌人（袋鼠 / 牛来）：停在某个机位时才现形
             foreach (var brain in _enemyDirector.Brains)
@@ -2182,6 +2186,27 @@ namespace NailongFNAF.UI
         /// 再用「敌人身份」选一个固定的点。不同敌人天然分开，
         /// 而且位置都属于真实存在的道具旁边，不是网格里的空位。
         /// </summary>
+        /// <summary>
+        /// 奶龙此刻「在监控里属于哪个机位」。
+        ///
+        /// ⚠️ **不要直接读 CameraIndex** ——
+        /// 那个字段只在**成功推进**的那一帧才被同步（见 NailongBrain.Advance），
+        /// 掷骰没过的几秒里它还是旧值。玩家这时切机位，就会看到奶龙
+        /// 停在原来的房间没动 —— 这是本方法存在的唯一理由。
+        ///
+        /// 偷电态用 CameraIndex（蹲点偷电）；
+        /// 进攻态用 PathCameraIndex（沿路径推进），到门口返回 -1（监控里看不到）。
+        /// </summary>
+        private static int NailongCameraOf(NailongBrain nailong)
+        {
+            if (nailong == null)
+            {
+                return -1;
+            }
+
+            return nailong.IsApproaching ? nailong.PathCameraIndex : nailong.CameraIndex;
+        }
+
         public static Vector2 MonitorSlotPosition(EnemyId id, int cameraIndex)
         {
             Vector2[] points = RoomStandPoints(cameraIndex);
@@ -2190,6 +2215,7 @@ namespace NailongFNAF.UI
                 return Vector2.zero;
             }
 
+            // ⚠️ **站位跟随「它在路径的第几步」变化**，不能按身份写死。
             // 用敌人身份决定它站哪个点（固定映射，不看别人在不在）。
             // 四只各占一个不同下标，所以同一间屋子最多同时出现四只也不会叠。
             int pick;
