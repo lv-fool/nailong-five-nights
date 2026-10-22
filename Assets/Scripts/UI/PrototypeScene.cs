@@ -919,6 +919,7 @@ namespace NailongFNAF.UI
             UpdateView(gm);
             HandleMonitorHotspot(gm);
             TryNaibaoPhoneClick(gm);
+            HandleNaibaoCallKeys(gm);
             UpdateVisuals(gm);
             UpdateHud(gm);
             UpdateJumpscareShake();
@@ -3691,7 +3692,8 @@ namespace NailongFNAF.UI
             }
 
             _naibaoCallText.text = line.Text;
-            _naibaoCallHint.text = "通话中 · 用电 +1 级 · 她不动手　"
+            // 提示里直接把键位写出来 —— 玩家不知道有快捷键就等于没有。
+            _naibaoCallHint.text = "空格 继续 · F 跳过　"
                 + (call.Index + 1) + " / " + call.Count;
         }
 
@@ -4688,7 +4690,18 @@ namespace NailongFNAF.UI
                 img.color = Color.white;
 
                 // 用支持「遮挡遮罩」的材质 —— 每个槽位一份，互相独立
-                var shader = Shader.Find("NailongFNAF/MonitorCharacter");
+                // （遮罩贴图 / 遮罩矩形是逐槽位不同的，不能共用同一个实例）
+                //
+                // ⚠️ **优先从 Resources 拿模板材质**，不要只靠 Shader.Find：
+                // 这个 shader 没有任何材质引用它（都靠代码 new），
+                // 打包时会被当成「没人用」剔除 —— 发行版里 Shader.Find 返回 null，
+                // 于是立绘退回默认 UI 材质、**遮挡全失效**（人直接盖在家具上）。
+                // Resources 下的材质一定会进包，它引用的 shader 也跟着进。
+                var template = Resources.Load<Material>("MonitorCharacterMaterial");
+                var shader = template != null
+                    ? template.shader
+                    : Shader.Find("NailongFNAF/MonitorCharacter");
+
                 if (shader != null)
                 {
                     img.material = new Material(shader);
@@ -5052,6 +5065,34 @@ namespace NailongFNAF.UI
             if (GameManager.Instance != null)
             {
                 GameManager.Instance.EndNaibaoCall();
+            }
+        }
+
+        /// <summary>
+        /// 通话中的键盘操作：**空格继续、F 跳过剩下的**。
+        ///
+        /// 为什么加键盘：通话时条子上虽然有两个按钮，但玩家此刻手多半在
+        /// 门上 / 灯上 / 鼠标转视角 —— 低头去点 132×36 的小按钮很别扭，
+        /// 而且会打断「一边聊一边干活」的节奏。
+        ///
+        /// 只在真的通话中才吃这两个键，平时空格和 F 不做任何事。
+        /// </summary>
+        private void HandleNaibaoCallKeys(GameManager gm)
+        {
+            if (gm == null || !gm.NaibaoTalking)
+            {
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                gm.AdvanceNaibaoCall();
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.F))
+            {
+                gm.EndNaibaoCall();
             }
         }
 
