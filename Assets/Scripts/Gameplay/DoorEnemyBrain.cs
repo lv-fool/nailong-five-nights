@@ -65,10 +65,10 @@ namespace NailongFNAF.Gameplay
         /// </list>
         ///
         /// **缓冲时长随难度增加**（见 <see cref="LastChanceSeconds"/>）：
-        /// 活动度 0 → 2.0 秒，活动度 20 → 4.0 秒。
+        /// 活动度 0 → 1.0 秒，活动度 20 → 3.0 秒。
         /// 高难度下它赖在门口更久 —— 玩家被逼着持续关门，电掉得更快。
         /// </summary>
-        public const float LastChanceBaseSeconds = 2f;
+        public const float LastChanceBaseSeconds = 1f;
 
         /// <summary>
         /// 「最后一搏」窗口的**上限**（秒）—— 活动度满级时的值。
@@ -78,10 +78,10 @@ namespace NailongFNAF.Gameplay
         /// 这和直觉上「高难度反应时间更短」相反，但符合这游戏的资源压力模型 ——
         /// 难度不体现在手速，体现在你还剩多少电。
         /// </summary>
-        public const float LastChanceMaxSeconds = 4f;
+        public const float LastChanceMaxSeconds = 3f;
 
         /// <summary>
-        /// 当前这个敌人的「最后一搏」窗口（秒）—— 按活动度在 2.0 → 4.0 之间线性折算。
+        /// 当前这个敌人的「最后一搏」窗口（秒）—— 按活动度在 1.0 → 3.0 之间线性折算。
         ///
         /// ⚠️ 不再是一个常量：难度直接体现在这段缓冲的长度上。
         /// 活动度越高，它赖在门口越久，玩家被逼着关门更久、电掉得更快。
