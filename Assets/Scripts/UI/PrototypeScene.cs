@@ -1919,11 +1919,14 @@ namespace NailongFNAF.UI
                 && count < ids.Length)
             {
                 ids[count] = EnemyId.Nailong;
-                // 偷电态用「圆滚滚的呆样」，进攻态才换成正经立绘 ——
+                // 偷电态一律用「圆滚滚的呆样」，进攻态才换成正经立绘 ——
                 // 玩家一眼就能看出「它现在是在偷电还是在逼近」。
+                //
+                // 不再区分「有没有被监控照到」：早先被照到会换成瞪眼那张，
+                // 但换来换去反而干扰判断，统一一张更干净。
                 poses[count] = nailong.IsApproaching
                     ? CharacterPose.Idle
-                    : (nailong.IsBeingWatched ? CharacterPose.Stare : CharacterPose.Steal);
+                    : CharacterPose.Steal;
                 count++;
             }
 
