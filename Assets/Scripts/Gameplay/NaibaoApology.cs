@@ -76,14 +76,20 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         public static string LineFor(NaibaoFault fault)
         {
+            // 台词存在 Assets/Resources/naibao_lines.json（「奶龙 / 12. 编辑奶包台词」），
+            // 那三条按「抢监控 / 关灯 / 偷加耗电」的**固定顺序**排，所以这里用下标取。
+            // 文件缺失时 NaibaoDirector.Lines 会给一份纯默认的实例，不会返回 null。
             switch (fault)
             {
                 case NaibaoFault.MonitorGrab:
-                    return "对不起，刚才监控是我按住的。我想替你看一眼，可我什么都没看见。";
+                    return NaibaoDirector.Lines.LineAt(NaibaoLines.KeyApology, 0);
+
                 case NaibaoFault.LightOff:
-                    return "对不起，灯是我关的。我以为你不需要看那边。";
+                    return NaibaoDirector.Lines.LineAt(NaibaoLines.KeyApology, 1);
+
                 case NaibaoFault.UsageSpike:
-                    return "对不起，电是我偷偷调高的。我以为还够用。";
+                    return NaibaoDirector.Lines.LineAt(NaibaoLines.KeyApology, 2);
+
                 default:
                     return null;
             }

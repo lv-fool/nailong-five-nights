@@ -89,40 +89,60 @@ namespace NailongFNAF.Gameplay
         /// <summary>「抢监控」持续多久。</summary>
         public const float MonitorGrabSeconds = 2.6f;
 
-        /// <summary>引导期的台词，按 <see cref="GuideTimes"/> 的顺序。</summary>
-        public static readonly string[] GuideLines =
+        /// <summary>
+        /// 引导期的台词（按 <see cref="GuideTimes"/> 的顺序）。
+        ///
+        /// ⚠️ 这些只是**兜底值** —— 实际用 <see cref="Lines"/> 从
+        /// Assets/Resources/naibao_lines.json 读（菜单「奶龙 / 12. 编辑奶包台词」维护）。
+        /// </summary>
+        public static string[] GuideLines
         {
-            "我是奶包，这屋里最靠谱的那个。先看监控吧——鼠标压到屏幕最底下，它就升起来。",
-            "两边墙上那两块板子，上面是门，下面是灯。门关着是看不见人的，得先把灯打开才看得见。",
-            "正门那边有个小孩，只有手电筒能赶走。按住屏幕中间那个 FLASHLIGHT，别松。",
-            "左下角那排格子是现在的用电量。格子越多，电掉得越快，你自己看着办。",
-            "好了，该说的我都说了。撑到六点，我在这儿看着你。",
-        };
+            get { return NaibaoLines.DefaultLines(NaibaoLines.KeyGuide); }
+        }
 
-        private static readonly string[] UsageSpikeLines =
-        {
-            "我看你电还挺多的，替你多开了一档。",
-            "别谢我，功率我帮你调高了。",
-        };
+        /// <summary>
+        /// 台词表（json 优先，缺了就用默认）。
+        ///
+        /// 用静态字段缓存：奶包每次出手都要取词，不能每帧读 Resources。
+        /// </summary>
+        private static NaibaoLines _lines;
+        private static bool _linesLoaded;
 
-        private static readonly string[] MonitorGrabLines =
+        /// <summary>读台词文件；读不到返回纯默认实例（不会返回 null）。</summary>
+        public static NaibaoLines Lines
         {
-            "这个机位我替你看看……哎，什么都没有。",
-            "诶，我好像按到什么了？",
-        };
+            get
+            {
+                if (_linesLoaded)
+                {
+                    return _lines;
+                }
 
-        private static readonly string[] LightOffLines =
-        {
-            "你灯开太久了，帮你关了啊。",
-            "省点电吧，我关你一盏。",
-        };
+                _linesLoaded = true;
 
-        private static readonly string[] TauntLines =
+                var asset = UnityEngine.Resources.Load<UnityEngine.TextAsset>(NaibaoLines.ResourcePath);
+
+                if (asset != null)
+                {
+                    NaibaoLines parsed;
+                    if (NaibaoLines.TryParse(asset.text, out parsed))
+                    {
+                        _lines = parsed;
+                        return _lines;
+                    }
+                }
+
+                _lines = new NaibaoLines();   // 纯默认
+                return _lines;
+            }
+        }
+
+        /// <summary>编辑器里改了 json 之后让缓存失效（窗口保存时调）。</summary>
+        public static void InvalidateLinesCache()
         {
-            "你关门的样子，有点像在给谁道歉。",
-            "我在这儿看着呢，别紧张。",
-            "其实你可以不用这么用力的。",
-        };
+            _lines = null;
+            _linesLoaded = false;
+        }
 
         private readonly bool _guide;
         private readonly IRandomSource _random;
@@ -309,7 +329,7 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.UsageSpike,
                         Pose = NaibaoPose.Smug,
-                        Line = Pick(UsageSpikeLines, index),
+                        Line = PickGroup(NaibaoLines.KeyUsage, index),
                         Seconds = UsageSpikeSeconds,
                     });
                     break;
@@ -319,7 +339,7 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.MonitorGrab,
                         Pose = NaibaoPose.Peek,
-                        Line = Pick(MonitorGrabLines, index),
+                        Line = PickGroup(NaibaoLines.KeyMonitor, index),
                         Seconds = MonitorGrabSeconds,
                     });
                     break;
@@ -329,7 +349,7 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.LightOff,
                         Pose = NaibaoPose.Huffy,
-                        Line = Pick(LightOffLines, index),
+                        Line = PickGroup(NaibaoLines.KeyLightOff, index),
                         Seconds = 0f,
                     });
                     break;
@@ -339,21 +359,29 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.Line,
                         Pose = NaibaoPose.Bored,
-                        Line = Pick(TauntLines, index),
+                        Line = PickGroup(NaibaoLines.KeyTaunt, index),
                         Seconds = 0f,
                     });
                     break;
             }
         }
 
-        private static string Pick(string[] lines, int index)
+        /// <summary>
+        /// 从某组台词里按下标轮着取（同一个 index 永远给同一句）。
+        ///
+        /// 用轮替而不是随机：玩家连着遇到两次抢监控，听到的话不该一样，
+        /// 但也不能随机——那样同一局里可能反复撞同一句，像复读机。
+        /// </summary>
+        private static string PickGroup(string key, int index)
         {
-            if (lines == null || lines.Length == 0)
+            var lines = Lines.LinesFor(key);
+
+            if (lines == null || lines.Count == 0)
             {
                 return string.Empty;
             }
 
-            return lines[index % lines.Length];
+            return lines[index % lines.Count] ?? string.Empty;
         }
     }
 }
