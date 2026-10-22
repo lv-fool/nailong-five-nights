@@ -88,3 +88,9 @@ __pycache__/
 
 # 奶包的原始建模（904 MB，别入库）
 /奶包/naibaojianmo/
+
+# 讨论用的聊天截图（本地参考，不入库）
+/讨论/
+
+# MemSearch 记忆插件的本地索引
+/.memsearch/
