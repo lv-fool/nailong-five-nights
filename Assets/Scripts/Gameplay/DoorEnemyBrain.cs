@@ -54,22 +54,50 @@ namespace NailongFNAF.Gameplay
         public float DoorTimer { get; protected set; }
 
         /// <summary>
-        /// 「最后一搏」窗口（秒）—— 移动机会攒满后才开始算。
+        /// 「最后一搏」窗口的**基准时长**（秒）—— 活动度 0 时的值。
         ///
         /// 规则（按用户 2026-10-22 定）：
         /// <list type="number">
         /// <item>到门口后先攒满 <see cref="DoorGraceSeconds"/>（一个移动机会）。</item>
-        /// <item>攒满后**不立刻决定**，而是再进入 2 秒的缓冲期。</item>
-        /// <item>这 2 秒里门**一旦被打开就立刻重置**，重新计时 —— 玩家还有补救机会。</item>
-        /// <item>2 秒走完：门还开着 → 动手；门关着 → 退走。</item>
+        /// <item>攒满后**不立刻决定**，而是再进入一段缓冲期。</item>
+        /// <item>缓冲期内门**一旦被打开就重置**，重新计时 —— 玩家还有补救机会。</item>
+        /// <item>缓冲期走完：门还开着 → 动手；门关着 → 退走。</item>
         /// </list>
         ///
-        /// 为什么加这一段：原来的实现里「攒满就立刻判」，
-        /// 玩家在最后一刻开门会被立刻抓住、关门的瞬间也可能刚好撞上判定，
-        /// 手感像「不给反应」。多这 2 秒既是给玩家的宽限，
-        /// 也让「在门口反复开关门」变成一个有代价的赌博。
+        /// **缓冲时长随难度增加**（见 <see cref="LastChanceSeconds"/>）：
+        /// 活动度 0 → 2.0 秒，活动度 20 → 4.0 秒。
+        /// 高难度下它赖在门口更久 —— 玩家被逼着持续关门，电掉得更快。
         /// </summary>
-        public const float LastChanceSeconds = 2f;
+        public const float LastChanceBaseSeconds = 2f;
+
+        /// <summary>
+        /// 「最后一搏」窗口的**上限**（秒）—— 活动度满级时的值。
+        ///
+        /// 为什么高难度要**更长**：它站在门口不走的那几秒，玩家必须一直按着关门，
+        /// 而关门是持续耗电的。所以「赖得越久」= 拖的电越多 = 越难。
+        /// 这和直觉上「高难度反应时间更短」相反，但符合这游戏的资源压力模型 ——
+        /// 难度不体现在手速，体现在你还剩多少电。
+        /// </summary>
+        public const float LastChanceMaxSeconds = 4f;
+
+        /// <summary>
+        /// 当前这个敌人的「最后一搏」窗口（秒）—— 按活动度在 2.0 → 4.0 之间线性折算。
+        ///
+        /// ⚠️ 不再是一个常量：难度直接体现在这段缓冲的长度上。
+        /// 活动度越高，它赖在门口越久，玩家被逼着关门更久、电掉得更快。
+        /// </summary>
+        public float LastChanceSeconds
+        {
+            get
+            {
+                float t = ActivityLevel / (float)MaxActivityLevel;
+                if (t < 0f) { t = 0f; }
+                if (t > 1f) { t = 1f; }
+
+                return LastChanceBaseSeconds
+                    + (LastChanceMaxSeconds - LastChanceBaseSeconds) * t;
+            }
+        }
 
         /// <summary>「最后一搏」已经走了多久（秒）。只在 <see cref="DoorTimer"/> 攒满后才累计。</summary>
         public float LastChanceTimer { get; protected set; }

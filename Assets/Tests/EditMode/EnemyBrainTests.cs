@@ -153,8 +153,11 @@ namespace NailongFNAF.Tests
         public void 门关着时_门类敌人要等移动机会加最后一搏才退走()
         {
             // 机制（用户 2026-10-22 定）：
-            //   攒满一个移动机会（turn 秒）→ 再进入 2 秒「最后一搏」
-            //   2 秒走完、门还关着 → 退走
+            //   攒满一个移动机会（turn 秒）→ 再进入「最后一搏」
+            //   缓冲走完、门还关着 → 退走
+            //
+            // ⚠️ 缓冲时长**随活动度增加**（2.0 → 4.0 秒），不是固定的 2 秒。
+            // 难度越高它赖在门口越久，玩家被逼着关门更久、电掉得更快。
             const float turn = 3f;
             var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1),
@@ -169,19 +172,19 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
             Assert.IsFalse(brain.RetreatedThisTick);
 
-            // 攒满移动机会 —— 但**还没到退走的时候**，要再等 2 秒
+            // 攒满移动机会 —— 但缓冲还没走完
             brain.Tick(turn, ctx);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏 2 秒还没走完");
+            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
             Assert.IsFalse(brain.RetreatedThisTick);
             Assert.IsFalse(brain.IsAttacking);
 
-            // 最后一搏刚过一半 —— 还是不该退
-            brain.Tick(1f, ctx);
-            Assert.AreEqual(2, brain.Stage, "最后一搏 1 秒，还不够");
+            // 缓冲刚过一半 —— 还是不该退
+            brain.Tick(brain.LastChanceSeconds * 0.5f, ctx);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完，不该退");
             Assert.IsFalse(brain.RetreatedThisTick);
 
-            // 2 秒走完、门一直关着 → 退走
-            brain.Tick(1.1f, ctx);
+            // 缓冲走完、门一直关着 → 退走
+            brain.Tick(brain.LastChanceSeconds, ctx);
             Assert.AreEqual(0, brain.Stage, "最后一搏走完，门关着就退走");
             Assert.IsFalse(brain.IsAttacking);
             Assert.IsTrue(brain.RetreatedThisTick);
@@ -197,8 +200,29 @@ namespace NailongFNAF.Tests
         // ---------------------------------------------------------------
 
         // ---------------------------------------------------------------
-        // 进攻失败 → 随机传送 + 随机游走（不回出生地）
+        // 最后一搏时长随难度增加 / 进攻失败 → 随机游走
         // ---------------------------------------------------------------
+
+        [Test]
+        public void 最后一搏时长随活动度增加()
+        {
+            // 用户 2026-10-22 定：难度越高，它赖在门口越久 ——
+            // 玩家必须一直按着关门，而关门持续耗电，所以「拖得久」= 更难。
+            var low = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 0,
+                new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, 3f);
+            var mid = new DoorEnemyBrain(EnemyId.Niulai, Side.Right, 10,
+                new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, 3f);
+            var high = new DoorEnemyBrain(EnemyId.Niulai, Side.Right,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, 3f);
+
+            Assert.AreEqual(DoorEnemyBrain.LastChanceBaseSeconds, low.LastChanceSeconds, 0.001f,
+                "活动度 0 应该是基准 2 秒");
+            Assert.AreEqual(DoorEnemyBrain.LastChanceMaxSeconds, high.LastChanceSeconds, 0.001f,
+                "满活动度应该是上限 4 秒");
+            Assert.Greater(mid.LastChanceSeconds, low.LastChanceSeconds);
+            Assert.Less(mid.LastChanceSeconds, high.LastChanceSeconds);
+        }
 
         [Test]
         public void 被门挡回后_随机传送到非出生地的机位()
@@ -399,14 +423,14 @@ namespace NailongFNAF.Tests
             brain.Tick(0.1f, opened);
             Assert.AreEqual(2, brain.Stage);
 
-            // 关门后重新计：再等 1.5 秒还不够（因为已经重置了）
-            brain.Tick(1.5f, closed);
-            Assert.AreEqual(2, brain.Stage, "重置后只过了 1.5 秒，不够 2 秒");
+            // 关门后重新计：还没走完就不该退
+            brain.Tick(brain.LastChanceSeconds * 0.75f, closed);
+            Assert.AreEqual(2, brain.Stage, "重置后还没走完，不该退");
             Assert.IsFalse(brain.RetreatedThisTick);
 
-            // 补满剩下的 0.6 秒 → 退走
-            brain.Tick(0.6f, closed);
-            Assert.AreEqual(0, brain.Stage, "重置后的 2 秒走完，退走");
+            // 补满剩下的 → 退走
+            brain.Tick(brain.LastChanceSeconds, closed);
+            Assert.AreEqual(0, brain.Stage, "重置后的最后一搏走完，退走");
             Assert.IsTrue(brain.RetreatedThisTick);
         }
 
@@ -435,9 +459,9 @@ namespace NailongFNAF.Tests
             brain.Tick(0.1f, opened);
             Assert.IsFalse(brain.IsAttacking, "中途开门不该立刻被抓");
 
-            // 又关回去，重新攒满 2 秒 → 退走
-            brain.Tick(2.1f, closed);
-            Assert.AreEqual(0, brain.Stage, "重新计满 2 秒后门关着 → 退走");
+            // 又关回去，重新攒满 → 退走
+            brain.Tick(brain.LastChanceSeconds + 0.1f, closed);
+            Assert.AreEqual(0, brain.Stage, "重新计满后门关着 → 退走");
             Assert.IsTrue(brain.RetreatedThisTick);
         }
 
@@ -846,7 +870,7 @@ namespace NailongFNAF.Tests
             brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
             Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
 
-            brain.Tick(DoorEnemyBrain.LastChanceSeconds, closed);
+            brain.Tick(brain.LastChanceSeconds, closed);
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(NailongMode.Stealing, brain.Mode, "被挡回后要回去偷电");
         }
@@ -925,7 +949,7 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
 
             // 最后一搏走完、门还关着 → 退回偷电
-            brain.Tick(DoorEnemyBrain.LastChanceSeconds, closed);
+            brain.Tick(brain.LastChanceSeconds, closed);
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(NailongMode.Stealing, brain.Mode, "被挡回后回去偷电");
         }
