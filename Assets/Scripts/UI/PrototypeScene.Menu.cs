@@ -282,9 +282,15 @@ namespace NailongFNAF.UI
             }
         }
 
-        /// <summary>自定义夜的 ± 按钮（比菜单按钮小，64×64）。</summary>
+        /// <summary>
+        /// 自定义夜的 ± 按钮（比菜单按钮小，64×64）。**支持按住连发**。
+        ///
+        /// ⚠️ 刻意**不用** Button.onClick：连发要靠 <see cref="RepeatButton"/>，
+        /// 而它按下时自己会走一格。两个都挂上就会「按一次加两格」，
+        /// 所以这里只保留 Button 做视觉（hover / 按下变色），不接 onClick。
+        /// </summary>
         private Button MakeStepperButton(Transform parent, string label, Vector2 anchor,
-            UnityEngine.Events.UnityAction onClick)
+            System.Action onRepeat)
         {
             var go = new GameObject("Stepper", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
             go.transform.SetParent(parent, false);
@@ -305,7 +311,10 @@ namespace NailongFNAF.UI
             colors.pressedColor = new Color(0.9f, 0.9f, 0.9f);
             colors.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.55f);
             button.colors = colors;
-            button.onClick.AddListener(onClick);
+
+            // 单击 + 长按连发都交给它
+            var repeat = go.AddComponent<RepeatButton>();
+            repeat.OnRepeat = onRepeat;
 
             var labelText = MakeLabel(go.transform, label, 36, Color.white,
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(64f, 64f));
