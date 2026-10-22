@@ -1502,28 +1502,53 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 每只敌人被抓到后的台词。
-        /// 调子跟美术一样是「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。
-        /// 改台词只动这张表。
+        ///
+        /// **优先读 Assets/Resources/death_quotes.json** —— 那是由编辑器窗口
+        /// 「奶龙 / 11. 编辑跳杀台词」维护的；文件不存在或某只没写，
+        /// 就退回 <see cref="DeathQuotes.DefaultFor"/> 里那套写死的文案。
+        ///
+        /// 所以改台词有两条路：菜单窗口（推荐，不用碰代码），
+        /// 或者直接改 DeathQuotes.DefaultFor()。
         /// </summary>
         private static string QuoteFor(EnemyId id)
         {
-            switch (id)
+            DeathQuotes quotes = LoadDeathQuotes();
+
+            if (quotes != null)
             {
-                case EnemyId.Nailong:
-                    return "「电量我收下啦～下次记得省着点用哦。」";
-
-                case EnemyId.Niulai:
-                    return "「门关得挺快嘛……可惜我比门快。」";
-
-                case EnemyId.Daishu:
-                    return "「你刚才没开灯吧？那你怎么知道门外是谁呢。」";
-
-                case EnemyId.Lulu:
-                    return "「手电筒呢？这次好像闪得不够亮呀。」";
-
-                default:
-                    return string.Empty;
+                return quotes.For(id);
             }
+
+            return DeathQuotes.DefaultFor(id);
+        }
+
+        /// <summary>缓存的台词表 —— 只在第一次用时读一次 Resources。</summary>
+        private static DeathQuotes _deathQuotes;
+        private static bool _deathQuotesLoaded;
+
+        /// <summary>读台词文件；读不到返回 null（调用方退回默认）。</summary>
+        private static DeathQuotes LoadDeathQuotes()
+        {
+            if (_deathQuotesLoaded)
+            {
+                return _deathQuotes;
+            }
+
+            _deathQuotesLoaded = true;
+
+            var asset = Resources.Load<TextAsset>(DeathQuotes.ResourcePath);
+            if (asset == null)
+            {
+                return null;
+            }
+
+            DeathQuotes parsed;
+            if (DeathQuotes.TryParse(asset.text, out parsed))
+            {
+                _deathQuotes = parsed;
+            }
+
+            return _deathQuotes;
         }
 
         private void OnEndPrimaryClicked()
