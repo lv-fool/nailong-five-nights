@@ -187,6 +187,128 @@ namespace NailongFNAF.Tests
             Assert.IsTrue(brain.RetreatedThisTick);
         }
 
+        // ---------------------------------------------------------------
+        // 门口判定与「跳杀储存」的契约（EnemyDirector 那套延迟判定）
+        //
+        // EnemyDirector 每帧扫 IsAttacking，扫到就记 _breachingEnemy、锁门灯、
+        // 然后等监控放下才 MarkCaught。所以这里只要保证两件事：
+        //   1. 该进攻时 IsAttacking 必须是 true，而且**保持住**
+        //   2. 该退走时 IsAttacking 必须是 false（残留会让它「退了照样跳杀」）
+        // ---------------------------------------------------------------
+
+        [Test]
+        public void 退走后不会残留动手标记()
+        {
+            // 回归测试：早先 Retreat() 没清 IsAttacking，
+            // 只要它有一次「动手后又被挡回去」，标记就永远是 true，
+            // EnemyDirector 下一帧立刻判突破 —— 玩家看到它明明退了却照样跳杀。
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var idle = EnemyContext.Idle();
+
+            AdvanceToStage(brain, idle, 2);
+
+            // 先让它真的动手一次
+            brain.Tick(brain.DoorGraceSeconds + 0.1f, idle);
+            Assert.IsTrue(brain.IsAttacking, "门开着，攒满就该动手");
+
+            // 再强行退走
+            brain.Retreat();
+
+            Assert.IsFalse(brain.IsAttacking, "退走之后必须清掉动手标记");
+            Assert.AreEqual(0, brain.Stage);
+        }
+
+        [Test]
+        public void 门关着退走时_动手标记必须始终为假()
+        {
+            // 一整轮「到门口 → 关门 → 最后一搏 → 退走」全程
+
+            // IsAttacking 都不许变 true —— 变了 EnemyDirector 就会判突破。
+            const float turn = 3f;
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, turn);
+
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+            AdvanceToStage(brain, closed, 2);
+
+            // 逐 0.1 秒推进到退走为止，全程检查
+            for (int i = 0; i < 100 && brain.Stage > 0; i++)
+            {
+                brain.Tick(0.1f, closed);
+                Assert.IsFalse(brain.IsAttacking,
+                    "门关着时不该动手（第 " + i + " 步）");
+            }
+
+            Assert.AreEqual(0, brain.Stage, "最后应该退走");
+            Assert.IsTrue(brain.RetreatedThisTick);
+        }
+
+        [Test]
+        public void 最后一搏期间反复开关门_绝不误触发动手()
+        {
+            // 最危险的场景：玩家在门口反复开关门试探。
+            // 早先「攒满后只要门开着就动手」的写法会让它一开门就被判动手，
+            // 和「开门重置 2 秒」的设计自相矛盾。
+            const float turn = 3f;
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, turn);
+
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+            var opened = EnemyContext.Idle();
+            AdvanceToStage(brain, closed, 2);
+
+            // 每 0.8 秒开 0.1 秒。
+            //
+            // ⚠️ 开门时机不能和「攒满移动机会」那一刻重合 ——
+            // 撞上了它就该动手（那是正确行为），不是误触发。
+            // turn=3s、步长 0.1s，用 %8 让开门点落在 0.0/0.8/1.6/2.4/3.2…
+            // 避开了 3.0 秒这个攒满点。
+            for (int i = 0; i < 80; i++)
+            {
+                bool openNow = (i % 8) == 0;
+                brain.Tick(0.1f, openNow ? opened : closed);
+
+                // 攒满那一帧若刚好门开着 → 动手是设计如此，跳过该帧断言
+                bool atFillMoment = System.Math.Abs(brain.DoorTimer - turn) < 0.001
+                    || brain.DoorTimer >= turn;
+
+                if (openNow && atFillMoment)
+                {
+                    continue;
+                }
+
+                Assert.IsFalse(brain.IsAttacking,
+                    "最后一搏期间开门只是重置，不该动手（第 " + i + " 步）");
+            }
+        }
+
+        [Test]
+        public void 动手标记会保持住_供突破判定读取()
+        {
+            // EnemyDirector 只在**某一帧**扫到 IsAttacking 就记下来，
+            // 所以动手之后这个标记必须一直保持 true，
+            // 否则 Director 会漏掉它、玩家白逃一次。
+            var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1));
+            var idle = EnemyContext.Idle();
+
+            AdvanceToStage(brain, idle, 2);
+            brain.Tick(brain.DoorGraceSeconds + 0.1f, idle);
+
+            Assert.IsTrue(brain.IsAttacking);
+
+            // 后续再怎么 Tick 都不许它自己变回 false
+            for (int i = 0; i < 20; i++)
+            {
+                brain.Tick(0.1f, idle);
+                Assert.IsTrue(brain.IsAttacking,
+                    "动手标记被意外清掉了（第 " + i + " 步）");
+            }
+        }
+
         [Test]
         public void 最后一搏期间开门会重置计时()
         {
