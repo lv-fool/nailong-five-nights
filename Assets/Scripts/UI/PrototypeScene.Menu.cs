@@ -1391,9 +1391,11 @@ namespace NailongFNAF.UI
             _endPrimaryLabel.text = custom ? "重试" : "重试本夜";
             _endPrimaryButton.interactable = true;
 
-            // 跳杀完，那只敌人说一句话
-            _endQuoteText.text = QuoteFor(_jumpscareEnemy);
-            PlayEndQuoteVoice(_jumpscareEnemy);
+            // 跳杀完，那只敌人说一句话。
+            // 文本和语音用**同一次抽签**的结果 —— 分两次抽就会各说各的。
+            int quoteIndex;
+            _endQuoteText.text = QuoteFor(_jumpscareEnemy, out quoteIndex);
+            PlayEndQuoteVoice(_jumpscareEnemy, quoteIndex);
 
             // 这局要算她的锅，她在左下角道个歉
             ShowEndNaibaoApology(gm);
@@ -1436,8 +1438,9 @@ namespace NailongFNAF.UI
             _endPrimaryButton.interactable = true;
 
             // 永夜模式死法多半是被抓，台词照旧；没抓到就没台词
-            _endQuoteText.text = QuoteFor(_jumpscareEnemy);
-            PlayEndQuoteVoice(_jumpscareEnemy);
+            int quoteIndex;
+            _endQuoteText.text = QuoteFor(_jumpscareEnemy, out quoteIndex);
+            PlayEndQuoteVoice(_jumpscareEnemy, quoteIndex);
 
             // 永夜模式她不全程在场，一律收起来
             ShowEndNaibaoApology(null);
@@ -1479,12 +1482,20 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 播「被谁抓到就放谁的语音」。
-        /// 素材放 <c>Assets/Resources/Audio/voice_&lt;代号&gt;</c>
-        /// （如 <c>voice_nailong.mp3</c>），没有就**只显示字幕**，不报错、不影响流程。
-        /// 所以做语音可以一条一条慢慢补，缺哪条就用哪条的文字版。
+        /// 播「被谁抓到、说了哪一句」的语音。
+        ///
+        /// 素材放 <c>Assets/Resources/Audio/</c>，**从精确到笼统两级回退**：
+        /// <list type="number">
+        /// <item><c>voice_&lt;代号&gt;_&lt;句号&gt;</c> —— 如 <c>voice_nailong_1.mp3</c>，
+        ///   对应台词池里第 2 句（下标 0 起，和「11. 编辑跳杀台词」窗口里显示的序号一致）。</item>
+        /// <item><c>voice_&lt;代号&gt;</c> —— 如 <c>voice_nailong.mp3</c>，
+        ///   这一只的通用录音（池子里每句都用它）。</item>
+        /// </list>
+        ///
+        /// 两级都没有就**只显示字幕**，不报错、不影响流程 ——
+        /// 所以语音可以一条一条慢慢补，缺哪句就用哪句的文字版。
         /// </summary>
-        private void PlayEndQuoteVoice(EnemyId id)
+        private void PlayEndQuoteVoice(EnemyId id, int quoteIndex)
         {
             if (_endQuoteAudio == null)
             {
@@ -1493,8 +1504,21 @@ namespace NailongFNAF.UI
 
             _endQuoteAudio.Stop();
 
-            string path = "Audio/voice_" + id.Code();
-            AudioClip clip = Resources.Load<AudioClip>(path);
+            string code = id.Code();
+            AudioClip clip = null;
+
+            // ① 按句 —— 字幕和录音严格对应
+            if (quoteIndex >= 0)
+            {
+                clip = Resources.Load<AudioClip>("Audio/voice_" + code + "_" + quoteIndex);
+            }
+
+            // ② 按敌人 —— 没做逐句录音时的通用版
+            if (clip == null)
+            {
+                clip = Resources.Load<AudioClip>("Audio/voice_" + code);
+            }
+
             if (clip == null)
             {
                 // 还没做语音 —— 静默跳过，字幕照常显示
@@ -1521,6 +1545,18 @@ namespace NailongFNAF.UI
         /// </summary>
         private static string QuoteFor(EnemyId id)
         {
+            int ignored;
+            return QuoteFor(id, out ignored);
+        }
+
+        /// <summary>
+        /// 同 <see cref="QuoteFor(EnemyId)"/>，但**把抽中的是池子里第几句一起带出来**。
+        ///
+        /// 结算画面拿这个下标去载对应的语音 —— 台词是随机抽的，
+        /// 只有一条通用录音必然会出现「说的和写的不是同一句」。
+        /// </summary>
+        private static string QuoteFor(EnemyId id, out int quoteIndex)
+        {
             DeathQuotes quotes = LoadDeathQuotes();
 
             if (quotes == null)
@@ -1531,7 +1567,8 @@ namespace NailongFNAF.UI
             string previous;
             _lastQuote.TryGetValue(id, out previous);
 
-            string line = quotes.RandomLineFor(id, previous);
+            string line;
+            quoteIndex = quotes.RandomLineIndexFor(id, previous, out line);
 
             if (!string.IsNullOrEmpty(line))
             {

@@ -129,7 +129,10 @@ namespace NailongFNAF.EditorTools
             EditorGUILayout.HelpBox(
                 "每次被抓从池里**随机抽一句**，并避开这一只上一句说过的话。\n"
                 + "空行会被忽略；只有一句时只能重复。\n"
-                + "调子建议保持「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。",
+                + "调子建议保持「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。\n\n"
+                + "语音：每句旁边写着它该用的文件名（voice_<代号>_<序号>），"
+                + "丢进 Assets/Resources/Audio/ 即可。也可以只放一条 "
+                + "voice_<代号> 当这一只的通用录音。",
                 MessageType.Info);
 
             EditorGUILayout.Space(8);
@@ -179,7 +182,15 @@ namespace NailongFNAF.EditorTools
                     {
                         EditorGUILayout.BeginHorizontal();
 
+                        // 序号 + **这句对应的语音文件名** ——
+                        // 从这个窗口直接能看出该把录音命名成什么，
+                        // 不用去翻代码里 PlayEndQuoteVoice 的规则。
                         GUILayout.Label((i + 1) + ".", GUILayout.Width(24f));
+
+                        var nameStyle = new GUIStyle(EditorStyles.miniLabel);
+                        nameStyle.normal.textColor = new Color(0.55f, 0.75f, 0.95f);
+                        GUILayout.Label("voice_" + id.Code() + "_" + i, nameStyle,
+                            GUILayout.Width(140f));
 
                         string current = pool[i] ?? string.Empty;
 
