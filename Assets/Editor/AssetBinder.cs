@@ -73,7 +73,9 @@ namespace NailongFNAF.EditorTools
                 LoadClip("Assets/Audio/SFX/sfx_camera_switch.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_footstep.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_power_out.ogg"),
-                LoadClip("Assets/Audio/SFX/sfx_power_out_music.wav"));
+                LoadClip("Assets/Audio/SFX/sfx_power_out_music.wav"),
+                // 偶尔响一下的远处环境声（不循环，25~70 秒随机一次）
+                LoadClip("Assets/Audio/Ambient/amb_distant_metal.wav"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);

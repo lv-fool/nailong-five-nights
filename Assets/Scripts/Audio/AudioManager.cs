@@ -14,6 +14,25 @@ namespace NailongFNAF.Audio
         [SerializeField] private AudioClip _ambFan;
         [SerializeField] private AudioClip _ambHum;
 
+        /// <summary>
+        /// 偶尔响一下的远处环境声（金属碰撞、管道……）——**不循环**。
+        ///
+        /// 为什么不做成第三条循环轨：三条底噪叠在一起会变成嗡嗡一片，
+        /// 反而听不出「远处有东西在动」。间歇响一下才吓人 ——
+        /// 玩家会下意识转头去看，而那正好是这游戏想让你做的事。
+        /// </summary>
+        [SerializeField] private AudioClip _ambDistant;
+
+        /// <summary>两次远处声之间隔多久（秒），随机取区间。</summary>
+        private const float DistantMinGap = 25f;
+        private const float DistantMaxGap = 70f;
+
+        /// <summary>下一次该响的时刻（Time.time）。</summary>
+        private float _nextDistantAt;
+
+        /// <summary>远处声的独立轨道 —— 用 PlayOneShot，不跟主音效抢通道。</summary>
+        private AudioSource _ambientC;
+
         [Header("音效")]
         [SerializeField] private AudioClip _sfxDoorClose;
         [SerializeField] private AudioClip _sfxDoorOpen;
@@ -65,11 +84,18 @@ namespace NailongFNAF.Audio
         {
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
             _ambientB = CreateSource("AmbientB", true, _ambientVolume);
+
+            // 远处声单独一条轨：**不循环**，音量比底噪略低一点，
+            // 让它听起来确实「在远处」。
+            _ambientC = CreateSource("AmbientC", false, _ambientVolume * 0.8f);
+
             _sfx = CreateSource("Sfx", false, _sfxVolume);
             _music = CreateSource("PowerOutMusic", false, _musicVolume);
 
             PlayLoop(_ambientA, _ambFan);
             PlayLoop(_ambientB, _ambHum);
+
+            ScheduleNextDistant();
         }
 
         private AudioSource CreateSource(string sourceName, bool loop, float volume)
@@ -95,6 +121,34 @@ namespace NailongFNAF.Audio
 
             source.clip = clip;
             source.Play();
+        }
+
+        /// <summary>
+        /// 远处环境声的调度：到了点就响一下，然后重新排下一次。
+        ///
+        /// 用 <see cref="AudioSource.PlayOneShot"/> 而不是主通道 ——
+        /// 它不该打断门 / 灯的音效，也不需要被谁 Stop。
+        /// </summary>
+        private void Update()
+        {
+            if (_ambDistant == null || _ambientC == null)
+            {
+                return;
+            }
+
+            if (Time.time < _nextDistantAt)
+            {
+                return;
+            }
+
+            _ambientC.PlayOneShot(_ambDistant, _ambientC.volume);
+            ScheduleNextDistant();
+        }
+
+        /// <summary>排下一次远处声的时刻：25~70 秒之间随机。</summary>
+        private void ScheduleNextDistant()
+        {
+            _nextDistantAt = Time.time + UnityEngine.Random.Range(DistantMinGap, DistantMaxGap);
         }
 
         public void PlayDoor(bool closed)
@@ -198,14 +252,18 @@ namespace NailongFNAF.Audio
         }
 
         /// <summary>由编辑器菜单调用，一次性注入全部素材。</summary>
+        /// <param name="ambDistant">
+        /// 偶尔响一下的远处环境声（不循环）。传 null 就是不启用。
+        /// </param>
         public void SetClips(AudioClip ambFan, AudioClip ambHum,
             AudioClip doorClose, AudioClip doorOpen,
             AudioClip lightOn, AudioClip lightOff,
             AudioClip cameraSwitch, AudioClip footstep, AudioClip powerOut,
-            AudioClip powerOutMusic)
+            AudioClip powerOutMusic, AudioClip ambDistant = null)
         {
             _ambFan = ambFan;
             _ambHum = ambHum;
+            _ambDistant = ambDistant;
             _sfxDoorClose = doorClose;
             _sfxDoorOpen = doorOpen;
             _sfxLightOn = lightOn;
