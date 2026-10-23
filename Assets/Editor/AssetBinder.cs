@@ -75,12 +75,11 @@ namespace NailongFNAF.EditorTools
                 LoadClip("Assets/Audio/SFX/sfx_power_out.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_power_out_music.wav"),
                 // 偶尔响一下的远处环境声（不循环，25~70 秒随机一次）。
-                // ⚠️ 用**截短的 5 秒版**：原文件 29.25 秒，里面其实有三下金属撞击
-                // （8.25 / 16.5 / 23.5 秒各一下，中间都是底噪）。
-                // 整条放进去等于「响一下 → 安静二十秒 → 又响」，节奏完全不归我们控。
-                // 截的是 16.5 秒那一下（峰值最强），从 16.0s 起取 5 秒，
-                // 两端各加了 30ms 淡入淡出避免咔哒。
-                LoadClip("Assets/Audio/Ambient/amb_distant_metal_once.wav"));
+                //
+                // 素材：用户给的「随机细碎音」3.91 秒 —— 一堆零碎的响动，
+                // 比原来那声金属撞击更像「楼里有东西在动」。
+                // 前面 2.8 秒是主体，尾巴自然衰减到静，所以整条直接用，没裁。
+                LoadClip("Assets/Audio/Ambient/amb_distant_metal_once.mp3"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);
