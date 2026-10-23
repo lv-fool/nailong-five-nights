@@ -132,7 +132,10 @@ namespace NailongFNAF.EditorTools
                 + "调子建议保持「可爱反差」—— 不骂人，用撒娇 / 无辜的语气说可怕的话。\n\n"
                 + "语音：每句旁边写着它该用的文件名（voice_<代号>_<序号>），"
                 + "丢进 Assets/Resources/Audio/ 即可。也可以只放一条 "
-                + "voice_<代号> 当这一只的通用录音。",
+                + "voice_<代号> 当这一只的通用录音。\n"
+                + "格式：mp3 / wav / ogg，**或者 mp4 也行** ——"
+                + "微信、QQ 导出的录音常是「mp4 容器装 AAC、扩展名却写 .mp3」，"
+                + "那种会被 Unity 导成 VideoClip，程序走另一条路只取它的音轨。",
                 MessageType.Info);
 
             EditorGUILayout.Space(8);

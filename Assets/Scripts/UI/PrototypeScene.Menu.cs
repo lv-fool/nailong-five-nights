@@ -3,6 +3,7 @@ using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Video;
 
 namespace NailongFNAF.UI
 {
@@ -85,6 +86,13 @@ namespace NailongFNAF.UI
 
         /// <summary>念那句台词的语音轨（素材可选，没有就只显示字幕）。</summary>
         private AudioSource _endQuoteAudio;
+
+        /// <summary>
+        /// 放 mp4 语音用的（只取音轨，不渲染画面）。
+        /// 见 <see cref="BuildEndView"/> 里那段注释：微信/QQ 导出的「.mp3」
+        /// 常常其实是 mp4 容器，Unity 只会把它导成 VideoClip。
+        /// </summary>
+        private VideoPlayer _endQuoteVideo;
         private Button _endPrimaryButton;
         private Text _endPrimaryLabel;
 
@@ -531,14 +539,33 @@ namespace NailongFNAF.UI
             MakeMenuButton(_endView.transform, "返回标题", Vector2.zero,
                 new Vector2(0.5f, 0.30f), OpenTitle);
 
-            // 台词语音轨：素材缺失时静默，不影响任何流程
+            // 台词语音轨：素材缺失时静默，不影响任何流程。
+            //
+            // ⚠️ **挂在 canvas 上，别挂在 _endView 下** ——
+            // _endView 平时是未激活的，而未激活的 GameObject 上
+            // AudioSource 和 VideoPlayer 都不会播放。挂 canvas 上则随调随响，
+            // 「离开结算页就停」由 StopEndQuoteVoice() 负责。
             var voiceGo = new GameObject("EndQuoteVoice");
-            voiceGo.transform.SetParent(_endView.transform, false);
+            voiceGo.transform.SetParent(_canvas.transform, false);
             _endQuoteAudio = voiceGo.AddComponent<AudioSource>();
             _endQuoteAudio.playOnAwake = false;
             _endQuoteAudio.loop = false;
             _endQuoteAudio.spatialBlend = 0f;
             _endQuoteAudio.volume = 0.95f;
+
+            // 有些语音是 **mp4 容器装的 AAC**（微信 / QQ 录音导出来常常是这种，
+            // 扩展名却写着 .mp3）—— Unity 的音频导入器不认 mp4，只会把它当
+            // VideoClip 导入。所以这里再挂一个 VideoPlayer，**只用它的音轨**：
+            // 不渲染画面（APIOnly），声音输出到上面那个 AudioSource，
+            // 这样两种素材（真音频 / mp4）都能放。
+            _endQuoteVideo = voiceGo.AddComponent<VideoPlayer>();
+            _endQuoteVideo.playOnAwake = false;
+            _endQuoteVideo.isLooping = false;
+            _endQuoteVideo.source = VideoSource.VideoClip;
+            _endQuoteVideo.renderMode = VideoRenderMode.APIOnly;
+            _endQuoteVideo.audioOutputMode = VideoAudioOutputMode.AudioSource;
+            _endQuoteVideo.controlledAudioTrackCount = 1;
+            _endQuoteVideo.SetTargetAudioSource(0, _endQuoteAudio);
 
             BuildEndNaibaoApology();
         }
@@ -1492,7 +1519,11 @@ namespace NailongFNAF.UI
         ///   这一只的通用录音（池子里每句都用它）。</item>
         /// </list>
         ///
-        /// 两级都没有就**只显示字幕**，不报错、不影响流程 ——
+        /// 每一级**先试音频、再试 mp4**：微信 / QQ 导出的录音常常是
+        /// 「mp4 容器装的 AAC，扩展名却写着 .mp3」，Unity 的音频导入器不认，
+        /// 只会导成 <see cref="VideoClip"/>。这种就走 VideoPlayer 只放音轨。
+        ///
+        /// 都没有就**只显示字幕**，不报错、不影响流程 ——
         /// 所以语音可以一条一条慢慢补，缺哪句就用哪句的文字版。
         /// </summary>
         private void PlayEndQuoteVoice(EnemyId id, int quoteIndex)
@@ -1502,31 +1533,68 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            _endQuoteAudio.Stop();
+            StopEndQuoteVoice();
 
             string code = id.Code();
-            AudioClip clip = null;
 
             // ① 按句 —— 字幕和录音严格对应
-            if (quoteIndex >= 0)
+            if (quoteIndex >= 0
+                && PlayVoiceAt("Audio/voice_" + code + "_" + quoteIndex))
             {
-                clip = Resources.Load<AudioClip>("Audio/voice_" + code + "_" + quoteIndex);
-            }
-
-            // ② 按敌人 —— 没做逐句录音时的通用版
-            if (clip == null)
-            {
-                clip = Resources.Load<AudioClip>("Audio/voice_" + code);
-            }
-
-            if (clip == null)
-            {
-                // 还没做语音 —— 静默跳过，字幕照常显示
                 return;
             }
 
-            _endQuoteAudio.clip = clip;
-            _endQuoteAudio.Play();
+            // ② 按敌人 —— 没做逐句录音时的通用版
+            if (PlayVoiceAt("Audio/voice_" + code))
+            {
+                return;
+            }
+
+            // 都没有 —— 静默跳过，字幕照常显示
+        }
+
+        /// <summary>
+        /// 尝试播放某条路径的语音。**先当音频、再当 mp4**。
+        /// 放到了返回 true；两样都不是返回 false（调用方继续回退）。
+        /// </summary>
+        private bool PlayVoiceAt(string path)
+        {
+            // ⓐ 真音频（mp3 / wav / ogg…）
+            AudioClip clip = Resources.Load<AudioClip>(path);
+            if (clip != null)
+            {
+                _endQuoteAudio.clip = clip;
+                _endQuoteAudio.Play();
+                return true;
+            }
+
+            // ⓑ mp4 容器（只取音轨，不渲染画面）
+            if (_endQuoteVideo != null)
+            {
+                VideoClip video = Resources.Load<VideoClip>(path);
+                if (video != null)
+                {
+                    _endQuoteVideo.clip = video;
+                    _endQuoteVideo.Play();
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>停掉台词语音（音频和 mp4 两条路都要停，不然会串音）。</summary>
+        private void StopEndQuoteVoice()
+        {
+            if (_endQuoteAudio != null)
+            {
+                _endQuoteAudio.Stop();
+            }
+
+            if (_endQuoteVideo != null && _endQuoteVideo.isPlaying)
+            {
+                _endQuoteVideo.Stop();
+            }
         }
 
         /// <summary>上一条说出去的台词（按敌人分），用来避免连续两次说同一句。</summary>
@@ -1613,10 +1681,8 @@ namespace NailongFNAF.UI
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
             bool wasLast = !custom && current >= NightCount - 1;
 
-            if (_endQuoteAudio != null)
-            {
-                _endQuoteAudio.Stop();
-            }
+            // 音频和 mp4 两条路都要停，不然离开结算页还在说
+            StopEndQuoteVoice();
 
             // 永夜模式只有「死」这一种结局，主按钮就是再来一局
             var gm = GameManager.Instance;
