@@ -351,7 +351,8 @@ namespace NailongFNAF.Diagnostics
                 _step = 29;
 
                 object gm2 = Instance("NailongFNAF.Core.GameManager");
-                object started2 = Invoke(gm2, "StartNaibaoCall", new object[] { 0 });
+                // 第二个参数是 custom（反射调用不认默认值，必须显式给）
+                object started2 = Invoke(gm2, "StartNaibaoCall", new object[] { 0, false });
                 Debug.Log("SMOKE: 接通 = " + started2);
             }
             else if (_step == 29 && elapsed > 36.8f)
