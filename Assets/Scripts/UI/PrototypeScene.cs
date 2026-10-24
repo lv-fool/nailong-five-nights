@@ -3432,6 +3432,71 @@ namespace NailongFNAF.UI
             }
 
             UpdateFootsteps();
+            UpdateMoo();
+        }
+
+        /// <summary>
+        /// 牛来进出厨房时的牛叫。
+        ///
+        /// 厨房（CAM 6）是官方那个「只有声音没有画面」的机位 ——
+        /// 玩家切过去是一片黑，只能听。所以：
+        ///   · 刚进厨房 → 原调牛叫（他进去了）
+        ///   · 刚出厨房 → **降调**牛叫（他出来了 / 走远了）
+        /// 音高差得不小（1.0 vs 0.78），不看画面也分得清方向。
+        /// </summary>
+        private void UpdateMoo()
+        {
+            if (_enemyDirector == null)
+            {
+                return;
+            }
+
+            var niulai = _enemyDirector.GetBrain(EnemyId.Niulai) as DoorEnemyBrain;
+            if (niulai == null || !niulai.HasCameraPath)
+            {
+                return;
+            }
+
+            int stage = niulai.Stage;
+
+            // 第一帧只记状态，不播 —— 否则一进夜就会先叫一声
+            if (_lastNiulaiStage < 0)
+            {
+                _lastNiulaiStage = stage;
+                return;
+            }
+
+            if (stage == _lastNiulaiStage)
+            {
+                return;
+            }
+
+            bool wasInKitchen = IsKitchenStage(niulai, _lastNiulaiStage);
+            bool isInKitchen = IsKitchenStage(niulai, stage);
+
+            _lastNiulaiStage = stage;
+
+            if (_audio == null)
+            {
+                return;
+            }
+
+            if (!wasInKitchen && isInKitchen)
+            {
+                // 进去：原调
+                _audio.PlayMoo(false);
+            }
+            else if (wasInKitchen && !isInKitchen)
+            {
+                // 出来：降调
+                _audio.PlayMoo(true);
+            }
+        }
+
+        /// <summary>这个 Stage 是不是厨房那一格。</summary>
+        private static bool IsKitchenStage(DoorEnemyBrain niulai, int stage)
+        {
+            return niulai.PathCameraIndexAt(stage) == KitchenCameraIndex;
         }
 
         // ── 脚步 ────────────────────────────────────────────────────
@@ -3456,6 +3521,15 @@ namespace NailongFNAF.UI
 
         /// <summary>上一次看到的「最近敌人距离」，用来检测靠近 / 离开。</summary>
         private float _lastNearestDistance = -1f;
+
+        /// <summary>
+        /// 牛来上一次的 Stage —— 用来检测「刚进厨房 / 刚出厨房」。
+        ///
+        /// 厨房（CAM 6）没有画面，所以「他在里面」这件事只能靠听。
+        /// 进厨房放原调牛叫、出厨房放**降调**牛叫（走远了）。
+        /// -1 = 还没初始化过（第一帧不播）。
+        /// </summary>
+        private int _lastNiulaiStage = -1;
 
         /// <summary>一串脚步之间的最短间隔（秒）。</summary>
         private const float FootstepBurstMinGap = 1.2f;

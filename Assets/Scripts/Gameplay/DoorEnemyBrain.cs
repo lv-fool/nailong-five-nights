@@ -216,6 +216,22 @@ namespace NailongFNAF.Gameplay
             }
         }
 
+        /// <summary>
+        /// 指定 Stage 对应的机位下标；越界或没配路径返回 -1。
+        ///
+        /// 和 <see cref="PathCameraIndex"/> 的区别：那个只看**当前** Stage，
+        /// 这个能查任意一格 —— 用来判断「上一帧它是不是在厨房」。
+        /// </summary>
+        public int PathCameraIndexAt(int stage)
+        {
+            if (!HasCameraPath || stage < 0 || stage >= _cameraPath.Length)
+            {
+                return -1;
+            }
+
+            return _cameraPath[stage];
+        }
+
         public DoorEnemyBrain(EnemyId id, Side side, int activityLevel, IRandomSource rng)
             : this(id, side, activityLevel, rng, DefaultMoveIntervalSeconds, DefaultDoorGraceSeconds)
         {

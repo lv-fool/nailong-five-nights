@@ -47,6 +47,15 @@ namespace NailongFNAF.Audio
         /// </summary>
         [SerializeField] private AudioClip _sfxFootstepLeft;
         [SerializeField] private AudioClip _sfxFootstepRight;
+
+        /// <summary>
+        /// 牛叫 —— 牛来进出厨房时响。
+        ///
+        /// 厨房（CAM 6）是官方那个**只有声音没有画面**的机位，
+        /// 所以「他在里面」这件事只能靠听。进厨房原调、出厨房**降调**，
+        /// 玩家不用看画面也能分辨他是在靠近还是走远了。
+        /// </summary>
+        [SerializeField] private AudioClip _sfxMoo;
         [SerializeField] private AudioClip _sfxPowerOut;
 
         /// <summary>
@@ -94,6 +103,9 @@ namespace NailongFNAF.Audio
         /// </summary>
         private AudioSource _footstepSource;
 
+        /// <summary>牛叫专用通道 —— 它需要单独设 pitch，不能和别的音效共用。</summary>
+        private AudioSource _mooSource;
+
         private void Awake()
         {
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
@@ -106,6 +118,7 @@ namespace NailongFNAF.Audio
             _sfx = CreateSource("Sfx", false, _sfxVolume);
             _music = CreateSource("PowerOutMusic", false, _musicVolume);
             _footstepSource = CreateSource("Footstep", false, _sfxVolume);
+            _mooSource = CreateSource("Moo", false, _sfxVolume);
 
             PlayLoop(_ambientA, _ambFan);
             PlayLoop(_ambientB, _ambHum);
@@ -220,6 +233,31 @@ namespace NailongFNAF.Audio
         }
 
         /// <summary>
+        /// 播一声牛叫。<paramref name="leaving"/> = true 时**降调**（走远了）。
+        ///
+        /// 走独立通道 + PlayOneShot：牛叫不该打断门 / 灯 / 脚步。
+        /// 音高用 1.0（进）和 0.78（出）—— 降得够明显能听出来，
+        /// 又不会低到像换了只怪物。
+        /// </summary>
+        public void PlayMoo(bool leaving, float volumeScale = 1f)
+        {
+            if (_sfxMoo == null || _mooSource == null)
+            {
+                return;
+            }
+
+            if (volumeScale < 0f) { volumeScale = 0f; }
+            if (volumeScale > 1.5f) { volumeScale = 1.5f; }
+
+            _mooSource.pitch = leaving ? 0.78f : 1f;
+            _mooSource.PlayOneShot(_sfxMoo, _sfxVolume * volumeScale);
+
+            // ⚠️ 播完必须把 pitch 拨回去 —— AudioSource.pitch 是**持久**属性，
+            // 不还原的话下一次（甚至别的音效）都会是降调的。
+            _mooSource.pitch = 1f;
+        }
+
+        /// <summary>
         /// 播一声脚步。<paramref name="rightFoot"/> 决定左右脚，
         /// <paramref name="volumeScale"/> 按距离缩放（1 = 就在门口）。
         ///
@@ -303,13 +341,15 @@ namespace NailongFNAF.Audio
             AudioClip lightOn, AudioClip lightOff,
             AudioClip cameraSwitch, AudioClip footstep, AudioClip powerOut,
             AudioClip powerOutMusic, AudioClip ambDistant = null,
-            AudioClip footstepLeft = null, AudioClip footstepRight = null)
+            AudioClip footstepLeft = null, AudioClip footstepRight = null,
+            AudioClip moo = null)
         {
             _ambFan = ambFan;
             _ambHum = ambHum;
             _ambDistant = ambDistant;
             _sfxFootstepLeft = footstepLeft;
             _sfxFootstepRight = footstepRight;
+            _sfxMoo = moo;
             _sfxDoorClose = doorClose;
             _sfxDoorOpen = doorOpen;
             _sfxLightOn = lightOn;

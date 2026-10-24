@@ -322,6 +322,7 @@ MonoBehaviour:
   _sfxFootstep: {fileID: 8300000, guid: 60c5db299dbe95e449401f294719e97b, type: 3}
   _sfxFootstepLeft: {fileID: 8300000, guid: b511d6895f8a52c4b8aec6f912cdf52f, type: 3}
   _sfxFootstepRight: {fileID: 8300000, guid: 781c1705fe211da4cbc1aab8d73c1beb, type: 3}
+  _sfxMoo: {fileID: 8300000, guid: 30f96b70177b75b45b2343c70224518f, type: 3}
   _sfxPowerOut: {fileID: 8300000, guid: e93d27b4e029a1f41a671154f758dacc, type: 3}
   _powerOutMusic: {fileID: 8300000, guid: 8e4a8e9f2f3bd3c4f8ab4deb7f8b3817, type: 3}
   _ambientVolume: 0.3

@@ -82,7 +82,9 @@ namespace NailongFNAF.EditorTools
                 LoadClip("Assets/Audio/Ambient/amb_distant_metal_once.mp3"),
                 // 左右脚各一条 —— 交替播才有「有人在走过来」的方位感
                 LoadClip("Assets/Audio/SFX/sfx_footstep_left.mp3"),
-                LoadClip("Assets/Audio/SFX/sfx_footstep_right.mp3"));
+                LoadClip("Assets/Audio/SFX/sfx_footstep_right.mp3"),
+                // 牛来进出厨房时的牛叫（进原调、出降调）
+                LoadClip("Assets/Audio/SFX/sfx_moo_niulai.mp3"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);
