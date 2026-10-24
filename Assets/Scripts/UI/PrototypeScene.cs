@@ -632,7 +632,7 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 监控画面的**16:9 设计区** —— 底图、贴图、敌人、小地图全都挂在它下面。
         ///
-        /// 尺寸**固定** 1920×1080（设计像素），再靠 <c>localScale</c> 等比缩到窗口里能放下。
+        /// 尺寸**固定** 1920×1080（设计像素），再靠 <c>localScale</c> 等比缩到**铺满**窗口。
         /// 为什么不直接把 overlay 铺满屏幕：overlay 的尺寸跟着窗口宽高比走
         /// （宽屏下能到 2350×882），而编辑器「奶龙 / 6. 监控画面编辑器」里的预览
         /// **永远是 mon_*.png 的 16:9**。两边坐标系一比一才谈得上「所见即所得」——
@@ -2642,7 +2642,13 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 把 16:9 设计区等比缩到窗口里能放下（两边留黑，不拉伸）。
+        /// 把 16:9 设计区等比缩放去**铺满**窗口（不留黑边、也不拉伸）。
+        ///
+        /// 取 <c>max</c> 而不是 <c>min</c>：宁可裁掉上下（或左右）一条边，也不要留黑框 ——
+        /// 监控画面就该是满屏的（绿子 2026-10-24：「监控就不能全屏了吗」）。
+        /// 窗口正好 16:9 时两者相等，等于 1:1 原样；**任何比例下形状都不变形**，
+        /// 所以在「奶龙 / 6. 监控画面编辑器」里摆好的比例依旧成立，只是边缘会被裁。
+        /// 纵向裁剪时**保底边**（裁天花板不裁地板），否则敌人站在画面下部会整个人被裁掉。
         ///
         /// 只改 <c>localScale</c>，不动 <c>sizeDelta</c> —— 设计区里的坐标永远是
         /// 1920×1080 那一套，编辑器预览和运行时才对得上。
@@ -2660,7 +2666,7 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            float s = Mathf.Min(host.width / MonitorDesignWidth, host.height / MonitorDesignHeight);
+            float s = Mathf.Max(host.width / MonitorDesignWidth, host.height / MonitorDesignHeight);
             if (s <= 0f)
             {
                 return;
@@ -2670,6 +2676,17 @@ namespace NailongFNAF.UI
             if (_monitorArea.localScale != scale)
             {
                 _monitorArea.localScale = scale;
+            }
+
+            // 铺满后多出来的高度**从上方裁掉**：底边贴着窗口底边。
+            // 不然宽窗口下裁掉的是地板 —— 敌人本来就站在画面下部，会整个人看不见。
+            float overflow = MonitorDesignHeight * s - host.height;
+            float y = overflow > 0f ? -overflow * 0.5f : 0f;
+
+            var pos = new Vector2(0f, y);
+            if (_monitorArea.anchoredPosition != pos)
+            {
+                _monitorArea.anchoredPosition = pos;
             }
         }
 
@@ -5124,9 +5141,9 @@ namespace NailongFNAF.UI
 
             // 1.5) 16:9 设计区 —— 监控画面的一切都挂在这下面。
             //
-            // **固定 1920×1080 设计像素**，再按窗口等比缩放（见 UpdateMonitorAreaScale）。
+            // **固定 1920×1080 设计像素**，再按窗口等比缩放铺满（见 UpdateMonitorAreaScale）。
             // 这样编辑器预览里的「归一化坐标 / 设计像素」和运行时是同一套，
-            // 摆多大就是多大；窗口不是 16:9 时两侧留黑，而不是把画面拉扁。
+            // 摆多大就是多大；窗口不是 16:9 时裁掉多出来的边，而不是把画面拉扁。
             var areaGo = new GameObject("MonitorArea", typeof(RectTransform));
             areaGo.transform.SetParent(_monitorOverlay.transform, false);
 
