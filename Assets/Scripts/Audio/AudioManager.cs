@@ -40,6 +40,13 @@ namespace NailongFNAF.Audio
         [SerializeField] private AudioClip _sfxLightOff;
         [SerializeField] private AudioClip _sfxCameraSwitch;
         [SerializeField] private AudioClip _sfxFootstep;
+
+        /// <summary>
+        /// 左右脚各一条 —— 交替播才有「有人在走过来」的方位感。
+        /// 单声道一条重复放会像节拍器，玩家很快听腻。
+        /// </summary>
+        [SerializeField] private AudioClip _sfxFootstepLeft;
+        [SerializeField] private AudioClip _sfxFootstepRight;
         [SerializeField] private AudioClip _sfxPowerOut;
 
         /// <summary>
@@ -80,6 +87,13 @@ namespace NailongFNAF.Audio
         private AudioSource _sfx;
         private AudioSource _music;
 
+        /// <summary>
+        /// 脚步专用通道 —— 和主音效分开。
+        /// 脚步声一局要响几百次，而且必须能和门 / 灯 / 提示音**同时**响，
+        /// 共用主通道会互相掐断。
+        /// </summary>
+        private AudioSource _footstepSource;
+
         private void Awake()
         {
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
@@ -91,6 +105,7 @@ namespace NailongFNAF.Audio
 
             _sfx = CreateSource("Sfx", false, _sfxVolume);
             _music = CreateSource("PowerOutMusic", false, _musicVolume);
+            _footstepSource = CreateSource("Footstep", false, _sfxVolume);
 
             PlayLoop(_ambientA, _ambFan);
             PlayLoop(_ambientB, _ambHum);
@@ -204,6 +219,34 @@ namespace NailongFNAF.Audio
             Play(_sfxFootstep);
         }
 
+        /// <summary>
+        /// 播一声脚步。<paramref name="rightFoot"/> 决定左右脚，
+        /// <paramref name="volumeScale"/> 按距离缩放（1 = 就在门口）。
+        ///
+        /// 走**独立通道** + PlayOneShot：脚步声要能和门 / 灯 / 提示音叠在一起，
+        /// 共用主通道会把正在响的音效掐掉。
+        /// </summary>
+        public void PlayFootstep(bool rightFoot, float volumeScale)
+        {
+            AudioClip clip = rightFoot ? _sfxFootstepRight : _sfxFootstepLeft;
+
+            // 新素材缺失时退回原来那条单声道，不至于完全没声
+            if (clip == null)
+            {
+                clip = _sfxFootstep;
+            }
+
+            if (clip == null || _footstepSource == null)
+            {
+                return;
+            }
+
+            if (volumeScale < 0f) { volumeScale = 0f; }
+            if (volumeScale > 1f) { volumeScale = 1f; }
+
+            _footstepSource.PlayOneShot(clip, _sfxVolume * volumeScale);
+        }
+
         public void PlayPowerOut()
         {
             Play(_sfxPowerOut);
@@ -259,11 +302,14 @@ namespace NailongFNAF.Audio
             AudioClip doorClose, AudioClip doorOpen,
             AudioClip lightOn, AudioClip lightOff,
             AudioClip cameraSwitch, AudioClip footstep, AudioClip powerOut,
-            AudioClip powerOutMusic, AudioClip ambDistant = null)
+            AudioClip powerOutMusic, AudioClip ambDistant = null,
+            AudioClip footstepLeft = null, AudioClip footstepRight = null)
         {
             _ambFan = ambFan;
             _ambHum = ambHum;
             _ambDistant = ambDistant;
+            _sfxFootstepLeft = footstepLeft;
+            _sfxFootstepRight = footstepRight;
             _sfxDoorClose = doorClose;
             _sfxDoorOpen = doorOpen;
             _sfxLightOn = lightOn;

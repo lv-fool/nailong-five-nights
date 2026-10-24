@@ -79,7 +79,10 @@ namespace NailongFNAF.EditorTools
                 // 素材：用户给的「随机细碎音」3.91 秒 —— 一堆零碎的响动，
                 // 比原来那声金属撞击更像「楼里有东西在动」。
                 // 前面 2.8 秒是主体，尾巴自然衰减到静，所以整条直接用，没裁。
-                LoadClip("Assets/Audio/Ambient/amb_distant_metal_once.mp3"));
+                LoadClip("Assets/Audio/Ambient/amb_distant_metal_once.mp3"),
+                // 左右脚各一条 —— 交替播才有「有人在走过来」的方位感
+                LoadClip("Assets/Audio/SFX/sfx_footstep_left.mp3"),
+                LoadClip("Assets/Audio/SFX/sfx_footstep_right.mp3"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);

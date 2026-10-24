@@ -3424,20 +3424,161 @@ namespace NailongFNAF.UI
                 _musicPlaying = false;
             }
 
-            if (gm.HasBeenCaught || _enemyDirector == null || !AnyEnemyNearby())
+            if (gm.HasBeenCaught || _enemyDirector == null)
             {
                 _footstepTimer = 0f;
+                _footstepLeft = 0;
                 return;
             }
 
-            // 有敌人在走廊或更近的位置 —— 按不规则的间隔传出脚步
-            _footstepTimer -= Time.deltaTime;
-            if (_footstepTimer <= 0f)
-            {
-                _audio.PlayFootstep();
-                _footstepTimer = Random.Range(0.7f, 1.5f);
-            }
+            UpdateFootsteps();
         }
+
+        // ── 脚步 ────────────────────────────────────────────────────
+        //
+        // 规则（用户 2026-10-24 定）：
+        //   · 敌人离 YOU 越近，脚步越响
+        //   · 每次「靠近或离开」触发一串 **2~4 步**
+        //   · 左右脚**交替**（有方位感，不像节拍器）
+        //   · 每串之间隔一会儿再响
+        //
+        // 「靠近或离开」= 某只敌人的 Stage 变了（换房间 / 走向门口 / 退走）。
+        // 不去算欧氏距离 —— 敌人本来就在固定的机位路径上，Stage 就是距离。
+
+        /// <summary>还差几步放完（0 = 这一串走完了）。</summary>
+        private int _footstepLeft;
+
+        /// <summary>下一声的脚步时刻（Time.time）。</summary>
+        private float _footstepNextAt;
+
+        /// <summary>true = 下一步是右脚。</summary>
+        private bool _footstepRightFoot;
+
+        /// <summary>上一次看到的「最近敌人距离」，用来检测靠近 / 离开。</summary>
+        private float _lastNearestDistance = -1f;
+
+        /// <summary>一串脚步之间的最短间隔（秒）。</summary>
+        private const float FootstepBurstMinGap = 0.9f;
+        private const float FootstepBurstMaxGap = 2.2f;
+
+        /// <summary>相邻两步之间隔多久（秒）—— 走路的速度感。</summary>
+        private const float FootstepStepGap = 0.42f;
+
+        /// <summary>
+        /// 敌人「离 YOU 多远」：0 = 刚到走廊、1 = 站在门口。
+        /// 取所有敌人里**最近**的那只 —— 玩家听到的是最近那个人的脚步。
+        /// 没有敌人在动时返回 -1。
+        /// </summary>
+        private float NearestEnemyDistance()
+        {
+            if (_enemyDirector == null)
+            {
+                return -1f;
+            }
+
+            float nearest = -1f;
+
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                int max = brain.MaxStage;
+                if (max <= 0)
+                {
+                    continue;
+                }
+
+                // Stage 0 = 出生地（很远），Stage = MaxStage = 门口（最近）
+                float d = brain.Stage / (float)max;
+                if (d < 0f) { d = 0f; }
+                if (d > 1f) { d = 1f; }
+
+                if (d > nearest)
+                {
+                    nearest = d;
+                }
+            }
+
+            return nearest;
+        }
+
+        private void UpdateFootsteps()
+        {
+            float distance = NearestEnemyDistance();
+
+            // 太远就不该听见 —— 低于这个门槛一律静音
+            const float AudibleFrom = 0.34f;
+
+            // ── 正在放一串 ──
+            if (_footstepLeft > 0)
+            {
+                if (Time.time < _footstepNextAt)
+                {
+                    return;
+                }
+
+                EmitFootstep(distance);
+                _footstepLeft--;
+
+                if (_footstepLeft > 0)
+                {
+                    _footstepNextAt = Time.time + FootstepStepGap;
+                }
+                else
+                {
+                    // 这一串走完，歇一会儿
+                    _footstepNextAt = Time.time + Random.Range(FootstepBurstMinGap, FootstepBurstMaxGap);
+                    _footstepTimer = _footstepNextAt - Time.time;
+                }
+
+                _lastNearestDistance = distance;
+                return;
+            }
+
+            // ── 不在放：有空档才能起新的一串 ──
+            if (Time.time < _footstepNextAt)
+            {
+                _lastNearestDistance = distance;
+                return;
+            }
+
+            // ── 判断「靠近或离开」──
+            bool moved = _lastNearestDistance >= 0f
+                && Mathf.Abs(distance - _lastNearestDistance) > 0.01f;
+
+            _lastNearestDistance = distance;
+
+            if (!moved || distance < AudibleFrom)
+            {
+                return;
+            }
+
+            // 起一串：2~4 步，第一步随机左右
+            _footstepLeft = Random.Range(2, 5);
+            _footstepRightFoot = Random.value < 0.5f;
+            EmitFootstep(distance);
+            _footstepLeft--;
+            _footstepNextAt = Time.time + FootstepStepGap;
+        }
+
+        /// <summary>
+        /// 放一声脚步。**响度随距离线性上升**：
+        /// 刚进走廊时几乎听不见（0.15），站到门口就是满音量。
+        /// </summary>
+        private void EmitFootstep(float distance)
+        {
+            if (_audio == null)
+            {
+                return;
+            }
+
+            float volume = Mathf.Lerp(0.15f, 1f, Mathf.Clamp01(distance));
+
+            _audio.PlayFootstep(_footstepRightFoot, volume);
+
+            // 交替
+            _footstepRightFoot = !_footstepRightFoot;
+        }
+
+        /// <summary>（旧的「附近就无规则响」判据，保留给别处用）</summary>
 
         /// <summary>
         /// 音乐盒只在断电演出的音乐段响。它一停，画面就该彻底黑下去 ——
