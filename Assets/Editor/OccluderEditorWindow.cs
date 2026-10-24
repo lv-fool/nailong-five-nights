@@ -39,7 +39,8 @@ namespace NailongFNAF.EditorTools
         {
             Occluders,
             Enemies,
-            Background
+            Background,
+            Stickers
         }
 
         private static readonly string[] RoomNames =
@@ -386,8 +387,9 @@ namespace NailongFNAF.EditorTools
                 bool hasBg = Mathf.Abs(r.bgX) > 0.01f
                              || Mathf.Abs(r.bgY) > 0.01f
                              || Mathf.Abs(r.bgScale - 1f) > 0.001f;
+                bool hasStickers = r.stickers != null && r.stickers.Length > 0;
 
-                if (!hasPoints && !hasBg)
+                if (!hasPoints && !hasBg && !hasStickers)
                 {
                     continue;
                 }
@@ -466,6 +468,9 @@ namespace NailongFNAF.EditorTools
                 case Mode.Enemies:
                     DrawEnemyPoints(rect);
                     break;
+                case Mode.Stickers:
+                    DrawStickers(rect);
+                    break;
                 default:
                     DrawShapes(rect);
                     DrawCurrent(rect);
@@ -473,8 +478,114 @@ namespace NailongFNAF.EditorTools
                     break;
             }
 
+            // 贴图模式：右侧的编辑面板（加 / 删 / 宽度 / 旋转 / 透明度）
+            if (_mode == Mode.Stickers)
+            {
+                DrawStickerPanel();
+            }
+
             HandleInput(rect);
             DrawFooter();
+        }
+
+        /// <summary>
+        /// 贴图模式的编辑面板：加一张 / 删掉选中的 / 调宽度、旋转、透明度。
+        ///
+        /// 位置靠**拖动画面上的画**来改 —— 这里只管那些拖不出来的属性。
+        /// </summary>
+        private void DrawStickerPanel()
+        {
+            if (_stickerImages.Length == 0)
+            {
+                RefreshStickerImages();
+            }
+
+            var stickers = StickersOf(_room);
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("贴图（" + RoomNames[_room] + "）", EditorStyles.boldLabel);
+
+            // ── 加一张 ──
+            EditorGUILayout.BeginHorizontal();
+
+            if (_stickerImages.Length == 0)
+            {
+                EditorGUILayout.HelpBox("Assets/Resources/Posters 里没有图片", MessageType.Warning);
+            }
+            else
+            {
+                for (int i = 0; i < _stickerImages.Length; i++)
+                {
+                    string shortName = _stickerImages[i].Replace("Posters/", string.Empty);
+
+                    if (GUILayout.Button(shortName, GUILayout.Width(76f)))
+                    {
+                        var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
+                        list.Add(new LayoutSticker
+                        {
+                            image = _stickerImages[i],
+                            x = 0.5f,
+                            y = 0.5f,
+                            width = 0.18f,
+                            rotation = 0f,
+                            alpha = 1f
+                        });
+
+                        Layout(_room).stickers = list.ToArray();
+                        _selSticker = list.Count - 1;
+                        _dirty = true;
+                        GUI.FocusControl(null);
+                        return;
+                    }
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            if (GUILayout.Button("刷新图片列表", GUILayout.Width(110f)))
+            {
+                RefreshStickerImages();
+                return;
+            }
+
+            if (_selSticker < 0 || _selSticker >= stickers.Length)
+            {
+                EditorGUILayout.LabelField("（点画面上的画来选中）", EditorStyles.miniLabel);
+                return;
+            }
+
+            var st = stickers[_selSticker];
+
+            if (st == null)
+            {
+                return;
+            }
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("选中：" + st.image, EditorStyles.boldLabel);
+
+            float w = EditorGUILayout.Slider("宽度", st.width, 0.02f, 1.2f);
+            if (!Mathf.Approximately(w, st.width)) { st.width = w; _dirty = true; }
+
+            float rot = EditorGUILayout.Slider("旋转", st.rotation, -180f, 180f);
+            if (!Mathf.Approximately(rot, st.rotation)) { st.rotation = rot; _dirty = true; }
+
+            float a = EditorGUILayout.Slider("透明度", st.alpha, 0f, 1f);
+            if (!Mathf.Approximately(a, st.alpha)) { st.alpha = a; _dirty = true; }
+
+            EditorGUILayout.LabelField(
+                "位置 " + st.x.ToString("F3") + ", " + st.y.ToString("F3") + "（拖动画面上的画改）",
+                EditorStyles.miniLabel);
+
+            if (GUILayout.Button("删掉这张", GUILayout.Width(110f)))
+            {
+                var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
+                list.RemoveAt(_selSticker);
+                Layout(_room).stickers = list.ToArray();
+                _selSticker = -1;
+                _dirty = true;
+                GUI.FocusControl(null);
+            }
         }
 
         /// <summary>
@@ -538,6 +649,12 @@ namespace NailongFNAF.EditorTools
                     EditorStyles.toolbarButton, GUILayout.Width(62f)))
             {
                 SwitchMode(Mode.Background);
+            }
+
+            if (GUILayout.Toggle(_mode == Mode.Stickers, "贴图",
+                    EditorStyles.toolbarButton, GUILayout.Width(50f)))
+            {
+                SwitchMode(Mode.Stickers);
             }
 
             GUILayout.Space(10f);
@@ -1033,6 +1150,225 @@ namespace NailongFNAF.EditorTools
 
             float total = slotScale * tierScale * manual;
             return new Vector2(w * total, h * total);
+        }
+
+        // ── 贴图模式 ──────────────────────────────────────────────
+        //
+        // 在监控画面上自由摆插画（墙上海报 / 涂鸦 / 警示牌）。
+        // 坐标是归一化 0..1、左下原点 —— 和底图 / 敌人点位同一套，
+        // 拖完直接就是运行时的位置，不用换算。
+
+        /// <summary>Resources/Posters 下可用的贴图（下拉框用）。</summary>
+        private string[] _stickerImages = new string[0];
+
+        /// <summary>当前选中的贴图下标（-1 = 没选）。</summary>
+        private int _selSticker = -1;
+
+        /// <summary>拖动中的状态。</summary>
+        private int _dragSticker = -1;
+        private Vector2 _dragStartNorm;
+        private float _dragStartX;
+        private float _dragStartY;
+
+        private void RefreshStickerImages()
+        {
+            var names = new System.Collections.Generic.List<string>();
+
+            const string dir = "Assets/Resources/Posters";
+
+            if (Directory.Exists(dir))
+            {
+                foreach (var path in Directory.GetFiles(dir))
+                {
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
+
+                    if (ext == ".jpg" || ext == ".jpeg" || ext == ".png")
+                    {
+                        names.Add("Posters/" + Path.GetFileNameWithoutExtension(path));
+                    }
+                }
+            }
+
+            names.Sort();
+            _stickerImages = names.ToArray();
+        }
+
+        /// <summary>当前机位的贴图数组（不存在就建一个空的）。</summary>
+        private LayoutSticker[] StickersOf(int room)
+        {
+            var r = Layout(room);
+
+            if (r.stickers == null)
+            {
+                r.stickers = new LayoutSticker[0];
+            }
+
+            return r.stickers;
+        }
+
+        private void DrawStickers(Rect r)
+        {
+            var stickers = StickersOf(_room);
+
+            for (int i = 0; i < stickers.Length; i++)
+            {
+                var st = stickers[i];
+
+                if (st == null || string.IsNullOrEmpty(st.image))
+                {
+                    continue;
+                }
+
+                Texture2D tex = StickerTexture(st.image);
+
+                // 归一化 → GUI 矩形（左下滑到左上：y 要翻）
+                float w = st.width * r.width;
+                float aspect = tex != null ? tex.height / (float)tex.width : 1f;
+                float h = w * aspect;
+
+                float cx = r.x + st.x * r.width;
+                float cy = r.y + (1f - st.y) * r.height;
+
+                var box = new Rect(cx - w * 0.5f, cy - h * 0.5f, w, h);
+
+                bool sel = i == _selSticker;
+
+                if (tex != null)
+                {
+                    var old = GUI.color;
+                    GUI.color = new Color(1f, 1f, 1f, sel ? 1f : 0.75f * st.alpha);
+                    GUI.DrawTexture(box, tex, ScaleMode.ScaleToFit, true);
+                    GUI.color = old;
+                }
+                else
+                {
+                    // 贴图缺失：画个红框占位，一眼看得出该补哪张
+                    EditorGUI.DrawRect(box, new Color(0.6f, 0.2f, 0.2f, 0.35f));
+                }
+
+                Handles.color = sel ? Color.yellow : new Color(1f, 1f, 1f, 0.5f);
+                Handles.DrawWireDisc(new Vector3(cx, cy, 0f), Vector3.forward, 6f);
+
+                if (sel)
+                {
+                    Handles.DrawWireCube(new Vector3(box.center.x, box.center.y, 0f),
+                        new Vector3(box.width, box.height, 0f));
+                }
+            }
+
+            HandleStickerInput(r, stickers);
+
+            // 提示条
+            var style = new GUIStyle(EditorStyles.miniLabel);
+            style.normal.textColor = new Color(0.8f, 0.85f, 0.9f);
+            GUI.Label(new Rect(r.x + 8f, r.yMax + 4f, r.width, 18f),
+                "贴图模式：拖动画 = 移动位置；选中后用右侧面板调宽度 / 旋转 / 透明度。"
+                + "  共 " + stickers.Length + " 张",
+                style);
+        }
+
+        /// <summary>贴图模式的鼠标交互：点选 + 拖动。</summary>
+        private void HandleStickerInput(Rect r, LayoutSticker[] stickers)
+        {
+            Event e = Event.current;
+
+            if (e == null)
+            {
+                return;
+            }
+
+            if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
+            {
+                // 从后往前找（后画的在上层）
+                int hit = -1;
+
+                for (int i = stickers.Length - 1; i >= 0; i--)
+                {
+                    var st = stickers[i];
+
+                    if (st == null || string.IsNullOrEmpty(st.image))
+                    {
+                        continue;
+                    }
+
+                    float w = st.width * r.width;
+                    Texture2D tex = StickerTexture(st.image);
+                    float aspect = tex != null ? tex.height / (float)tex.width : 1f;
+                    float h = w * aspect;
+
+                    float cx = r.x + st.x * r.width;
+                    float cy = r.y + (1f - st.y) * r.height;
+
+                    var box = new Rect(cx - w * 0.5f, cy - h * 0.5f, w, h);
+
+                    if (box.Contains(e.mousePosition))
+                    {
+                        hit = i;
+                        break;
+                    }
+                }
+
+                _selSticker = hit;
+
+                if (hit >= 0)
+                {
+                    _dragSticker = hit;
+                    _dragStartNorm = ToNorm(r, e.mousePosition);
+                    _dragStartX = stickers[hit].x;
+                    _dragStartY = stickers[hit].y;
+                }
+
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseDrag && _dragSticker >= 0
+                     && _dragSticker < stickers.Length)
+            {
+                Vector2 now = ToNorm(r, e.mousePosition);
+                Vector2 delta = now - _dragStartNorm;
+
+                var st = stickers[_dragSticker];
+                st.x = Mathf.Clamp01(_dragStartX + delta.x);
+                st.y = Mathf.Clamp01(_dragStartY + delta.y);
+
+                _dirty = true;
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseUp)
+            {
+                _dragSticker = -1;
+            }
+        }
+
+        /// <summary>贴图缓存：Resources 路径 → Texture2D。</summary>
+        private readonly System.Collections.Generic.Dictionary<string, Texture2D> _stickerTexCache =
+            new System.Collections.Generic.Dictionary<string, Texture2D>();
+
+        private Texture2D StickerTexture(string resourcesPath)
+        {
+            if (string.IsNullOrEmpty(resourcesPath))
+            {
+                return null;
+            }
+
+            Texture2D cached;
+            if (_stickerTexCache.TryGetValue(resourcesPath, out cached))
+            {
+                return cached;
+            }
+
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/Resources/" + resourcesPath + ".jpg");
+
+            if (tex == null)
+            {
+                tex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    "Assets/Resources/" + resourcesPath + ".png");
+            }
+
+            _stickerTexCache[resourcesPath] = tex;
+            return tex;
         }
 
         private void DrawEnemyPoints(Rect r)
@@ -1818,6 +2154,31 @@ namespace NailongFNAF.EditorTools
             public float bgY;
             public float bgScale = 1f;
             public LayoutPoint[] points;
+
+            /// <summary>贴在这一机位上的插画（墙上海报 / 涂鸦 / 警示牌）。</summary>
+            public LayoutSticker[] stickers;
+        }
+
+        /// <summary>
+        /// 一张插画：归一化坐标（0..1，左下原点）+ 宽度比例 + 旋转 + 透明度。
+        /// 和运行时 PrototypeScene.MonitorSticker 一一对应。
+        /// </summary>
+        [System.Serializable]
+        private class LayoutSticker
+        {
+            /// <summary>Resources 里的路径（不带扩展名），如 "Posters/poster_01"。</summary>
+            public string image;
+
+            public float x = 0.5f;
+            public float y = 0.5f;
+
+            /// <summary>宽度占画面宽度的比例（高度按原图比例算）。</summary>
+            public float width = 0.2f;
+
+            /// <summary>绕自身中心的旋转角（度，逆时针）。</summary>
+            public float rotation;
+
+            public float alpha = 1f;
         }
 
         [System.Serializable]

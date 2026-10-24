@@ -2484,6 +2484,39 @@ namespace NailongFNAF.UI
             public float bgScale = 1f;
 
             public MonitorPoint[] points;
+
+            /// <summary>
+            /// 这一机位上贴的插画（墙上海报、涂鸦、警示牌…）。
+            /// 由编辑器「奶龙 / 6. 监控画面编辑器」的**贴图**模式摆出来。
+            /// </summary>
+            public MonitorSticker[] stickers;
+        }
+
+        /// <summary>
+        /// 贴在监控画面上的**一张插画** —— 归一化坐标（0..1，左下原点），
+        /// 和底图 / 敌人点位同一套坐标系，编辑器里拖完直接就是运行时位置。
+        /// </summary>
+        [System.Serializable]
+        private class MonitorSticker
+        {
+            /// <summary>
+            /// Resources 里的贴图路径（不带扩展名）—— 相对 Assets/Resources/。
+            /// 例如 "Posters/poster_01"。
+            /// </summary>
+            public string image;
+
+            /// <summary>中心点归一化坐标（0..1，左下原点）。</summary>
+            public float x = 0.5f;
+            public float y = 0.5f;
+
+            /// <summary>宽度占画面宽度的比例（高度按原图比例算）。</summary>
+            public float width = 0.2f;
+
+            /// <summary>绕自身中心的旋转角（度，逆时针）。</summary>
+            public float rotation;
+
+            /// <summary>不透明度 0..1。</summary>
+            public float alpha = 1f;
         }
 
         [System.Serializable]
@@ -2576,9 +2609,11 @@ namespace NailongFNAF.UI
 
             var rt = _monitorFrame.rectTransform;
 
-            MonitorLayoutRoom room;
-            if (_monitorLayout != null && _monitorLayout.TryGetValue(cameraIndex, out room) && room != null)
+            MonitorLayoutRoom room = null;
+            if (_monitorLayout != null && _monitorLayout.TryGetValue(cameraIndex, out MonitorLayoutRoom found)
+                && found != null)
             {
+                room = found;
                 float s = room.bgScale <= 0.01f ? 1f : room.bgScale;
                 rt.anchoredPosition = new Vector2(room.bgX, room.bgY);
                 rt.localScale = new Vector3(s, s, 1f);
@@ -2588,6 +2623,144 @@ namespace NailongFNAF.UI
                 rt.anchoredPosition = Vector2.zero;
                 rt.localScale = Vector3.one;
             }
+
+            ApplyMonitorStickers(room);
+        }
+
+        // ---------------- 监控画面上的插画（贴图）----------------
+
+        /// <summary>
+        /// 每个机位一组贴图层；切机位时整组换掉。
+        /// 不复用单个 Image 是因为一屏可能要贴好几张（墙上海报 + 涂鸦 + 警示牌）。
+        /// </summary>
+        private readonly System.Collections.Generic.List<Image> _stickerPool =
+            new System.Collections.Generic.List<Image>();
+
+        /// <summary>贴图挂在哪个父物体下（监控画面那一层，跟着画面一起缩放）。</summary>
+        private RectTransform _stickerRoot;
+
+        /// <summary>
+        /// 把某个机位上配的插画摆上去。
+        ///
+        /// 坐标和底图 / 敌人点位同一套：归一化 0..1、**左下原点**。
+        /// 没配就整组隐藏，不报错。
+        /// </summary>
+        private void ApplyMonitorStickers(MonitorLayoutRoom room)
+        {
+            if (_stickerRoot == null)
+            {
+                return;
+            }
+
+            var stickers = room != null ? room.stickers : null;
+            int count = stickers != null ? stickers.Length : 0;
+
+            // 池子不够就补
+            while (_stickerPool.Count < count)
+            {
+                var go = new GameObject("Sticker", typeof(RectTransform), typeof(Image));
+                go.transform.SetParent(_stickerRoot, false);
+
+                var image = go.GetComponent<Image>();
+                image.raycastTarget = false;
+                image.preserveAspect = true;
+
+                _stickerPool.Add(image);
+            }
+
+            RectTransform host = _stickerRoot;
+            float hostW = host != null ? host.rect.width : 0f;
+            float hostH = host != null ? host.rect.height : 0f;
+
+            for (int i = 0; i < _stickerPool.Count; i++)
+            {
+                var image = _stickerPool[i];
+
+                if (i >= count || stickers[i] == null || string.IsNullOrEmpty(stickers[i].image))
+                {
+                    if (image.gameObject.activeSelf)
+                    {
+                        image.gameObject.SetActive(false);
+                    }
+
+                    continue;
+                }
+
+                var st = stickers[i];
+
+                // 贴图按需加载并缓存 —— 同一个文件可能贴在多个机位上
+                Sprite sprite = LoadStickerSprite(st.image);
+                if (sprite == null)
+                {
+                    image.gameObject.SetActive(false);
+                    continue;
+                }
+
+                if (!image.gameObject.activeSelf)
+                {
+                    image.gameObject.SetActive(true);
+                }
+
+                image.sprite = sprite;
+                image.color = new Color(1f, 1f, 1f, Mathf.Clamp01(st.alpha));
+
+                var rt = image.rectTransform;
+
+                // 宽 = 画面宽 × 比例；高按原图比例
+                float w = hostW * Mathf.Max(0.01f, st.width);
+                float aspect = sprite.rect.height / Mathf.Max(1f, sprite.rect.width);
+                float h = w * aspect;
+
+                rt.sizeDelta = new Vector2(w, h);
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(0f, 0f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+
+                // 归一化 → 画面本地像素（左下原点 → 中心原点）
+                rt.anchoredPosition = new Vector2(
+                    st.x * hostW - hostW * 0.5f,
+                    st.y * hostH - hostH * 0.5f);
+
+                rt.localRotation = Quaternion.Euler(0f, 0f, st.rotation);
+            }
+        }
+
+        /// <summary>贴图缓存：Resources 路径 → Sprite。</summary>
+        private readonly System.Collections.Generic.Dictionary<string, Sprite> _stickerSprites =
+            new System.Collections.Generic.Dictionary<string, Sprite>();
+
+        /// <summary>
+        /// 载入一张贴图。<c>image</c> 是相对 Assets/Resources/ 的路径（不带扩展名），
+        /// 例如 "Posters/poster_01"。
+        ///
+        /// ⚠️ 用 <c>Resources.Load&lt;Texture2D&gt;</c> 而不是 Load&lt;Sprite&gt; ——
+        /// 这些 jpg 是按普通贴图导入的，没有 Sprite 元数据，直接 Load&lt;Sprite&gt; 会拿到 null。
+        /// </summary>
+        private Sprite LoadStickerSprite(string image)
+        {
+            if (string.IsNullOrEmpty(image))
+            {
+                return null;
+            }
+
+            Sprite cached;
+            if (_stickerSprites.TryGetValue(image, out cached))
+            {
+                return cached;
+            }
+
+            var texture = Resources.Load<Texture2D>(image);
+            Sprite sprite = null;
+
+            if (texture != null)
+            {
+                sprite = Sprite.Create(texture,
+                    new Rect(0f, 0f, texture.width, texture.height),
+                    new Vector2(0.5f, 0.5f), 100f);
+            }
+
+            _stickerSprites[image] = sprite;
+            return sprite;
         }
 
         /// <summary>多边形遮罩纹理缓存（按机位）。</summary>
@@ -4854,6 +5027,15 @@ namespace NailongFNAF.UI
             _monitorFrame.transform.SetParent(_monitorOverlay.transform, false);
             StretchToParent(_monitorFrame.rectTransform);
             _monitorFrame.transform.SetSiblingIndex(1);
+
+            // 2.5) 贴图层：墙上海报 / 涂鸦 / 警示牌 —— **在底图之上、敌人之下**。
+            //      跟着底图那层一起，但不参与它的缩放（贴图自己有归一化坐标）。
+            var stickerGo = new GameObject("MonitorStickers", typeof(RectTransform));
+            stickerGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _stickerRoot = stickerGo.GetComponent<RectTransform>();
+            StretchToParent(_stickerRoot);
+            stickerGo.transform.SetSiblingIndex(2);
 
             _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1B",
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
