@@ -26,6 +26,18 @@ namespace NailongFNAF.UI
         /// </summary>
         private Texture _texture;
 
+        /// <summary>
+        /// 覆盖 Graphic.mainTexture —— UGUI 渲染时读的是**这个属性**，
+        /// 不是 material.mainTexture。
+        ///
+        /// 默认实现返回 s_WhiteTexture，所以只设 material.mainTexture 的话
+        /// 画面依然是一片白（踩过）。
+        /// </summary>
+        public override Texture mainTexture
+        {
+            get { return _texture != null ? _texture : s_WhiteTexture; }
+        }
+
         public Texture Texture
         {
             get { return _texture; }
