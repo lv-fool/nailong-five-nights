@@ -2678,10 +2678,12 @@ namespace NailongFNAF.UI
                 _monitorArea.localScale = scale;
             }
 
-            // 铺满后多出来的高度**从上方裁掉**：底边贴着窗口底边。
-            // 不然宽窗口下裁掉的是地板 —— 敌人本来就站在画面下部，会整个人看不见。
+            // 铺满后多出来的高度**从上方裁掉**：把设计区整体**往上抬** overflow/2，
+            // 底边正好贴住窗口底边（UI 的 y 朝上，抬 = 正的 anchoredPosition.y）。
+            // 反了就变成裁地板 —— 敌人本来就站在画面下部，会整个人看不见
+            // （2026-10-24 绿子：「弄反了，下面的看不见了」）。
             float overflow = MonitorDesignHeight * s - host.height;
-            float y = overflow > 0f ? -overflow * 0.5f : 0f;
+            float y = overflow > 0f ? overflow * 0.5f : 0f;
 
             var pos = new Vector2(0f, y);
             if (_monitorArea.anchoredPosition != pos)
