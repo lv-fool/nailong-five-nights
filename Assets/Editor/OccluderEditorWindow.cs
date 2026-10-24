@@ -499,11 +499,26 @@ namespace NailongFNAF.EditorTools
                 // DrawStickerPanel 内部有几处提前 return（没选中、贴图缺失…），
                 // 那些 return 会跳过 EndArea，Unity 抛
                 // "Invalid GUILayout state" 之后**整个窗口的按钮都点不动**。
+                //
+                // 外面再包一层**滚动视图**：面板内容（网格 + 属性行 + 按钮）
+                // 加起来通常比面板区高，不给滚动的话下半截直接被裁掉看不见。
+                // 面板内的「加一张」网格因此改成**不滚动**（只靠这一层），
+                // 避免滚动区套滚动区。
                 GUILayout.BeginArea(panelRect);
 
                 try
                 {
-                    DrawStickerPanel();
+                    _stickerPanelScroll = EditorGUILayout.BeginScrollView(
+                        _stickerPanelScroll, false, true);
+
+                    try
+                    {
+                        DrawStickerPanel();
+                    }
+                    finally
+                    {
+                        EditorGUILayout.EndScrollView();
+                    }
                 }
                 finally
                 {
@@ -627,9 +642,9 @@ namespace NailongFNAF.EditorTools
                 GUILayout.Label("加一张（" + _stickerImages.Length + " 张可用）",
                     EditorStyles.miniBoldLabel);
 
-                // 网格滚动区：固定高度，避免把下面的属性面板顶出屏幕
-                _stickerPickScroll = EditorGUILayout.BeginScrollView(
-                    _stickerPickScroll, GUILayout.Height(140f));
+                // ⚠️ 这里**不再自己滚** —— 外层面板已经套了一个滚动视图，
+                // 滚动区套滚动区在 Unity 里容易出问题。
+                // 网格该多高就多高，由外层统一滚。
 
                 const int PerRow = 4;
                 const float CellW = 92f;
@@ -672,9 +687,7 @@ namespace NailongFNAF.EditorTools
                     EditorGUILayout.EndHorizontal();
                 }
 
-                EditorGUILayout.EndScrollView();
-
-                // 滚动区已经闭合，这里再处理点击 —— 布局状态是干净的
+                // 网格已经画完，这里再处理点击
                 if (clicked != null)
                 {
                     AddSticker(clicked, stickers);
