@@ -1167,6 +1167,51 @@ namespace NailongFNAF.UI
             return true;
         }
 
+        // ── 监控雪花噪点（切机位的一瞬炸一下）──
+
+        /// <summary>噪点材质（程序化 shader，无贴图依赖）。</summary>
+        private Material _staticMaterial;
+
+        /// <summary>当前噪点强度（0 = 画面正常）。</summary>
+        private float _staticStrength;
+
+        /// <summary>噪点完全平息所需秒数。</summary>
+        private const float StaticFadeSeconds = 0.28f;
+
+        /// <summary>噪点覆盖层（全屏 RawImage，盖在画面框之上）。</summary>
+        private UnityEngine.UI.RawImage _staticOverlay;
+
+        /// <summary>
+        /// 切机位的一瞬把噪点拉满，之后随时间衰减。
+        /// 平时也可以偶尔来一下（低概率），让玩家不敢盯着发呆。
+        /// </summary>
+        private void BurstStatic(float strength)
+        {
+            _staticStrength = Mathf.Max(_staticStrength, Mathf.Clamp01(strength));
+        }
+
+        /// <summary>每帧衰减噪点强度并写进材质。</summary>
+        private void UpdateStatic()
+        {
+            if (_staticOverlay == null)
+            {
+                return;
+            }
+
+            if (_staticStrength > 0f)
+            {
+                _staticStrength = Mathf.MoveTowards(
+                    _staticStrength, 0f, Time.unscaledDeltaTime / StaticFadeSeconds);
+
+                _staticOverlay.enabled = true;
+                _staticMaterial.SetFloat("_Strength", _staticStrength);
+            }
+            else if (_staticOverlay.enabled)
+            {
+                _staticOverlay.enabled = false;
+            }
+        }
+
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
         private void HandleMonitorHotspot(GameManager gm)
         {
@@ -1230,9 +1275,15 @@ namespace NailongFNAF.UI
             int before = gm.CurrentCameraIndex;
             gm.SetCamera(index);
 
-            if (_audio != null && gm.CurrentCameraIndex != before)
+            if (gm.CurrentCameraIndex != before)
             {
-                _audio.PlayCameraSwitch();
+                if (_audio != null)
+                {
+                    _audio.PlayCameraSwitch();
+                }
+
+                // 切机位的一瞬：雪花炸满屏，然后衰减平息（0.28 秒）
+                BurstStatic(1f);
             }
         }
 
@@ -1329,6 +1380,7 @@ namespace NailongFNAF.UI
             }
 
             UpdateMonitorBlur(monitorUp);
+            UpdateStatic();
 
             _monitorOverlay.gameObject.SetActive(monitorUp || animating);
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
@@ -5430,6 +5482,29 @@ namespace NailongFNAF.UI
             // **固定 1920×1080 设计像素**，再按窗口等比缩放（见 UpdateMonitorAreaScale）。
             // 这样编辑器预览里的「归一化坐标 / 设计像素」和运行时是同一套，
             // 摆多大就是多大；窗口不是 16:9 时留黑边，而不是把画面拉扁或裁掉。
+            // 1.57) 雪花噪点层：切机位的一瞬炸一下（见 BurstStatic / UpdateStatic）。
+            //       程序化 shader，无贴图。挂在 overlay 顶层（平板容器之外），
+            //       盖住整个监控（含黑壳）。
+            var staticGo = new GameObject("MonitorStatic", typeof(RectTransform), typeof(UnityEngine.UI.RawImage));
+            staticGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _staticOverlay = staticGo.GetComponent<UnityEngine.UI.RawImage>();
+            StretchToParent(_staticOverlay.rectTransform);
+            _staticOverlay.raycastTarget = false;
+            _staticOverlay.enabled = false;
+
+            var staticShader = Shader.Find("NailongFNAF/MonitorStatic");
+            if (staticShader != null)
+            {
+                _staticMaterial = new Material(staticShader);
+                _staticMaterial.SetFloat("_Strength", 0f);
+                _staticOverlay.material = _staticMaterial;
+                _staticOverlay.color = Color.white;
+                _staticOverlay.texture = Texture2D.whiteTexture;
+            }
+
+            staticGo.transform.SetAsLastSibling();
+
             // 1.55) 平板容器：包住设计区（黑壳 + 画面 + 敌人 + 小地图都在里面）。
             //       开关监控时这块整体从屏幕底部抬起 / 放下（见 UpdateMonitorTabletAnim）。
             //       ⚠️ 框外模糊**不在**容器里 —— 抬起时办公室就该先看见，
@@ -5654,6 +5729,14 @@ namespace NailongFNAF.UI
 
             _monitorMapGroup.alpha = 0f;
             _monitorMapGroup.blocksRaycasts = false;
+
+            // ⚠️ 噪点层**必须置顶** —— 它创建在平板容器之前，后面建的
+            // MonitorTablet / 小地图等 sibling 会排到它上面，把雪花全盖住。
+            // 在这里（所有监控子物体都建完）再置顶一次才是真的最上。
+            if (_staticOverlay != null)
+            {
+                _staticOverlay.transform.SetAsLastSibling();
+            }
         }
 
         private void BuildMonitorHandle()
