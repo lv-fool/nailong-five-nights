@@ -68,10 +68,17 @@ namespace NailongFNAF.UI
 
                     _ownMaterial = new Material(shader);
                     _ownMaterial.name = "QuadGraphic (instance)";
-                    material = _ownMaterial;
                 }
 
                 _ownMaterial.mainTexture = value;
+
+                // ⚠️ 每次都重新赋一次 material —— UGUI 内部有材质缓存，
+                // 只改 _ownMaterial 的内容（换贴图）不重新赋值的话，
+                // 批次/材质指针还是老的，画面继续显示**上一张贴图**
+                // （表现就是「所有机位都显示同一张图」）。
+                material = _ownMaterial;
+
+                SetMaterialDirty();
                 SetVerticesDirty();
             }
         }
