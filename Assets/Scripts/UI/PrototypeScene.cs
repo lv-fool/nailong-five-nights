@@ -2509,14 +2509,35 @@ namespace NailongFNAF.UI
             public float x = 0.5f;
             public float y = 0.5f;
 
-            /// <summary>宽度占画面宽度的比例（高度按原图比例算）。</summary>
+            /// <summary>
+            /// 宽度占画面宽度的比例 —— **只在 corners 为空时用**。
+            /// 有 corners 时以四个角为准。
+            /// </summary>
             public float width = 0.2f;
 
-            /// <summary>绕自身中心的旋转角（度，逆时针）。</summary>
+            /// <summary>绕自身中心的旋转角（度，逆时针）—— 同样只在没有 corners 时用。</summary>
             public float rotation;
 
             /// <summary>不透明度 0..1。</summary>
             public float alpha = 1f;
+
+            /// <summary>
+            /// **自由四边形**的四个角，归一化坐标（0..1，左下原点）。
+            ///
+            /// 顺序：左下、左上、右上、右下（顺时针）。
+            /// 空数组 = 用老的 x/y/width/rotation 走正矩形 —— 老存档兼容。
+            /// 长度不是 8（4 个点 × 2 个分量）时也当空处理。
+            /// </summary>
+            public float[] corners;
+        }
+
+        /// <summary>
+        /// 贴图的「四角模式」是否可用。<paramref name="corners"/> 必须是 8 个浮点数
+        /// （4 个点，每个 x,y 归一化）。
+        /// </summary>
+        private static bool HasCorners(MonitorSticker st)
+        {
+            return st != null && st.corners != null && st.corners.Length == 8;
         }
 
         [System.Serializable]
@@ -2631,10 +2652,13 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 每个机位一组贴图层；切机位时整组换掉。
-        /// 不复用单个 Image 是因为一屏可能要贴好几张（墙上海报 + 涂鸦 + 警示牌）。
+        /// 不复用单个控件是因为一屏可能要贴好几张（墙上海报 + 涂鸦 + 警示牌）。
+        ///
+        /// 用 <see cref="QuadGraphic"/> 而不是 Image：
+        /// Image 只能画正矩形，没法「拖四个角」做透视变形。
         /// </summary>
-        private readonly System.Collections.Generic.List<Image> _stickerPool =
-            new System.Collections.Generic.List<Image>();
+        private readonly System.Collections.Generic.List<QuadGraphic> _stickerPool =
+            new System.Collections.Generic.List<QuadGraphic>();
 
         /// <summary>贴图挂在哪个父物体下（监控画面那一层，跟着画面一起缩放）。</summary>
         private RectTransform _stickerRoot;
@@ -2658,14 +2682,14 @@ namespace NailongFNAF.UI
             // 池子不够就补
             while (_stickerPool.Count < count)
             {
-                var go = new GameObject("Sticker", typeof(RectTransform), typeof(Image));
+                var go = new GameObject("Sticker",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(QuadGraphic));
                 go.transform.SetParent(_stickerRoot, false);
 
-                var image = go.GetComponent<Image>();
-                image.raycastTarget = false;
-                image.preserveAspect = true;
+                var quad = go.GetComponent<QuadGraphic>();
+                quad.raycastTarget = false;
 
-                _stickerPool.Add(image);
+                _stickerPool.Add(quad);
             }
 
             RectTransform host = _stickerRoot;
@@ -2674,13 +2698,13 @@ namespace NailongFNAF.UI
 
             for (int i = 0; i < _stickerPool.Count; i++)
             {
-                var image = _stickerPool[i];
+                var quad = _stickerPool[i];
 
                 if (i >= count || stickers[i] == null || string.IsNullOrEmpty(stickers[i].image))
                 {
-                    if (image.gameObject.activeSelf)
+                    if (quad.gameObject.activeSelf)
                     {
-                        image.gameObject.SetActive(false);
+                        quad.gameObject.SetActive(false);
                     }
 
                     continue;
@@ -2688,79 +2712,88 @@ namespace NailongFNAF.UI
 
                 var st = stickers[i];
 
-                // 贴图按需加载并缓存 —— 同一个文件可能贴在多个机位上
-                Sprite sprite = LoadStickerSprite(st.image);
-                if (sprite == null)
+                Texture texture = LoadStickerTexture(st.image);
+                if (texture == null)
                 {
-                    image.gameObject.SetActive(false);
+                    quad.gameObject.SetActive(false);
                     continue;
                 }
 
-                if (!image.gameObject.activeSelf)
+                if (!quad.gameObject.activeSelf)
                 {
-                    image.gameObject.SetActive(true);
+                    quad.gameObject.SetActive(true);
                 }
 
-                image.sprite = sprite;
-                image.color = new Color(1f, 1f, 1f, Mathf.Clamp01(st.alpha));
+                quad.Texture = texture;
+                quad.color = new Color(1f, 1f, 1f, Mathf.Clamp01(st.alpha));
 
-                var rt = image.rectTransform;
-
-                // 宽 = 画面宽 × 比例；高按原图比例
-                float w = hostW * Mathf.Max(0.01f, st.width);
-                float aspect = sprite.rect.height / Mathf.Max(1f, sprite.rect.width);
-                float h = w * aspect;
-
-                rt.sizeDelta = new Vector2(w, h);
-                rt.anchorMin = new Vector2(0f, 0f);
-                rt.anchorMax = new Vector2(0f, 0f);
+                var rt = quad.rectTransform;
+                rt.anchorMin = new Vector2(0.5f, 0.5f);
+                rt.anchorMax = new Vector2(0.5f, 0.5f);
                 rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.sizeDelta = Vector2.zero;
+                rt.anchoredPosition = Vector2.zero;
+                rt.localRotation = Quaternion.identity;
 
-                // 归一化 → 画面本地像素（左下原点 → 中心原点）
-                rt.anchoredPosition = new Vector2(
-                    st.x * hostW - hostW * 0.5f,
-                    st.y * hostH - hostH * 0.5f);
+                if (HasCorners(st))
+                {
+                    // 自由四边形：四个角直接从数据来（归一化 → 以画面中心为原点的像素）
+                    quad.SetCorners(
+                        StickerCorner(st, 0, hostW, hostH),
+                        StickerCorner(st, 1, hostW, hostH),
+                        StickerCorner(st, 2, hostW, hostH),
+                        StickerCorner(st, 3, hostW, hostH));
+                }
+                else
+                {
+                    // 老数据：正矩形 + 旋转
+                    float w = hostW * Mathf.Max(0.01f, st.width);
+                    float aspect = texture.height / Mathf.Max(1f, texture.width);
+                    float h = w * aspect;
 
-                rt.localRotation = Quaternion.Euler(0f, 0f, st.rotation);
+                    quad.SetCornersFromSize(w, h, 0f, 0f);
+
+                    rt.anchoredPosition = new Vector2(
+                        st.x * hostW - hostW * 0.5f,
+                        st.y * hostH - hostH * 0.5f);
+
+                    rt.localRotation = Quaternion.Euler(0f, 0f, st.rotation);
+                }
             }
         }
 
-        /// <summary>贴图缓存：Resources 路径 → Sprite。</summary>
-        private readonly System.Collections.Generic.Dictionary<string, Sprite> _stickerSprites =
-            new System.Collections.Generic.Dictionary<string, Sprite>();
+        /// <summary>取第 <paramref name="index"/> 个角的本地像素坐标（以画面中心为原点）。</summary>
+        private static Vector2 StickerCorner(MonitorSticker st, int index, float hostW, float hostH)
+        {
+            return new Vector2(
+                st.corners[index * 2] * hostW - hostW * 0.5f,
+                st.corners[index * 2 + 1] * hostH - hostH * 0.5f);
+        }
+
+        /// <summary>贴图缓存：Resources 路径 → Texture2D。</summary>
+        private readonly System.Collections.Generic.Dictionary<string, Texture2D> _stickerTextures =
+            new System.Collections.Generic.Dictionary<string, Texture2D>();
 
         /// <summary>
         /// 载入一张贴图。<c>image</c> 是相对 Assets/Resources/ 的路径（不带扩展名），
         /// 例如 "Posters/poster_01"。
-        ///
-        /// ⚠️ 用 <c>Resources.Load&lt;Texture2D&gt;</c> 而不是 Load&lt;Sprite&gt; ——
-        /// 这些 jpg 是按普通贴图导入的，没有 Sprite 元数据，直接 Load&lt;Sprite&gt; 会拿到 null。
         /// </summary>
-        private Sprite LoadStickerSprite(string image)
+        private Texture2D LoadStickerTexture(string image)
         {
             if (string.IsNullOrEmpty(image))
             {
                 return null;
             }
 
-            Sprite cached;
-            if (_stickerSprites.TryGetValue(image, out cached))
+            Texture2D cached;
+            if (_stickerTextures.TryGetValue(image, out cached))
             {
                 return cached;
             }
 
             var texture = Resources.Load<Texture2D>(image);
-            Sprite sprite = null;
-
-            if (texture != null)
-            {
-                sprite = Sprite.Create(texture,
-                    new Rect(0f, 0f, texture.width, texture.height),
-                    new Vector2(0.5f, 0.5f), 100f);
-            }
-
-            _stickerSprites[image] = sprite;
-            return sprite;
+            _stickerTextures[image] = texture;
+            return texture;
         }
 
         /// <summary>多边形遮罩纹理缓存（按机位）。</summary>

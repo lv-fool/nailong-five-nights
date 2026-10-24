@@ -745,6 +745,21 @@ namespace NailongFNAF.EditorTools
                 "（也可以直接在画面上拖这张画）",
                 EditorStyles.miniLabel);
 
+            // 四角模式的操作 —— 拖歪了能一键回到正矩形
+            if (HasCorners(st))
+            {
+                EditorGUILayout.HelpBox(
+                    "这是**自由四边形**（四个角可独立拖动）。",
+                    MessageType.None);
+
+                if (GUILayout.Button("重置为矩形", GUILayout.Width(110f)))
+                {
+                    st.corners = null;
+                    _dirty = true;
+                    GUI.FocusControl(null);
+                }
+            }
+
             if (GUILayout.Button("删掉这张", GUILayout.Width(110f)))
             {
                 var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
@@ -1492,6 +1507,12 @@ namespace NailongFNAF.EditorTools
         private float _dragStartX;
         private float _dragStartY;
 
+        /// <summary>正在拖哪个角（0~3）；-1 = 在拖整张。</summary>
+        private int _dragCorner = -1;
+
+        /// <summary>开始拖整张时四角的快照（四角模式下平移用）。</summary>
+        private float[] _dragStartCorners;
+
         private void RefreshStickerImages()
         {
             var names = new System.Collections.Generic.List<string>();
@@ -1528,6 +1549,207 @@ namespace NailongFNAF.EditorTools
             return r.stickers;
         }
 
+        // ── 贴图四角（自由四边形）──
+
+        /// <summary>手柄半径（像素）—— 够大好点中。</summary>
+        private const float HandleRadius = 6f;
+
+        /// <summary>这条贴图有没有四角数据（8 个浮点）。</summary>
+        private static bool HasCorners(LayoutSticker st)
+        {
+            return st != null && st.corners != null && st.corners.Length == 8;
+        }
+
+        /// <summary>
+        /// 取这条贴图的四个角，**归一化**坐标（左下原点），顺序：左下、左上、右上、右下。
+        ///
+        /// 没有 corners 数据时按老的正矩形现算一个（带旋转），
+        /// 这样「第一次拖角」时能从当前形状无缝过渡到四边形。
+        /// </summary>
+        private Vector2[] StickerCorners(LayoutSticker st, Rect r)
+        {
+            if (HasCorners(st))
+            {
+                return new[]
+                {
+                    new Vector2(st.corners[0], st.corners[1]),
+                    new Vector2(st.corners[2], st.corners[3]),
+                    new Vector2(st.corners[4], st.corners[5]),
+                    new Vector2(st.corners[6], st.corners[7]),
+                };
+            }
+
+            Texture2D tex = StickerTexture(st.image);
+            float aspect = tex != null ? tex.height / (float)tex.width : 1f;
+
+            // 归一化尺寸：宽度按画面比例，高度按原图比例再除画面高
+            float hn = st.width * aspect * (r.width / Mathf.Max(1f, r.height));
+
+            float hw = st.width * 0.5f;
+            float hh = hn * 0.5f;
+
+            float rad = st.rotation * Mathf.Deg2Rad;
+            float cos = Mathf.Cos(rad);
+            float sin = Mathf.Sin(rad);
+
+            // 本地四角 → 旋转 → 平移到 x/y
+            var local = new[]
+            {
+                new Vector2(-hw, -hh),
+                new Vector2(-hw, hh),
+                new Vector2(hw, hh),
+                new Vector2(hw, -hh),
+            };
+
+            var result = new Vector2[4];
+
+            for (int i = 0; i < 4; i++)
+            {
+                float lx = local[i].x;
+                float ly = local[i].y;
+
+                result[i] = new Vector2(
+                    st.x + lx * cos - ly * sin,
+                    st.y + lx * sin + ly * cos);
+            }
+
+            return result;
+        }
+
+        /// <summary>归一化角 → GUI 坐标（Y 要翻）。</summary>
+        private static Vector2 CornerToGui(Rect r, Vector2 norm)
+        {
+            return new Vector2(r.x + norm.x * r.width, r.y + (1f - norm.y) * r.height);
+        }
+
+        /// <summary>
+        /// 点是否落在四边形内 —— 用**同侧判定**：对每条边，点必须在同一侧，
+        /// 四条边都满足就在里面。
+        ///
+        /// 不能用外接矩形判断：四边形可能倾斜得很厉害，
+        /// 外接框里有大片其实不属于图片的区域，点上去会误选中。
+        /// </summary>
+        private static bool PointInQuad(Vector2[] quad, Vector2 p)
+        {
+            bool hasNeg = false;
+            bool hasPos = false;
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 a = quad[i];
+                Vector2 b = quad[(i + 1) % 4];
+
+                float cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+
+                if (cross < -0.001f) { hasNeg = true; }
+                else if (cross > 0.001f) { hasPos = true; }
+
+                // 同时出现正负 = 不在同一侧
+                if (hasNeg && hasPos)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 把贴图切到「四角模式」—— 用当前形状初始化 corners。
+        /// 之后拖手柄改的就是这个数组。
+        /// </summary>
+        private void EnsureCorners(LayoutSticker st, Rect r)
+        {
+            if (HasCorners(st))
+            {
+                return;
+            }
+
+            var c = StickerCorners(st, r);
+
+            st.corners = new[]
+            {
+                c[0].x, c[0].y,
+                c[1].x, c[1].y,
+                c[2].x, c[2].y,
+                c[3].x, c[3].y,
+            };
+
+            _dirty = true;
+        }
+
+        /// <summary>
+        /// 把贴图画成**任意四边形**。
+        ///
+        /// 编辑器里没有现成的「带 UV 的四边形绘制」，标准做法是
+        /// GL.Begin(QUADS) —— 但它必须在 Repaint 事件里、且要成对
+        /// Push/Pop 矩阵，否则会污染整个编辑器的 IMGUI 状态。
+        ///
+        /// 没有透视时（最常见）退回两次 GUI.DrawTextureWithTexCoords 会拉伸变形，
+        /// 所以这里统一用 GL：它按顶点插值 UV，倾斜得多厉害都正确。
+        /// </summary>
+        private static void DrawQuadTexture(Vector2[] gui, Texture tex, Vector2[] uv)
+        {
+            if (Event.current == null || Event.current.type != EventType.Repaint)
+            {
+                return;
+            }
+
+            if (tex == null || gui == null || gui.Length != 4)
+            {
+                return;
+            }
+
+            Material mat = null;
+
+            try
+            {
+                // 用一个临时的 UI 材质，指定 UGUI 默认 shader；
+                // GL 只认材质不认 GUI.color，所以透明度靠 Unlit/Transparent Colored
+                var shader = Shader.Find("UI/Default");
+                if (shader == null)
+                {
+                    shader = Shader.Find("Unlit/Transparent");
+                }
+
+                if (shader == null)
+                {
+                    return;
+                }
+
+                mat = new Material(shader) { mainTexture = tex };
+                mat.SetPass(0);
+
+                GL.PushMatrix();
+
+                // 屏幕像素坐标 → GL 坐标（左下原点 0..1）
+                GL.LoadPixelMatrix(0f, Screen.width, Screen.height, 0f);
+
+                GL.Begin(GL.QUADS);
+
+                // GL 的 QUADS 顶点顺序：顺时针
+                for (int k = 0; k < 4; k++)
+                {
+                    GL.TexCoord2(uv[k].x, uv[k].y);
+                    GL.Vertex3(gui[k].x, gui[k].y, 0f);
+                }
+
+                GL.End();
+                GL.PopMatrix();
+            }
+            catch
+            {
+                // 绘制失败不该影响窗口 —— 静默跳过
+            }
+            finally
+            {
+                if (mat != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(mat);
+                }
+            }
+        }
+
         private void DrawStickers(Rect r)
         {
             var stickers = StickersOf(_room);
@@ -1542,39 +1764,76 @@ namespace NailongFNAF.EditorTools
                 }
 
                 Texture2D tex = StickerTexture(st.image);
-
-                // 归一化 → GUI 矩形（左下滑到左上：y 要翻）
-                float w = st.width * r.width;
-                float aspect = tex != null ? tex.height / (float)tex.width : 1f;
-                float h = w * aspect;
-
-                float cx = r.x + st.x * r.width;
-                float cy = r.y + (1f - st.y) * r.height;
-
-                var box = new Rect(cx - w * 0.5f, cy - h * 0.5f, w, h);
-
                 bool sel = i == _selSticker;
 
+                // 四个角（归一化）→ GUI 坐标
+                Vector2[] corners = StickerCorners(st, r);
+                var gui = new Vector2[4];
+
+                for (int k = 0; k < 4; k++)
+                {
+                    gui[k] = CornerToGui(r, corners[k]);
+                }
+
+                // 用两段三角形把贴图画成**任意四边形**（不是正矩形）
                 if (tex != null)
                 {
                     var old = GUI.color;
                     GUI.color = new Color(1f, 1f, 1f, sel ? 1f : 0.75f * st.alpha);
-                    GUI.DrawTexture(box, tex, ScaleMode.ScaleToFit, true);
+
+                    DrawQuadTexture(gui, tex, new[]
+                    {
+                        new Vector2(0f, 0f),   // 左下
+                        new Vector2(0f, 1f),   // 左上
+                        new Vector2(1f, 1f),   // 右上
+                        new Vector2(1f, 0f),   // 右下
+                    });
+
                     GUI.color = old;
                 }
                 else
                 {
-                    // 贴图缺失：画个红框占位，一眼看得出该补哪张
-                    EditorGUI.DrawRect(box, new Color(0.6f, 0.2f, 0.2f, 0.35f));
+                    // 贴图缺失：填充一块红，一眼看得出该补哪张
+                    Handles.color = new Color(0.6f, 0.2f, 0.2f, 0.35f);
+                    Handles.DrawAAConvexPolygon(new[]
+                    {
+                        new Vector3(gui[0].x, gui[0].y, 0f),
+                        new Vector3(gui[1].x, gui[1].y, 0f),
+                        new Vector3(gui[2].x, gui[2].y, 0f),
+                        new Vector3(gui[3].x, gui[3].y, 0f),
+                    });
                 }
 
-                Handles.color = sel ? Color.yellow : new Color(1f, 1f, 1f, 0.5f);
-                Handles.DrawWireDisc(new Vector3(cx, cy, 0f), Vector3.forward, 6f);
-
+                // 选中时画四个角的手柄（可拖）
                 if (sel)
                 {
-                    Handles.DrawWireCube(new Vector3(box.center.x, box.center.y, 0f),
-                        new Vector3(box.width, box.height, 0f));
+                    Handles.color = new Color(1f, 0.85f, 0.2f, 1f);
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var p = new Vector3(gui[k].x, gui[k].y, 0f);
+                        Handles.DrawSolidDisc(p, Vector3.forward, HandleRadius);
+                    }
+
+                    // 连边，让四边形轮廓清楚
+                    Handles.color = new Color(1f, 0.85f, 0.2f, 0.65f);
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        Handles.DrawLine(
+                            new Vector3(gui[k].x, gui[k].y, 0f),
+                            new Vector3(gui[(k + 1) % 4].x, gui[(k + 1) % 4].y, 0f));
+                    }
+                }
+                else
+                {
+                    Handles.color = new Color(1f, 1f, 1f, 0.4f);
+                    Handles.DrawAAPolyLine(1f,
+                        new Vector3(gui[0].x, gui[0].y, 0f),
+                        new Vector3(gui[1].x, gui[1].y, 0f),
+                        new Vector3(gui[2].x, gui[2].y, 0f),
+                        new Vector3(gui[3].x, gui[3].y, 0f),
+                        new Vector3(gui[0].x, gui[0].y, 0f));
                 }
             }
 
@@ -1587,7 +1846,7 @@ namespace NailongFNAF.EditorTools
             var style = new GUIStyle(EditorStyles.miniLabel);
             style.normal.textColor = new Color(0.8f, 0.85f, 0.9f);
             GUI.Label(new Rect(r.x + 8f, r.yMax + 4f, r.width, 18f),
-                "贴图模式：拖动画 = 移动位置；选中后用右侧面板调宽度 / 旋转 / 透明度。"
+                "贴图模式：拖动图片 = 移动；选中后**拖黄色的角** = 拉成任意四边形。"
                 + "  共 " + stickers.Length + " 张",
                 style);
         }
@@ -1604,7 +1863,38 @@ namespace NailongFNAF.EditorTools
 
             if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
             {
-                // 从后往前找（后画的在上层）
+                // ① 先看有没有点中「已选中那张」的**角手柄** —— 优先级最高，
+                //    否则拖角会变成拖动整张图。
+                if (_selSticker >= 0 && _selSticker < stickers.Length)
+                {
+                    var sel = stickers[_selSticker];
+
+                    if (sel != null && !string.IsNullOrEmpty(sel.image))
+                    {
+                        Vector2[] corners = StickerCorners(sel, r);
+
+                        for (int k = 0; k < 4; k++)
+                        {
+                            Vector2 handle = CornerToGui(r, corners[k]);
+
+                            if (Vector2.Distance(handle, e.mousePosition) <= HandleRadius + 4f)
+                            {
+                                // 切到四角模式（老的正矩形也能无缝过渡）
+                                EnsureCorners(sel, r);
+
+                                _dragCorner = k;
+                                _dragSticker = _selSticker;
+                                _dragStartNorm = ToNorm(r, e.mousePosition);
+
+                                e.Use();
+                                Repaint();
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // ② 没点中手柄 → 找点中了哪张图（点在四边形内部）
                 int hit = -1;
 
                 for (int i = stickers.Length - 1; i >= 0; i--)
@@ -1616,39 +1906,41 @@ namespace NailongFNAF.EditorTools
                         continue;
                     }
 
-                    float w = st.width * r.width;
-                    Texture2D tex = StickerTexture(st.image);
-                    float aspect = tex != null ? tex.height / (float)tex.width : 1f;
-                    float h = w * aspect;
+                    Vector2[] corners = StickerCorners(st, r);
+                    var gui = new Vector2[4];
 
-                    float cx = r.x + st.x * r.width;
-                    float cy = r.y + (1f - st.y) * r.height;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        gui[k] = CornerToGui(r, corners[k]);
+                    }
 
-                    var box = new Rect(cx - w * 0.5f, cy - h * 0.5f, w, h);
-
-                    if (box.Contains(e.mousePosition))
+                    if (PointInQuad(gui, e.mousePosition))
                     {
                         hit = i;
                         break;
                     }
                 }
 
-                // ⚠️ **点在空白处才取消选中**，点中任何一张就选中它。
-                // 之前是「没点中 = 取消」，于是拖动画时鼠标稍微不是精确落在
-                // 那张图上（比如拖到边缘、或图半透明）就会先被取消选中、
-                // 拖动随之断掉 —— 体感就是「一操作就丢选中」。
                 if (hit >= 0)
                 {
                     _selSticker = hit;
                     _dragSticker = hit;
+                    _dragCorner = -1;
                     _dragStartNorm = ToNorm(r, e.mousePosition);
                     _dragStartX = stickers[hit].x;
                     _dragStartY = stickers[hit].y;
+
+                    // 整张拖动时，四角数据也要一起平移 ——
+                    // 记下原始的 corners 副本
+                    _dragStartCorners = HasCorners(stickers[hit])
+                        ? (float[])stickers[hit].corners.Clone()
+                        : null;
                 }
                 else
                 {
                     _selSticker = -1;
                     _dragSticker = -1;
+                    _dragCorner = -1;
                 }
 
                 e.Use();
@@ -1658,11 +1950,37 @@ namespace NailongFNAF.EditorTools
                      && _dragSticker < stickers.Length)
             {
                 Vector2 now = ToNorm(r, e.mousePosition);
-                Vector2 delta = now - _dragStartNorm;
-
                 var st = stickers[_dragSticker];
-                st.x = Mathf.Clamp01(_dragStartX + delta.x);
-                st.y = Mathf.Clamp01(_dragStartY + delta.y);
+
+                if (st == null)
+                {
+                    return;
+                }
+
+                if (_dragCorner >= 0)
+                {
+                    // ── 拖某个角 ──
+                    st.corners[_dragCorner * 2] = Mathf.Clamp01(now.x);
+                    st.corners[_dragCorner * 2 + 1] = Mathf.Clamp01(now.y);
+                }
+                else if (_dragStartCorners != null)
+                {
+                    // ── 整张平移（四角模式）──
+                    Vector2 delta = now - _dragStartNorm;
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        st.corners[k * 2] = Mathf.Clamp01(_dragStartCorners[k * 2] + delta.x);
+                        st.corners[k * 2 + 1] = Mathf.Clamp01(_dragStartCorners[k * 2 + 1] + delta.y);
+                    }
+                }
+                else
+                {
+                    // ── 整张平移（老的正矩形模式）──
+                    Vector2 delta = now - _dragStartNorm;
+                    st.x = Mathf.Clamp01(_dragStartX + delta.x);
+                    st.y = Mathf.Clamp01(_dragStartY + delta.y);
+                }
 
                 // ⚠️ 必须写回 —— LayoutSticker 是**引用类型**，但数组本身
                 // 可能是从 Layout(room).stickers 取的副本；不写回的话
@@ -1676,6 +1994,8 @@ namespace NailongFNAF.EditorTools
             else if (e.type == EventType.MouseUp)
             {
                 _dragSticker = -1;
+                _dragCorner = -1;
+                _dragStartCorners = null;
             }
         }
 
@@ -2522,10 +2842,19 @@ namespace NailongFNAF.EditorTools
             /// <summary>宽度占画面宽度的比例（高度按原图比例算）。</summary>
             public float width = 0.2f;
 
-            /// <summary>绕自身中心的旋转角（度，逆时针）。</summary>
+            /// <summary>绕自身中心的旋转角（度，逆时针）—— 只在没有 corners 时用。</summary>
             public float rotation;
 
             public float alpha = 1f;
+
+            /// <summary>
+            /// **自由四边形**的四个角，归一化（0..1，左下原点），
+            /// 顺序：左下、左上、右上、右下（顺时针）。
+            ///
+            /// 空 / 长度不是 8 = 走老的正矩形模式（x/y/width/rotation）。
+            /// 「贴图」模式里拖四个角手柄就会写进这里。
+            /// </summary>
+            public float[] corners;
         }
 
         [System.Serializable]
