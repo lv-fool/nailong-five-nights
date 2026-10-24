@@ -478,13 +478,46 @@ namespace NailongFNAF.EditorTools
                     break;
             }
 
-            // 贴图模式：右侧的编辑面板（加 / 删 / 宽度 / 旋转 / 透明度）
+            // 贴图模式的编辑面板：**必须放在图片下方的一块独立区域里**。
+            //
+            // ⚠️ EditorGUILayout 是从窗口**顶部**往下排的，而上方那张图是用
+            // GUI.DrawTexture 直接画的（不推进布局流）。所以面板会整个压在
+            // 图片上，「+」按钮一旦落进图片区，点击就先被 HandleStickerInput
+            // 吃掉 —— 表现就是「按钮点不到」。
+            // 用 GUILayout.BeginArea 把面板钉在图片下沿之下，两者不再重叠。
             if (_mode == Mode.Stickers)
             {
-                DrawStickerPanel();
+                Rect panelRect = new Rect(
+                    4f,
+                    rect.yMax + 8f,
+                    position.width - 8f,
+                    Mathf.Max(80f, position.height - rect.yMax - 8f - 56f));
+
+                // ⚠️ 用 try/finally 保证 EndArea 一定执行 ——
+                // DrawStickerPanel 内部有几处提前 return（没选中、贴图缺失…），
+                // 那些 return 会跳过 EndArea，Unity 抛
+                // "Invalid GUILayout state" 之后**整个窗口的按钮都点不动**。
+                GUILayout.BeginArea(panelRect);
+
+                try
+                {
+                    DrawStickerPanel();
+                }
+                finally
+                {
+                    GUILayout.EndArea();
+                }
             }
 
             HandleInput(rect);
+
+            // 贴图的鼠标事件放在**所有布局闭合之后**处理 ——
+            // 布局还在进行时 e.Use() 会破坏 Begin/End 配对。
+            if (_mode == Mode.Stickers)
+            {
+                HandleStickerInput(rect, StickersOf(_room));
+            }
+
             DrawFooter();
         }
 
@@ -509,15 +542,19 @@ namespace NailongFNAF.EditorTools
 
             EditorGUILayout.BeginHorizontal();
 
-            GUILayout.Label(label, GUILayout.Width(90f));
+            // ⚠️ 宽度都**收窄**了：原来标签 90 + 两个 24 按钮 + 输入框 90
+            // + 范围文字，一行要 330px 以上 —— 编辑器窗口一窄（或右侧
+            // 面板被挤），「+」和范围就会被推到可视区外面，**点不到**。
+            // 现在标签 70、输入框 70，范围改成只显示在 tooltip 里。
+            GUILayout.Label(label, GUILayout.Width(70f));
 
-            if (GUILayout.Button("−", GUILayout.Width(24f)))
+            if (GUILayout.Button("−", GUILayout.Width(22f)))
             {
                 value = Mathf.Clamp(value - step, min, max);
                 dirty = true;
             }
 
-            float typed = EditorGUILayout.FloatField(value, GUILayout.Width(90f));
+            float typed = EditorGUILayout.FloatField(value, GUILayout.Width(70f));
 
             if (!Mathf.Approximately(typed, value))
             {
@@ -525,14 +562,17 @@ namespace NailongFNAF.EditorTools
                 dirty = true;
             }
 
-            if (GUILayout.Button("+", GUILayout.Width(24f)))
+            if (GUILayout.Button("+", GUILayout.Width(22f)))
             {
                 value = Mathf.Clamp(value + step, min, max);
                 dirty = true;
             }
 
-            GUILayout.Label("（" + min.ToString("F2") + " ~ " + max.ToString("F2") + "）",
-                EditorStyles.miniLabel);
+            // 范围改到 tooltip —— 常驻显示会把「+」挤出屏幕
+            GUILayout.Label(new GUIContent(string.Empty,
+                "范围 " + min.ToString("F2") + " ~ " + max.ToString("F2")
+                + "，步长 " + step.ToString("G") ),
+                GUILayout.Width(16f));
 
             EditorGUILayout.EndHorizontal();
 
@@ -593,6 +633,12 @@ namespace NailongFNAF.EditorTools
                 const float CellW = 92f;
                 const float ThumbH = 52f;
 
+                // ⚠️ **不能在循环里 return** —— 那会跳过 EndVertical /
+                // EndHorizontal / EndScrollView，GUILayout 的 Begin/End 就对不上，
+                // Unity 会抛「Invalid GUILayout state」并且整个窗口的按钮都点不动。
+                // 所以先记下点了哪张，等滚动区正常闭合之后再处理。
+                string clicked = null;
+
                 for (int i = 0; i < _stickerImages.Length; i += PerRow)
                 {
                     EditorGUILayout.BeginHorizontal();
@@ -606,20 +652,14 @@ namespace NailongFNAF.EditorTools
 
                         Texture2D thumb = StickerTexture(_stickerImages[idx]);
 
-                        if (thumb != null)
+                        GUIContent content = thumb != null
+                            ? new GUIContent(thumb, shortName)
+                            : new GUIContent(shortName);
+
+                        if (GUILayout.Button(content, GUILayout.Width(CellW - 4f),
+                                GUILayout.Height(ThumbH)))
                         {
-                            if (GUILayout.Button(thumb, GUILayout.Width(CellW - 4f),
-                                    GUILayout.Height(ThumbH)))
-                            {
-                                AddSticker(_stickerImages[idx], stickers);
-                                return;
-                            }
-                        }
-                        else if (GUILayout.Button(shortName, GUILayout.Width(CellW - 4f),
-                                     GUILayout.Height(ThumbH)))
-                        {
-                            AddSticker(_stickerImages[idx], stickers);
-                            return;
+                            clicked = _stickerImages[idx];
                         }
 
                         GUILayout.Label(shortName, EditorStyles.miniLabel, GUILayout.Width(CellW));
@@ -631,6 +671,12 @@ namespace NailongFNAF.EditorTools
                 }
 
                 EditorGUILayout.EndScrollView();
+
+                // 滚动区已经闭合，这里再处理点击 —— 布局状态是干净的
+                if (clicked != null)
+                {
+                    AddSticker(clicked, stickers);
+                }
             }
 
             if (GUILayout.Button("刷新图片列表", GUILayout.Width(110f)))
@@ -639,16 +685,20 @@ namespace NailongFNAF.EditorTools
                 return;
             }
 
-            if (_selSticker < 0 || _selSticker >= stickers.Length)
-            {
-                EditorGUILayout.LabelField("（点画面上的画来选中）", EditorStyles.miniLabel);
-                return;
-            }
+            // ⚠️ 这里**不能 return** —— 调用方（OnGUI）还开着 GUILayout.BeginArea，
+            // 提前 return 会让 EndArea 执行不到，Unity 直接抛
+            // "Invalid GUILayout state"，然后**整个窗口的按钮都点不动**。
+            // 用 if 包住剩下的部分来替代提前返回。
+            LayoutSticker st = null;
 
-            var st = stickers[_selSticker];
+            if (_selSticker >= 0 && _selSticker < stickers.Length)
+            {
+                st = stickers[_selSticker];
+            }
 
             if (st == null)
             {
+                EditorGUILayout.LabelField("（点画面上的画来选中）", EditorStyles.miniLabel);
                 return;
             }
 
@@ -909,8 +959,16 @@ namespace NailongFNAF.EditorTools
             const float top = 62f;
             const float bottom = 52f;
 
+            // ⚠️ 贴图模式下要给下面的属性面板**留出高度**。
+            // 原来这里只扣了标题栏和页脚，图片区会一直铺到窗口底部，
+            // 而 DrawStickerPanel() 用 EditorGUILayout 从上往下排在同一个
+            // 窗口里 —— 两者必然重叠。面板上的「+」按钮一旦落在图片区
+            // 范围内，点击就先被 HandleStickerInput 吃掉（它 e.Use()），
+            // 表现就是「按钮点不到」。
+            float panelReserve = _mode == Mode.Stickers ? StickerPanelHeight : 0f;
+
             float availW = position.width - 20f;
-            float availH = position.height - top - bottom;
+            float availH = position.height - top - bottom - panelReserve;
             float aspect = (float)_tex.width / _tex.height;
 
             float w = availW;
@@ -1270,6 +1328,15 @@ namespace NailongFNAF.EditorTools
         /// <summary>「加一张」网格的滚动位置。</summary>
         private Vector2 _stickerPickScroll;
 
+        /// <summary>
+        /// 贴图模式下属性面板占的高度（像素）—— 图片区要给它让位。
+        /// 140 网格 + 约 200 属性行 + 按钮 + 边距。
+        /// </summary>
+        private const float StickerPanelHeight = 430f;
+
+        /// <summary>属性面板自己的滚动位置（图片下方那块区域可能放不下）。</summary>
+        private Vector2 _stickerPanelScroll;
+
         /// <summary>拖动中的状态。</summary>
         private int _dragSticker = -1;
         private Vector2 _dragStartNorm;
@@ -1362,7 +1429,10 @@ namespace NailongFNAF.EditorTools
                 }
             }
 
-            HandleStickerInput(r, stickers);
+            // ⚠️ **不在绘制阶段处理鼠标事件** —— 这里还在 GUILayout 布局中，
+            // 提前 e.Use() 会让 Begin/End 对不上（Unity 会抛
+            // "Invalid GUILayout state"）。事件统一交给 OnGUI 末尾的
+            // HandleStickerInput（见 DrawStickerPanel 之后那行）。
 
             // 提示条
             var style = new GUIStyle(EditorStyles.miniLabel);
