@@ -115,6 +115,9 @@ namespace NailongFNAF.Core
         /// </summary>
         public string NaibaoApologyLine { get; private set; }
 
+        /// <summary>那句道歉的配音 id（Assets/Resources/Voice/apology_*.mp3）；不背锅时为空串。</summary>
+        public string NaibaoApologyLineId { get; private set; }
+
         /// <summary>当前这一通电话（没在通话时为 null）。</summary>
         public NaibaoCall NaibaoCall { get; private set; }
 
@@ -158,6 +161,7 @@ namespace NailongFNAF.Core
 
             // 死因归到奶包头上？那就把她这句道歉钉住，死亡面板会显示
             NaibaoApologyLine = _naibaoApology.CulpableLine();
+            NaibaoApologyLineId = _naibaoApology.CulpableLineId();
 
             // 结算彩蛋要看「死在第几个小时」——抓到的这一帧就把时刻钉住
             if (Stats != null && Clock != null)
@@ -376,6 +380,7 @@ namespace NailongFNAF.Core
             LastNaibaoCueAge = 0f;
             _naibaoApology.Clear();
             NaibaoApologyLine = null;
+            NaibaoApologyLineId = null;
             NaibaoCall = null;
             NaibaoCallCount = 0;
 
@@ -418,6 +423,7 @@ namespace NailongFNAF.Core
             LastNaibaoCueAge = 0f;
             _naibaoApology.Clear();
             NaibaoApologyLine = null;
+            NaibaoApologyLineId = null;
             NaibaoCall = null;
             NaibaoCallCount = 0;
         }
