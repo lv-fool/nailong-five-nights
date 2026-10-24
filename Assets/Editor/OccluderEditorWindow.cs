@@ -485,13 +485,15 @@ namespace NailongFNAF.EditorTools
             // 图片上，「+」按钮一旦落进图片区，点击就先被 HandleStickerInput
             // 吃掉 —— 表现就是「按钮点不到」。
             // 用 GUILayout.BeginArea 把面板钉在图片下沿之下，两者不再重叠。
+            //
+            // 面板高度**可拖动**（中间那条分隔条）—— 素材多的时候能拉大，
+            // 想多看画面就把面板压小。比例存在 EditorPrefs 里，关了窗口还记得。
             if (_mode == Mode.Stickers)
             {
-                Rect panelRect = new Rect(
-                    4f,
-                    rect.yMax + 8f,
-                    position.width - 8f,
-                    Mathf.Max(80f, position.height - rect.yMax - 8f - 56f));
+                Rect splitter;
+                Rect panelRect = StickerAreas(rect, out splitter);
+
+                DrawSplitter(splitter);
 
                 // ⚠️ 用 try/finally 保证 EndArea 一定执行 ——
                 // DrawStickerPanel 内部有几处提前 return（没选中、贴图缺失…），
@@ -965,7 +967,15 @@ namespace NailongFNAF.EditorTools
             // 窗口里 —— 两者必然重叠。面板上的「+」按钮一旦落在图片区
             // 范围内，点击就先被 HandleStickerInput 吃掉（它 e.Use()），
             // 表现就是「按钮点不到」。
-            float panelReserve = _mode == Mode.Stickers ? StickerPanelHeight : 0f;
+            //
+            // 预留多少由**可拖动的分隔条**决定（StickerAreas 用同一个比例算）。
+            float panelReserve = 0f;
+
+            if (_mode == Mode.Stickers)
+            {
+                float usable = Mathf.Max(1f, position.height - top - bottom);
+                panelReserve = usable * PanelHeightRatio + SplitterHeight;
+            }
 
             float availW = position.width - 20f;
             float availH = position.height - top - bottom - panelReserve;
@@ -1328,14 +1338,139 @@ namespace NailongFNAF.EditorTools
         /// <summary>「加一张」网格的滚动位置。</summary>
         private Vector2 _stickerPickScroll;
 
-        /// <summary>
-        /// 贴图模式下属性面板占的高度（像素）—— 图片区要给它让位。
-        /// 140 网格 + 约 200 属性行 + 按钮 + 边距。
-        /// </summary>
-        private const float StickerPanelHeight = 430f;
-
         /// <summary>属性面板自己的滚动位置（图片下方那块区域可能放不下）。</summary>
         private Vector2 _stickerPanelScroll;
+
+        // ── 面板高度（可拖动分隔条调整）──
+
+        private const string PanelHeightKey = "NailongFNAF.OccluderEditor.StickerPanelHeight";
+
+        /// <summary>面板占的高度比例（0.15 ~ 0.9）。拖动分隔条时改这个。</summary>
+        private float _panelHeightRatio = -1f;
+
+        /// <summary>是否正在拖分隔条。</summary>
+        private bool _splitterDragging;
+
+        /// <summary>分隔条的高度（像素）—— 够宽才好点中。</summary>
+        private const float SplitterHeight = 8f;
+
+        private float PanelHeightRatio
+        {
+            get
+            {
+                if (_panelHeightRatio < 0f)
+                {
+                    _panelHeightRatio = EditorPrefs.GetFloat(PanelHeightKey, 0.46f);
+                }
+
+                return Mathf.Clamp(_panelHeightRatio, 0.15f, 0.9f);
+            }
+            set
+            {
+                _panelHeightRatio = Mathf.Clamp(value, 0.15f, 0.9f);
+                EditorPrefs.SetFloat(PanelHeightKey, _panelHeightRatio);
+            }
+        }
+
+        /// <summary>
+        /// 算出面板区和分隔条的矩形。
+        ///
+        /// 面板高度 = 可用高度 × <see cref="PanelHeightRatio"/>，
+        /// 并夹在「至少 90px」和「至少给画面留 120px」之间 ——
+        /// 拖到极限也不会把某一边完全挤没。
+        /// </summary>
+        private Rect StickerAreas(Rect imageRect, out Rect splitterRect)
+        {
+            const float MinImage = 120f;
+            const float MinPanel = 90f;
+            const float BottomBar = 56f;
+
+            // 从图片下沿到页脚上方，是这块区域能用的全部高度
+            float top = imageRect.yMax + SplitterHeight;
+            float bottom = position.height - BottomBar;
+            float available = Mathf.Max(MinPanel, bottom - top);
+
+            // 面板高度 = 可用高度 × 比例，并夹住两头：
+            // 面板不小于 90px，同时给上方画面至少留 120px。
+            float maxPanel = Mathf.Max(MinPanel, available - MinImage);
+            float panelH = Mathf.Clamp(available * PanelHeightRatio, MinPanel, maxPanel);
+
+            // 分隔条贴在图片下沿
+            splitterRect = new Rect(
+                0f,
+                imageRect.yMax,
+                position.width,
+                SplitterHeight);
+
+            return new Rect(
+                4f,
+                imageRect.yMax + SplitterHeight,
+                position.width - 8f,
+                panelH);
+        }
+
+        /// <summary>
+        /// 画分隔条并处理拖动。
+        ///
+        /// 拖的时候直接按住整条（不要求精确点中），并显示上下箭头光标，
+        /// 让「这里能拖」这件事一眼看得出来。
+        /// </summary>
+        private void DrawSplitter(Rect r)
+        {
+            Event e = Event.current;
+
+            bool hover = e != null && r.Contains(e.mousePosition);
+
+            // 底色：平时淡、悬停和拖动时亮
+            Color fill = _splitterDragging
+                ? new Color(0.35f, 0.6f, 0.95f, 0.9f)
+                : hover
+                    ? new Color(0.5f, 0.62f, 0.78f, 0.7f)
+                    : new Color(0.28f, 0.28f, 0.28f, 0.5f);
+
+            EditorGUI.DrawRect(r, fill);
+
+            // 三条小横线，暗示「可拖动」
+            Color lineColor = new Color(0.75f, 0.78f, 0.82f, hover || _splitterDragging ? 1f : 0.55f);
+            float cx = r.center.x;
+            float cy = r.center.y;
+
+            for (int i = -1; i <= 1; i++)
+            {
+                EditorGUI.DrawRect(new Rect(cx - 14f, cy + i * 2.2f, 28f, 1.2f), lineColor);
+            }
+
+            if (e == null)
+            {
+                return;
+            }
+
+            if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
+            {
+                _splitterDragging = true;
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseDrag && _splitterDragging)
+            {
+                // 鼠标在窗口里的相对高度 → 面板比例
+                float usableTop = r.y;
+                float usableBottom = position.height - 56f;
+                float usable = Mathf.Max(1f, usableBottom - usableTop);
+
+                float fromBottom = usableBottom - e.mousePosition.y;
+                PanelHeightRatio = fromBottom / usable;
+
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseUp && _splitterDragging)
+            {
+                _splitterDragging = false;
+                e.Use();
+                Repaint();
+            }
+        }
 
         /// <summary>拖动中的状态。</summary>
         private int _dragSticker = -1;
