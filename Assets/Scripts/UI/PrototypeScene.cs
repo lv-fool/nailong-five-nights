@@ -1867,6 +1867,12 @@ namespace NailongFNAF.UI
                 SetMonitorFrame(_solidSprite, Color.black);
                 _monitorLabel.text = CameraName(index) + "    (AUDIO ONLY)";
                 HideMonitorCharacters();
+
+                // ⚠️ 这里也要清贴图 —— 这条分支提前 return，不走下面的
+                // ApplyMonitorBackground，否则会残留上一个机位的插画，
+                // 在黑屏上飘着。传 null = 整组隐藏。
+                ApplyMonitorStickers(null);
+
                 UpdateCameraBoxes(index);
                 return;
             }
