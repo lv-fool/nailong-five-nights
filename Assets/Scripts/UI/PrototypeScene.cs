@@ -1090,6 +1090,83 @@ namespace NailongFNAF.UI
             HandleNaibaoPhoneClick(gm);
         }
 
+        // ── 监控平板动画 ──
+        // 开关不再是瞬间出现/消失：黑平板从屏幕底部**抬起/放下**（约 0.18 秒），
+        // 期间监控画面跟着平板走。放下的那一小段里画面还在（半透明渐隐），
+        // 不是啪一下没了。
+
+        /// <summary>平板动画时长（秒）。</summary>
+        private const float MonitorAnimSeconds = 0.18f;
+
+        /// <summary>当前动画进度：0 = 完全放下，1 = 完全抬起。</summary>
+        private float _monitorAnim;
+
+        /// <summary>动画方向：1 抬起中，-1 放下中，0 = 静止。</summary>
+        private int _monitorAnimDir;
+
+        /// <summary>动画期间的平板容器（黑壳 + 画面都在里面，整体位移/倾斜）。</summary>
+        private RectTransform _monitorTablet;
+
+        /// <summary>
+        /// 监控平板的视觉状态。
+        /// 返回 true 表示动画还在进行中（这一帧别把 overlay SetActive(false)）。
+        /// </summary>
+        private bool UpdateMonitorTabletAnim(bool wantUp)
+        {
+            // 目标进度
+            float target = wantUp ? 1f : 0f;
+            int dir = wantUp ? 1 : -1;
+
+            if (_monitorTablet == null)
+            {
+                return false;
+            }
+
+            // 已经到位且没有动画要播
+            if (_monitorAnimDir == 0 && Mathf.Approximately(_monitorAnim, target))
+            {
+                return false;
+            }
+
+            if (_monitorAnimDir != dir && Mathf.Approximately(_monitorAnim, target))
+            {
+                _monitorAnimDir = 0;
+                return false;
+            }
+
+            _monitorAnimDir = dir;
+
+            // 推进
+            float dt = Time.unscaledDeltaTime;
+            _monitorAnim = Mathf.MoveTowards(_monitorAnim, target, dt / MonitorAnimSeconds);
+
+            // 缓动：easeOutCubic 的感觉
+            float eased = 1f - Mathf.Pow(1f - _monitorAnim, 3f);
+
+            // 平板从屏幕底部抬起来：位移 + 轻微透视倾斜
+            float h = Screen.height;
+            float rise = (1f - eased) * h * 0.85f;
+
+            _monitorTablet.anchoredPosition = new Vector2(0f, -rise);
+            _monitorTablet.localRotation = Quaternion.Euler(0f, 0f, 0f);
+
+            // 画面透明度跟动画走（放下的过程渐隐）
+            float alpha = Mathf.Clamp01(eased * 1.6f);
+            var cg = _monitorTablet.GetComponent<UnityEngine.CanvasGroup>();
+            if (cg != null)
+            {
+                cg.alpha = alpha;
+            }
+
+            bool running = !Mathf.Approximately(_monitorAnim, target);
+            if (!running)
+            {
+                _monitorAnimDir = 0;
+            }
+
+            return true;
+        }
+
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
         private void HandleMonitorHotspot(GameManager gm)
         {
@@ -1240,6 +1317,11 @@ namespace NailongFNAF.UI
 
             // 监控层：断电后整套掉线，别挡着断电演出
             bool monitorUp = gm.MonitorUp && !_hasJumpscare && !gm.HasPowerOut;
+
+            // 平板动画：抬 / 放的过程里 overlay **保持激活**，
+            // 让画面跟着平板滑出来 / 滑回去，而不是啪一下出现或消失。
+            bool animating = UpdateMonitorTabletAnim(monitorUp);
+
             if (monitorUp)
             {
                 UpdateMonitorAreaScale();
@@ -1248,7 +1330,7 @@ namespace NailongFNAF.UI
 
             UpdateMonitorBlur(monitorUp);
 
-            _monitorOverlay.gameObject.SetActive(monitorUp);
+            _monitorOverlay.gameObject.SetActive(monitorUp || animating);
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
             _monitorMapGroup.blocksRaycasts = monitorUp;
 
@@ -5348,8 +5430,22 @@ namespace NailongFNAF.UI
             // **固定 1920×1080 设计像素**，再按窗口等比缩放（见 UpdateMonitorAreaScale）。
             // 这样编辑器预览里的「归一化坐标 / 设计像素」和运行时是同一套，
             // 摆多大就是多大；窗口不是 16:9 时留黑边，而不是把画面拉扁或裁掉。
+            // 1.55) 平板容器：包住设计区（黑壳 + 画面 + 敌人 + 小地图都在里面）。
+            //       开关监控时这块整体从屏幕底部抬起 / 放下（见 UpdateMonitorTabletAnim）。
+            //       ⚠️ 框外模糊**不在**容器里 —— 抬起时办公室就该先看见，
+            //       只有平板本体在滑。
+            var tabletGo = new GameObject("MonitorTablet", typeof(RectTransform), typeof(UnityEngine.CanvasGroup));
+            tabletGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _monitorTablet = tabletGo.GetComponent<RectTransform>();
+            _monitorTablet.anchorMin = new Vector2(0.5f, 0.5f);
+            _monitorTablet.anchorMax = new Vector2(0.5f, 0.5f);
+            _monitorTablet.pivot = new Vector2(0.5f, 0.5f);
+            _monitorTablet.anchoredPosition = Vector2.zero;
+            _monitorTablet.sizeDelta = Vector2.zero;
+
             var areaGo = new GameObject("MonitorArea", typeof(RectTransform));
-            areaGo.transform.SetParent(_monitorOverlay.transform, false);
+            areaGo.transform.SetParent(_monitorTablet, false);
 
             _monitorArea = areaGo.GetComponent<RectTransform>();
             _monitorArea.anchorMin = new Vector2(0.5f, 0.5f);
