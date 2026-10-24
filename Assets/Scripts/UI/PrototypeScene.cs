@@ -645,6 +645,39 @@ namespace NailongFNAF.UI
         public const float MonitorDesignWidth = 1920f;
         public const float MonitorDesignHeight = 1080f;
 
+        /// <summary>黑壳比画面框外扩多少（设计像素）—— 34 ≈ 屏幕宽的 1.8%。</summary>
+        private const float MonitorBezelPad = 34f;
+
+        /// <summary>
+        /// 监控画面相对窗口留多少（0.92 = 上下左右各留 4%）。
+        /// 留出来的地方是黑壳 + 糊掉的办公室。**改这一个数就能调大小。**
+        /// </summary>
+        private const float MonitorInset = 0.92f;
+
+        /// <summary>黑壳颜色：近黑略带一点冷灰，别用纯黑（和画面里的黑糊成一片）。</summary>
+        private static readonly Color MonitorBezelColor = new Color(0.055f, 0.065f, 0.070f, 1f);
+
+        /// <summary>壳内沿那圈细亮线比画面框外扩多少（设计像素）。</summary>
+        private const float MonitorBezelRimPad = 3f;
+
+        /// <summary>细亮线的颜色 —— 比壳亮一档就够，太亮会像发光边框。</summary>
+        private static readonly Color MonitorBezelRimColor = new Color(0.22f, 0.23f, 0.24f, 1f);
+
+        /// <summary>
+        /// 画面框外那层模糊：显示 `_blurRT`（低分辨率渲的办公室），铺满整屏，
+        /// 挂在 overlay 第一个子物体，监控画面框盖在它上面。
+        /// </summary>
+        private RawImage _monitorBlurImage;
+
+        /// <summary>专门给模糊层渲低分辨率画面的相机（复制主相机的位姿 / FOV）。</summary>
+        private Camera _blurCam;
+
+        /// <summary>低分辨率渲染目标。屏幕尺寸变了要重建。</summary>
+        private RenderTexture _blurRT;
+
+        /// <summary>模糊层把画面缩小到 1/6 再拉大 —— 数越大越糊、越便宜。</summary>
+        private const int MonitorBlurDownscale = 6;
+
         /// <summary>
         /// 监控画面的**底图**（挂在 overlay 下面单独一层）。
         ///
@@ -1202,6 +1235,8 @@ namespace NailongFNAF.UI
                 UpdateMonitorAreaScale();
                 ApplyMonitorOverlay(gm);
             }
+
+            UpdateMonitorBlur(monitorUp);
 
             _monitorOverlay.gameObject.SetActive(monitorUp);
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
@@ -2644,11 +2679,13 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 把 16:9 设计区等比缩到窗口里**完整放下**（整张监控图不裁、不拉伸）。
         ///
-        /// 取 <c>min</c>：宁可窗口不是 16:9 时两侧（或上下）留黑，也要让画面完整。
+        /// 取 <c>min</c>：宁可窗口不是 16:9 时两侧（或上下）留空，也要让画面完整。
         /// 试过 <c>max</c>（铺满、裁边），但 2.66:1 那种宽窗口要裁掉三成高度，
         /// 天花板 / 地板说没就没 —— 绿子 2026-10-24 看过之后选了「完整显示」。
-        /// **窗口正好 16:9 时两者相等**，等于 1:1 原样铺满整个屏幕（她的显示器就是 1920×1080，
-        /// 打包出来满屏无黑边）。
+        ///
+        /// 再乘 <see cref="MonitorInset"/>：**画面永远不顶到屏幕边缘**，
+        /// 留出黑壳（`MonitorBezelPad`）和一圈糊掉的办公室 —— 监控得像一台摆在那儿的设备，
+        /// 而不是一张贴满屏幕的图（绿子 2026-10-24：「画框外加模糊，给监控一个黑壳边框」）。
         ///
         /// 只改 <c>localScale</c>，不动 <c>sizeDelta</c> —— 设计区里的坐标永远是
         /// 1920×1080 那一套，编辑器预览和运行时才对得上。
@@ -2666,7 +2703,8 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            float s = Mathf.Min(host.width / MonitorDesignWidth, host.height / MonitorDesignHeight);
+            float s = Mathf.Min(host.width / MonitorDesignWidth, host.height / MonitorDesignHeight)
+                * MonitorInset;
             if (s <= 0f)
             {
                 return;
@@ -2682,6 +2720,97 @@ namespace NailongFNAF.UI
             if (_monitorArea.anchoredPosition != Vector2.zero)
             {
                 _monitorArea.anchoredPosition = Vector2.zero;
+            }
+        }
+
+        /// <summary>
+        /// 监控画面框外那圈「虚化的办公室」。
+        ///
+        /// 做法：另开一台相机（不碰 `Camera.main`，免得 `WorldToScreenPoint`
+        /// 变成渲染目标的像素坐标、把墙上的按钮和门口立绘算错），
+        /// 每帧复制主相机的位姿 / FOV，渲到 **1/6 分辨率** 的 RenderTexture，
+        /// 再用一张全屏 RawImage 双线性拉大 —— 就是一团柔和的虚化。
+        ///
+        /// 只在监控升起时开；降下时立刻关掉相机、隐藏图片，一分钱不花。
+        /// </summary>
+        private void UpdateMonitorBlur(bool on)
+        {
+            if (_monitorBlurImage == null)
+            {
+                return;
+            }
+
+            if (!on)
+            {
+                if (_monitorBlurImage.enabled)
+                {
+                    _monitorBlurImage.enabled = false;
+                }
+
+                if (_blurCam != null && _blurCam.enabled)
+                {
+                    _blurCam.enabled = false;
+                }
+
+                return;
+            }
+
+            Camera main = Camera.main;
+            if (main == null)
+            {
+                _monitorBlurImage.enabled = false;
+                return;
+            }
+
+            int w = Mathf.Max(8, Screen.width / MonitorBlurDownscale);
+            int h = Mathf.Max(8, Screen.height / MonitorBlurDownscale);
+
+            if (_blurRT == null || _blurRT.width != w || _blurRT.height != h)
+            {
+                if (_blurCam != null)
+                {
+                    _blurCam.targetTexture = null;
+                }
+
+                if (_blurRT != null)
+                {
+                    _blurRT.Release();
+                    Destroy(_blurRT);
+                }
+
+                _blurRT = new RenderTexture(w, h, 16, RenderTextureFormat.Default);
+                _blurRT.filterMode = FilterMode.Bilinear;
+                _blurRT.Create();
+            }
+
+            if (_blurCam == null)
+            {
+                var go = new GameObject("MonitorBlurCamera");
+                _blurCam = go.AddComponent<Camera>();
+                _blurCam.clearFlags = CameraClearFlags.SolidColor;
+                _blurCam.backgroundColor = Color.black;
+                _blurCam.nearClipPlane = 0.05f;
+                _blurCam.farClipPlane = 60f;
+                _blurCam.allowHDR = false;
+                _blurCam.allowMSAA = false;
+                _blurCam.useOcclusionCulling = false;
+            }
+
+            _blurCam.transform.SetPositionAndRotation(main.transform.position, main.transform.rotation);
+            _blurCam.fieldOfView = main.fieldOfView;
+            _blurCam.cullingMask = main.cullingMask;
+            _blurCam.targetTexture = _blurRT;
+
+            if (!_blurCam.enabled)
+            {
+                _blurCam.enabled = true;
+            }
+
+            _monitorBlurImage.texture = _blurRT;
+
+            if (!_monitorBlurImage.enabled)
+            {
+                _monitorBlurImage.enabled = true;
             }
         }
 
@@ -5132,6 +5261,22 @@ namespace NailongFNAF.UI
             // 注意 raycastTarget 仍是 true —— 透明也要挡住背后的点击。
             _monitorOverlay.color = Color.clear;
 
+            // 0) 框外模糊：把办公室**低分辨率渲一遍**再拉大，自然就糊了。
+            //    监控画面框（连同黑壳）盖在它上面，所以只有框外是糊的。
+            //
+            // ⚠️ 别用 GrabPass 做实时高斯 —— 试过：抓屏 + 25 抽样在这台机器上
+            //    掉到 50fps（不开是 160fps），比低分辨率渲一遍贵一个数量级。
+            //    低分辨率方案基本免费，模糊感也够（背景本来就该看不清）。
+            var blurGo = new GameObject("MonitorBlur", typeof(RectTransform), typeof(RawImage));
+            blurGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _monitorBlurImage = blurGo.GetComponent<RawImage>();
+            StretchToParent(_monitorBlurImage.rectTransform);
+            _monitorBlurImage.raycastTarget = false;
+            // 稍微压暗一点点，别让模糊的背景比监控画面还抢眼
+            _monitorBlurImage.color = new Color(0.88f, 0.89f, 0.92f, 1f);
+            blurGo.transform.SetAsFirstSibling();
+
             // 1.5) 16:9 设计区 —— 监控画面的一切都挂在这下面。
             //
             // **固定 1920×1080 设计像素**，再按窗口等比缩放（见 UpdateMonitorAreaScale）。
@@ -5148,12 +5293,51 @@ namespace NailongFNAF.UI
             _monitorArea.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
             _monitorArea.localScale = Vector3.one;
 
+            // 1.6) 黑壳：比画面框大一圈的圆角黑板，让监控像一台真的显示器。
+            //      挂在设计区里（跟着一起缩放），排在垫底之前 —— 只露出发给框外的那一圈。
+            var bezelGo = new GameObject("MonitorBezel", typeof(RectTransform), typeof(Image));
+            bezelGo.transform.SetParent(_monitorArea, false);
+
+            var bezelRect = bezelGo.GetComponent<RectTransform>();
+            bezelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            bezelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            bezelRect.pivot = new Vector2(0.5f, 0.5f);
+            bezelRect.anchoredPosition = Vector2.zero;
+            bezelRect.sizeDelta = new Vector2(
+                MonitorDesignWidth + MonitorBezelPad * 2f,
+                MonitorDesignHeight + MonitorBezelPad * 2f);
+
+            var bezelImage = bezelGo.GetComponent<Image>();
+            bezelImage.sprite = GetButtonSprite();
+            bezelImage.type = Image.Type.Sliced;
+            bezelImage.color = MonitorBezelColor;
+            bezelImage.raycastTarget = false;
+
+            // 1.7) 壳内沿的一圈细亮线：纯黑壳贴着一片暗画面时看不出边界，
+            //      加这条 3px 的灰线才有「屏幕嵌在壳里」的立体感。
+            var rimGo = new GameObject("MonitorBezelRim", typeof(RectTransform), typeof(Image));
+            rimGo.transform.SetParent(_monitorArea, false);
+
+            var rimRect = rimGo.GetComponent<RectTransform>();
+            rimRect.anchorMin = new Vector2(0.5f, 0.5f);
+            rimRect.anchorMax = new Vector2(0.5f, 0.5f);
+            rimRect.pivot = new Vector2(0.5f, 0.5f);
+            rimRect.anchoredPosition = Vector2.zero;
+            rimRect.sizeDelta = new Vector2(
+                MonitorDesignWidth + MonitorBezelRimPad * 2f,
+                MonitorDesignHeight + MonitorBezelRimPad * 2f);
+
+            var rimImage = rimGo.GetComponent<Image>();
+            rimImage.sprite = GetButtonSprite();
+            rimImage.type = Image.Type.Sliced;
+            rimImage.color = MonitorBezelRimColor;
+            rimImage.raycastTarget = false;
+
             // 1) 画面框内的纯黑垫底：底图缩小 / 平移后露出来的地方必须是黑的
-            //    （屏幕该有的黑），**只盖画面框这一块** —— 框外要让办公室透出来。
+            //    （屏幕该有的黑），**只盖画面框这一块** —— 框外是糊掉的办公室。
             _monitorBackdrop = MakeFullScreenImage("MonitorBackdrop", Color.black, false);
             _monitorBackdrop.transform.SetParent(_monitorArea, false);
             StretchToParent(_monitorBackdrop.rectTransform);
-            _monitorBackdrop.transform.SetAsFirstSibling();
 
             // 2) 底图：可单独平移 / 缩放（以后换分块背景靠它对齐）
             _monitorFrame = MakeFullScreenImage("MonitorFrame", Color.white, false);
