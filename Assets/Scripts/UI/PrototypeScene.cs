@@ -630,6 +630,22 @@ namespace NailongFNAF.UI
         private Image _monitorOverlay;
 
         /// <summary>
+        /// 监控画面的**16:9 设计区** —— 底图、贴图、敌人、小地图全都挂在它下面。
+        ///
+        /// 尺寸**固定** 1920×1080（设计像素），再靠 <c>localScale</c> 等比缩到窗口里能放下。
+        /// 为什么不直接把 overlay 铺满屏幕：overlay 的尺寸跟着窗口宽高比走
+        /// （宽屏下能到 2350×882），而编辑器「奶龙 / 6. 监控画面编辑器」里的预览
+        /// **永远是 mon_*.png 的 16:9**。两边坐标系一比一才谈得上「所见即所得」——
+        /// 否则同一张海报在编辑器里是 32% 高，进游戏变成 48% 高（2026-10-24 绿子报的
+        /// 「调的比例与监控显示不同」就是这个）。
+        /// </summary>
+        private RectTransform _monitorArea;
+
+        /// <summary>监控画面的设计分辨率（= mon_*.png 的原尺寸）。</summary>
+        public const float MonitorDesignWidth = 1920f;
+        public const float MonitorDesignHeight = 1080f;
+
+        /// <summary>
         /// 监控画面的**底图**（挂在 overlay 下面单独一层）。
         ///
         /// 为什么不直接画在 overlay 上：底图要能**单独平移 / 缩放**（以后换成分块背景
@@ -1183,6 +1199,7 @@ namespace NailongFNAF.UI
             bool monitorUp = gm.MonitorUp && !_hasJumpscare && !gm.HasPowerOut;
             if (monitorUp)
             {
+                UpdateMonitorAreaScale();
                 ApplyMonitorOverlay(gm);
             }
 
@@ -2058,9 +2075,10 @@ namespace NailongFNAF.UI
                 MonitorPoint custom = FindMonitorPoint(ids[i], cam);
                 if (custom != null)
                 {
-                    var overlayRt = (RectTransform)_monitorOverlay.transform;
-                    x = (custom.x - 0.5f) * overlayRt.rect.width;
-                    rect.anchoredPosition = new Vector2(x, custom.y * overlayRt.rect.height);
+                    // 归一化坐标 → **设计区**像素（1920×1080），不是 overlay 的尺寸
+                    Rect areaRect = MonitorAreaRect();
+                    x = (custom.x - 0.5f) * areaRect.width;
+                    rect.anchoredPosition = new Vector2(x, custom.y * areaRect.height);
                 }
                 else
                 {
@@ -2360,8 +2378,7 @@ namespace NailongFNAF.UI
                 return slotX;
             }
 
-            var overlayRect = (RectTransform)_monitorOverlay.transform;
-            float width = overlayRect.rect.width;
+            float width = MonitorAreaRect().width;
             float boxCenterX = ((minX + maxX) * 0.5f - 0.5f) * width;
 
             // 往箱子中心靠 60%
@@ -2622,6 +2639,54 @@ namespace NailongFNAF.UI
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 把 16:9 设计区等比缩到窗口里能放下（两边留黑，不拉伸）。
+        ///
+        /// 只改 <c>localScale</c>，不动 <c>sizeDelta</c> —— 设计区里的坐标永远是
+        /// 1920×1080 那一套，编辑器预览和运行时才对得上。
+        /// </summary>
+        private void UpdateMonitorAreaScale()
+        {
+            if (_monitorArea == null || _monitorOverlay == null)
+            {
+                return;
+            }
+
+            Rect host = _monitorOverlay.rectTransform.rect;
+            if (host.width < 1f || host.height < 1f)
+            {
+                return;
+            }
+
+            float s = Mathf.Min(host.width / MonitorDesignWidth, host.height / MonitorDesignHeight);
+            if (s <= 0f)
+            {
+                return;
+            }
+
+            var scale = new Vector3(s, s, 1f);
+            if (_monitorArea.localScale != scale)
+            {
+                _monitorArea.localScale = scale;
+            }
+        }
+
+        /// <summary>
+        /// 监控画面的**设计区矩形**（1920×1080，原点在左下）。
+        /// 所有归一化坐标（点位 / 贴图 / 遮挡）都以它为基准 —— 不是 overlay。
+        /// </summary>
+        private Rect MonitorAreaRect()
+        {
+            if (_monitorArea != null)
+            {
+                return _monitorArea.rect;
+            }
+
+            return _monitorOverlay != null
+                ? _monitorOverlay.rectTransform.rect
+                : new Rect(0f, 0f, MonitorDesignWidth, MonitorDesignHeight);
         }
 
         /// <summary>把底图的平移 / 缩放套到画面上。没配该机位就复位。</summary>
@@ -3073,41 +3138,37 @@ namespace NailongFNAF.UI
                     // 用世界角点反算，而不是拼 anchoredPosition ——
                     // 立绘外面套着 mask 父节点、pivot 又在底部，纯算偏移会错。
                     //
-                    // ⚠️ 基准必须是**监控图本身占的那块区域**，不是 overlay：
-                    // overlay 是 2241x925（铺满画布），而监控图是 16:9 的 1920x1080，
-                    // 两者宽高比不同，直接按 overlay 算会让采样坐标整体偏掉。
-                    var imgRect = img.rectTransform;
-                    var overlayRect = (RectTransform)_monitorOverlay.transform;
-
-                    // 监控图在 overlay 里的**实际显示区域**。
-                    // 图是 16:9，overlay 是 2241x925（宽高比 2.42:1），
-                    // 所以图会被拉伸铺满 —— 遮罩和背景图用的是同一张 1920x1080 内容，
-                    // 两者在 overlay 里占的是**同一块区域**，直接按 overlay 归一化即可。
-                    //
-                    // （早先担心的「宽高比不一致」其实不存在：拉伸对背景和遮罩
-                    //   是同时发生的，所以它们的归一化坐标仍然一一对应。）
-                    // ⚠️ 必须用 **InverseTransformPoint 转进 overlay 的本地空间**，
+                    // ⚠️ 基准必须是**监控画面的设计区**（1920×1080，和遮罩图同尺寸），
+                    // 不是 overlay：overlay 的宽高比跟着窗口走，拿它归一化会让采样坐标整体偏掉。
+                    // 2026-10-24 起 overlay 里放了一块固定 16:9 的 MonitorArea，
+                    // 底图 / 贴图 / 立绘 / 遮罩全都对齐到它。
+                    // ⚠️ 必须用 **InverseTransformPoint 转进设计区的本地空间**，
                     // 不能拿世界坐标相减再除以 rect.size ——
                     // Canvas 有缩放系数（CanvasScaler），世界单位 ≠ 本地单位，
                     // 混用会算出**偏小且偏移**的矩形，遮挡就跑到画面别处去了
                     // （2026-10-18 踩过：算出来 0.05 宽，实际应该是 0.09）。
+                    var imgRect = img.rectTransform;
+                    RectTransform areaRt = _monitorArea != null
+                        ? _monitorArea
+                        : (RectTransform)_monitorOverlay.transform;
+
                     Vector3[] corners = new Vector3[4];
                     imgRect.GetWorldCorners(corners);
 
-                    Rect local = overlayRect.rect;
+                    Rect local = areaRt.rect;
 
                     Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
                     Vector2 max = new Vector2(float.MinValue, float.MinValue);
                     for (int ci = 0; ci < 4; ci++)
                     {
-                        Vector3 p = overlayRect.InverseTransformPoint(corners[ci]);
+                        Vector3 p = areaRt.InverseTransformPoint(corners[ci]);
                         min.x = Mathf.Min(min.x, p.x);
                         min.y = Mathf.Min(min.y, p.y);
                         max.x = Mathf.Max(max.x, p.x);
                         max.y = Mathf.Max(max.y, p.y);
                     }
 
-                    // 本地坐标 → 0..1（以 overlay 左下角为原点）
+                    // 本地坐标 → 0..1（以设计区左下角为原点）
                     float u0 = (min.x - local.xMin) / local.width;
                     float du = (max.x - min.x) / local.width;
 
@@ -5061,22 +5122,36 @@ namespace NailongFNAF.UI
             StretchToParent(_monitorBackdrop.rectTransform);
             _monitorBackdrop.transform.SetAsFirstSibling();
 
+            // 1.5) 16:9 设计区 —— 监控画面的一切都挂在这下面。
+            //
+            // **固定 1920×1080 设计像素**，再按窗口等比缩放（见 UpdateMonitorAreaScale）。
+            // 这样编辑器预览里的「归一化坐标 / 设计像素」和运行时是同一套，
+            // 摆多大就是多大；窗口不是 16:9 时两侧留黑，而不是把画面拉扁。
+            var areaGo = new GameObject("MonitorArea", typeof(RectTransform));
+            areaGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _monitorArea = areaGo.GetComponent<RectTransform>();
+            _monitorArea.anchorMin = new Vector2(0.5f, 0.5f);
+            _monitorArea.anchorMax = new Vector2(0.5f, 0.5f);
+            _monitorArea.pivot = new Vector2(0.5f, 0.5f);
+            _monitorArea.anchoredPosition = Vector2.zero;
+            _monitorArea.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
+            _monitorArea.localScale = Vector3.one;
+
             // 2) 底图：可单独平移 / 缩放（以后换分块背景靠它对齐）
             _monitorFrame = MakeFullScreenImage("MonitorFrame", Color.white, false);
-            _monitorFrame.transform.SetParent(_monitorOverlay.transform, false);
+            _monitorFrame.transform.SetParent(_monitorArea, false);
             StretchToParent(_monitorFrame.rectTransform);
-            _monitorFrame.transform.SetSiblingIndex(1);
 
             // 2.5) 贴图层：墙上海报 / 涂鸦 / 警示牌 —— **在底图之上、敌人之下**。
             //      跟着底图那层一起，但不参与它的缩放（贴图自己有归一化坐标）。
             var stickerGo = new GameObject("MonitorStickers", typeof(RectTransform));
-            stickerGo.transform.SetParent(_monitorOverlay.transform, false);
+            stickerGo.transform.SetParent(_monitorArea, false);
 
             _stickerRoot = stickerGo.GetComponent<RectTransform>();
             StretchToParent(_stickerRoot);
-            stickerGo.transform.SetSiblingIndex(2);
 
-            _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1B",
+            _monitorLabel = MakeText(_monitorArea, "MonitorLabel", "CAM 1B",
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
 
@@ -5095,7 +5170,7 @@ namespace NailongFNAF.UI
                 // 现在的裁剪全靠 MonitorCharacter.shader 逐像素 clip，不需要 RectMask2D。
                 var maskGo = new GameObject("MonitorCharacterMask" + i,
                     typeof(RectTransform));
-                maskGo.transform.SetParent(_monitorOverlay.transform, false);
+                maskGo.transform.SetParent(_monitorArea, false);
 
                 // 保险：场景里若残留旧的 RectMask2D（早期版本建的），一并清掉
                 var staleMask = maskGo.GetComponent<RectMask2D>();
@@ -5156,7 +5231,7 @@ namespace NailongFNAF.UI
 
             // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
-            map.transform.SetParent(_monitorOverlay.transform, false);
+            map.transform.SetParent(_monitorArea, false);
 
             var mapRect = map.GetComponent<RectTransform>();
             PlaceRect(mapRect, new Vector2(1f, 0f), new Vector2(1f, 0f),
