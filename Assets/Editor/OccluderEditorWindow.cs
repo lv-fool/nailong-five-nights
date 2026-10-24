@@ -1688,65 +1688,59 @@ namespace NailongFNAF.EditorTools
         /// 没有透视时（最常见）退回两次 GUI.DrawTextureWithTexCoords 会拉伸变形，
         /// 所以这里统一用 GL：它按顶点插值 UV，倾斜得多厉害都正确。
         /// </summary>
+        /// <summary>
+        /// 把贴图画成**任意四边形** —— 用「横向切片」近似。
+        ///
+        /// 为什么不用 GL：
+        /// GL.Begin 必须配 GL.LoadPixelMatrix，而那个矩阵用的是
+        /// **Screen.width/height（设备像素）**，可 gui 坐标是**编辑器窗口坐标**，
+        /// 两个尺度对不上 —— 画出来会跑到窗口外面（表现就是「图片不显示」）。
+        /// 而且 EditorWindow 里 GL 的裁剪区和 IMGUI 不一致，很容易整块被裁掉。
+        ///
+        /// 所以改成切片：把四边形沿纵向切成 N 条梯形，
+        /// 每条用 GUI.DrawTextureWithTexCoords 画（它支持指定 UV 区域）。
+        /// N 够大时视觉上和真四边形几乎没差别，而且完全走 IMGUI，不会跑位。
+        /// </summary>
         private static void DrawQuadTexture(Vector2[] gui, Texture tex, Vector2[] uv)
         {
-            if (Event.current == null || Event.current.type != EventType.Repaint)
+            if (tex == null || gui == null || gui.Length != 4 || uv == null)
             {
                 return;
             }
 
-            if (tex == null || gui == null || gui.Length != 4)
+            // 竖着切成 N 条**水平切片**。
+            // 每一片：左边取 (gui[1] → gui[0]) 上按 t 插值，右边取 (gui[2] → gui[3])，
+            // 片的高度由这两点的 y 差决定 —— 画出来就是梯形。
+            const int Slices = 64;
+
+            for (int s = 0; s < Slices; s++)
             {
-                return;
-            }
+                float t0 = s / (float)Slices;
+                float t1 = (s + 1) / (float)Slices;
 
-            Material mat = null;
+                // 左边界（从上边左角到下边左角）与右边界，分别按 t 插值
+                Vector2 l0 = Vector2.Lerp(gui[1], gui[0], t0);   // 左边 上
+                Vector2 l1 = Vector2.Lerp(gui[1], gui[0], t1);   // 左边 下
+                Vector2 r0 = Vector2.Lerp(gui[2], gui[3], t0);   // 右边 上
+                Vector2 r1 = Vector2.Lerp(gui[2], gui[3], t1);   // 右边 下
 
-            try
-            {
-                // 用一个临时的 UI 材质，指定 UGUI 默认 shader；
-                // GL 只认材质不认 GUI.color，所以透明度靠 Unlit/Transparent Colored
-                var shader = Shader.Find("UI/Default");
-                if (shader == null)
-                {
-                    shader = Shader.Find("Unlit/Transparent");
-                }
+                // 这一片的包围盒（GUI 坐标 y 向下）
+                float minX = Mathf.Min(l0.x, l1.x, r0.x, r1.x);
+                float maxX = Mathf.Max(l0.x, l1.x, r0.x, r1.x);
+                float minY = Mathf.Min(l0.y, l1.y, r0.y, r1.y);
+                float maxY = Mathf.Max(l0.y, l1.y, r0.y, r1.y);
 
-                if (shader == null)
-                {
-                    return;
-                }
+                float w = maxX - minX;
+                float h = maxY - minY;
 
-                mat = new Material(shader) { mainTexture = tex };
-                mat.SetPass(0);
+                if (w < 0.5f || h < 0.5f) { continue; }
 
-                GL.PushMatrix();
+                // 用包围盒 + 纹理坐标画。倾斜时用 48 片已经足够平滑，
+                // 每片内部仍按矩形近似 —— 这正是「切片法」的精度来源。
+                var src = new Rect(0f, 1f - t1, 1f, t1 - t0);
 
-                // 屏幕像素坐标 → GL 坐标（左下原点 0..1）
-                GL.LoadPixelMatrix(0f, Screen.width, Screen.height, 0f);
-
-                GL.Begin(GL.QUADS);
-
-                // GL 的 QUADS 顶点顺序：顺时针
-                for (int k = 0; k < 4; k++)
-                {
-                    GL.TexCoord2(uv[k].x, uv[k].y);
-                    GL.Vertex3(gui[k].x, gui[k].y, 0f);
-                }
-
-                GL.End();
-                GL.PopMatrix();
-            }
-            catch
-            {
-                // 绘制失败不该影响窗口 —— 静默跳过
-            }
-            finally
-            {
-                if (mat != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(mat);
-                }
+                GUI.DrawTextureWithTexCoords(
+                    new Rect(minX, minY, w, h), tex, src, true);
             }
         }
 
