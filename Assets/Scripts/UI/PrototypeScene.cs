@@ -5124,15 +5124,13 @@ namespace NailongFNAF.UI
             _monitorOverlay = MakeFullScreenImage("MonitorOverlay", MonitorFallback, true);
 
             // overlay 本身只当**容器**用，别再往上画东西（否则底图一缩放，
-            // 敌人立绘、小地图、机位名会跟着缩）。底色压黑即可。
-            _monitorOverlay.color = Color.black;
-
-            // 1) 纯黑垫底：底图缩小 / 平移后露出来的地方必须是黑的，
-            //    否则会透出办公室画面，看着像"监控没铺满"。
-            _monitorBackdrop = MakeFullScreenImage("MonitorBackdrop", Color.black, false);
-            _monitorBackdrop.transform.SetParent(_monitorOverlay.transform, false);
-            StretchToParent(_monitorBackdrop.rectTransform);
-            _monitorBackdrop.transform.SetAsFirstSibling();
+            // 敌人立绘、小地图、机位名会跟着缩）。
+            //
+            // **底色透明**：监控升起时，16:9 画面框之外要看得见办公室
+            // （绿子 2026-10-24：「打开监控的时候剩下的部分应该能看到办公室」）。
+            // 只有画面框**里面**才垫黑（MonitorBackdrop），像一块真的屏幕。
+            // 注意 raycastTarget 仍是 true —— 透明也要挡住背后的点击。
+            _monitorOverlay.color = Color.clear;
 
             // 1.5) 16:9 设计区 —— 监控画面的一切都挂在这下面。
             //
@@ -5149,6 +5147,13 @@ namespace NailongFNAF.UI
             _monitorArea.anchoredPosition = Vector2.zero;
             _monitorArea.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
             _monitorArea.localScale = Vector3.one;
+
+            // 1) 画面框内的纯黑垫底：底图缩小 / 平移后露出来的地方必须是黑的
+            //    （屏幕该有的黑），**只盖画面框这一块** —— 框外要让办公室透出来。
+            _monitorBackdrop = MakeFullScreenImage("MonitorBackdrop", Color.black, false);
+            _monitorBackdrop.transform.SetParent(_monitorArea, false);
+            StretchToParent(_monitorBackdrop.rectTransform);
+            _monitorBackdrop.transform.SetAsFirstSibling();
 
             // 2) 底图：可单独平移 / 缩放（以后换分块背景靠它对齐）
             _monitorFrame = MakeFullScreenImage("MonitorFrame", Color.white, false);
