@@ -1039,7 +1039,19 @@ namespace NailongFNAF.UI
 
         private void UpdateView(GameManager gm)
         {
-            if (CanOperate(gm))
+            if (!CanOperate(gm))
+            {
+                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
+                _panTarget = 0f;
+            }
+            else if (gm.MonitorUp)
+            {
+                // ⚠️ 监控开着时**不要跟鼠标转** ——
+                // 画面整个被监控盖住了，跟手转头毫无反馈，还会让切回来的
+                // 瞬间视角莫名其妙在边上。冻结当前视角（_panTarget 不动），
+                // 放下监控的那一刻就是抬头前的方向。
+            }
+            else
             {
                 float width = Screen.width;
                 float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
@@ -1048,11 +1060,6 @@ namespace NailongFNAF.UI
                 // 中间那段按比例跟手，两边各留一段**饱和区**（推到那儿视角不再变）——
                 // 贴墙的按钮只有落在这段里，鼠标才压得住、点得到（见 BuildWallButtons）。
                 _panTarget = Mathf.Clamp((x - 0.5f) / PanSaturationK, -1f, 1f);
-            }
-            else
-            {
-                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
-                _panTarget = 0f;
             }
 
             // 一点缓动：跟手，但不让鼠标的微小抖动直接抖到画面上
