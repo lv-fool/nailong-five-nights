@@ -68,12 +68,14 @@ Unity 2022.3 LTS + C# 写的，只跑 Windows，界面全中文。下面这些�
 （1,453,352 → 59,999 面）导出的 `Assets/Resources/NaibaoPhone/naibao_phone.fbx`，贴图单独放在
 `naibao_phone_color.jpg`；办公室没有实时光照，所以它用的是项目自己的 unlit shader，高亮靠把颜色往暖黄推。
 
-**她现在是会出声的。** 全部 33 句（引导、四件手欠、道歉、通话分档）都合成了 mp3，用的是火山引擎
-「豆包语音合成 2.0」的 Vivi 2.0 音色 —— 就是豆包说话那个调子。文件在 `Assets/Resources/Voice/`，
-台词文本以 `tools/voice_lines.json` 为唯一真源，改词之后跑一句
-`python tools/tts_volc.py --lines tools/voice_lines.json --outdir Assets/Resources/Voice` 重新生成。
-字幕的停留时间会跟着音频长度走（念完再留一口气），所以听得到的和看得见的是同一句。
-缺了某个 mp3 也不会崩，只是那一句退回成纯字幕 —— `VoiceBank` 找不到文件就安静地返回 null。
+**她现在是会出声的**，而且用的是豆包网页上那把真嗓子：让她把那句台词原样复述一遍，点她话下面的
+「朗读」，同时把系统输出环回录下来，再按能量裁静音、切句、归一化。文件是
+`Assets/Resources/Voice/<id>.wav`，`VoiceBank` 按 id 取，字幕停留时间跟着音频长度走（念完再留一口气）。
+
+**目前录好了 16 句**——最先会被听到的那些：五句第一夜引导、两句道歉、偷加耗电/抢监控/关灯各两句、三句嘲讽。
+手机通话那 17 句（还有第三句道歉）暂时没有配音，游戏退回纯字幕，流程一点不受影响。台词文本以
+`tools/voice_lines.json` 为唯一真源，录制与切分脚本都在 `tools/`（`record_loopback.py`、
+`trim_voice.py`、`split_voice.py`），补录之后把 wav 丢进同一个目录就会自动生效，不用改代码。
 
 ## 四种模式
 
