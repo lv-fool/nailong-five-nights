@@ -107,44 +107,70 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         public string RandomLineFor(EnemyId id, string avoid = null)
         {
+            string line;
+            RandomLineIndexFor(id, avoid, out line);
+            return line;
+        }
+
+        /// <summary>
+        /// 同 <see cref="RandomLineFor"/>，但**连这一句在池子里的下标一起返回**。
+        ///
+        /// 下标是给语音用的：结算画面按「敌人 + 抽中的第几句」去载
+        /// <c>Audio/voice_&lt;代号&gt;_&lt;下标&gt;</c>，这样字幕和录音才对得上。
+        /// （台词是随机抽的，只有一条通用录音必然会出现「说的和写的不是一句」。）
+        ///
+        /// 抽不到（空池）返回 -1，<paramref name="line"/> 为空串。
+        /// </summary>
+        public int RandomLineIndexFor(EnemyId id, string avoid, out string line)
+        {
+            line = string.Empty;
+
             List<string> pool = PoolFor(id);
 
             if (pool == null || pool.Count == 0)
             {
-                return string.Empty;
+                return -1;
             }
 
-            var candidates = new List<string>(pool.Count);
+            var candidates = new List<int>(pool.Count);
 
             for (int i = 0; i < pool.Count; i++)
             {
-                string line = pool[i];
+                string s = pool[i];
 
-                if (string.IsNullOrEmpty(line))
+                if (string.IsNullOrEmpty(s))
                 {
                     continue;
                 }
 
-                if (avoid != null && line == avoid)
+                if (avoid != null && s == avoid)
                 {
                     continue;
                 }
 
-                candidates.Add(line);
+                candidates.Add(i);
             }
 
             // 全是避免项（池子只有一句）→ 退回整池随机
             if (candidates.Count == 0)
             {
-                candidates = pool;
+                for (int i = 0; i < pool.Count; i++)
+                {
+                    if (!string.IsNullOrEmpty(pool[i]))
+                    {
+                        candidates.Add(i);
+                    }
+                }
             }
 
             if (candidates.Count == 0)
             {
-                return string.Empty;
+                return -1;
             }
 
-            return candidates[UnityEngine.Random.Range(0, candidates.Count)];
+            int pick = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+            line = pool[pick];
+            return pick;
         }
 
         /// <summary>写一只敌人的整池（编辑器窗口用）。</summary>

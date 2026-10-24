@@ -73,7 +73,13 @@ namespace NailongFNAF.EditorTools
                 LoadClip("Assets/Audio/SFX/sfx_camera_switch.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_footstep.ogg"),
                 LoadClip("Assets/Audio/SFX/sfx_power_out.ogg"),
-                LoadClip("Assets/Audio/SFX/sfx_power_out_music.wav"));
+                LoadClip("Assets/Audio/SFX/sfx_power_out_music.wav"),
+                // 偶尔响一下的远处环境声（不循环，25~70 秒随机一次）。
+                //
+                // 素材：用户给的「随机细碎音」3.91 秒 —— 一堆零碎的响动，
+                // 比原来那声金属撞击更像「楼里有东西在动」。
+                // 前面 2.8 秒是主体，尾巴自然衰减到静，所以整条直接用，没裁。
+                LoadClip("Assets/Audio/Ambient/amb_distant_metal_once.mp3"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);
