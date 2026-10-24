@@ -1366,14 +1366,22 @@ namespace NailongFNAF.EditorTools
                     }
                 }
 
-                _selSticker = hit;
-
+                // ⚠️ **点在空白处才取消选中**，点中任何一张就选中它。
+                // 之前是「没点中 = 取消」，于是拖动画时鼠标稍微不是精确落在
+                // 那张图上（比如拖到边缘、或图半透明）就会先被取消选中、
+                // 拖动随之断掉 —— 体感就是「一操作就丢选中」。
                 if (hit >= 0)
                 {
+                    _selSticker = hit;
                     _dragSticker = hit;
                     _dragStartNorm = ToNorm(r, e.mousePosition);
                     _dragStartX = stickers[hit].x;
                     _dragStartY = stickers[hit].y;
+                }
+                else
+                {
+                    _selSticker = -1;
+                    _dragSticker = -1;
                 }
 
                 e.Use();
@@ -1388,6 +1396,11 @@ namespace NailongFNAF.EditorTools
                 var st = stickers[_dragSticker];
                 st.x = Mathf.Clamp01(_dragStartX + delta.x);
                 st.y = Mathf.Clamp01(_dragStartY + delta.y);
+
+                // ⚠️ 必须写回 —— LayoutSticker 是**引用类型**，但数组本身
+                // 可能是从 Layout(room).stickers 取的副本；不写回的话
+                // 下一次 OnGUI 重画又会用回旧值，拖动看起来毫无反应。
+                Layout(_room).stickers = stickers;
 
                 _dirty = true;
                 e.Use();
@@ -1512,6 +1525,15 @@ namespace NailongFNAF.EditorTools
         {
             var e = Event.current;
             if (e == null)
+            {
+                return;
+            }
+
+            // ⚠️ **贴图模式自己处理鼠标**（见 DrawStickers → HandleStickerInput）。
+            // 这里的通用输入必须整个跳过 —— 它在 DrawStickers 之前执行，
+            // 会把 MouseDown 先吃掉（e.Use()），贴图的选中/拖动就永远收不到事件，
+            // 表现是「一点就取消选中、也拖不动」。
+            if (_mode == Mode.Stickers)
             {
                 return;
             }
