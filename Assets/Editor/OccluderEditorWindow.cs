@@ -493,6 +493,52 @@ namespace NailongFNAF.EditorTools
         ///
         /// 位置靠**拖动画面上的画**来改 —— 这里只管那些拖不出来的属性。
         /// </summary>
+        /// <summary>
+        /// 一行「标签 + −[输入框]+」的数值调节。
+        ///
+        /// 比滑动条顺手得多：滑动条想精确调到 0.18 要来回蹭，
+        /// 窗口一窄还只剩几像素行程；输入框直接敲数字，± 用来微调。
+        ///
+        /// <paramref name="dirty"/> 返回**这一行有没有被改**，
+        /// 调用方据此决定要不要置脏。
+        /// </summary>
+        private static float DrawNumberRow(string label, float value,
+            float min, float max, float step, out bool dirty)
+        {
+            dirty = false;
+
+            EditorGUILayout.BeginHorizontal();
+
+            GUILayout.Label(label, GUILayout.Width(90f));
+
+            if (GUILayout.Button("−", GUILayout.Width(24f)))
+            {
+                value = Mathf.Clamp(value - step, min, max);
+                dirty = true;
+            }
+
+            float typed = EditorGUILayout.FloatField(value, GUILayout.Width(90f));
+
+            if (!Mathf.Approximately(typed, value))
+            {
+                value = Mathf.Clamp(typed, min, max);
+                dirty = true;
+            }
+
+            if (GUILayout.Button("+", GUILayout.Width(24f)))
+            {
+                value = Mathf.Clamp(value + step, min, max);
+                dirty = true;
+            }
+
+            GUILayout.Label("（" + min.ToString("F2") + " ~ " + max.ToString("F2") + "）",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.EndHorizontal();
+
+            return value;
+        }
+
         private void DrawStickerPanel()
         {
             if (_stickerImages.Length == 0)
@@ -564,17 +610,29 @@ namespace NailongFNAF.EditorTools
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("选中：" + st.image, EditorStyles.boldLabel);
 
-            float w = EditorGUILayout.Slider("宽度", st.width, 0.02f, 1.2f);
-            if (!Mathf.Approximately(w, st.width)) { st.width = w; _dirty = true; }
+            // ⚠️ 用**输入框 + 微调按钮**而不是滑动条：
+            // 滑动条在编辑器里手感很差 —— 想精确调到 0.18 得来回蹭，
+            // 而且窗口一窄它就只剩几像素行程。输入框可以直接敲数字，
+            // 旁边的 ± 用来微调，两边都顺手。
 
-            float rot = EditorGUILayout.Slider("旋转", st.rotation, -180f, 180f);
-            if (!Mathf.Approximately(rot, st.rotation)) { st.rotation = rot; _dirty = true; }
+            st.width = DrawNumberRow("宽度", st.width, 0.02f, 1.2f, 0.01f, out bool dirtyW);
+            if (dirtyW) { _dirty = true; }
 
-            float a = EditorGUILayout.Slider("透明度", st.alpha, 0f, 1f);
-            if (!Mathf.Approximately(a, st.alpha)) { st.alpha = a; _dirty = true; }
+            st.rotation = DrawNumberRow("旋转", st.rotation, -180f, 180f, 1f, out bool dirtyR);
+            if (dirtyR) { _dirty = true; }
+
+            st.alpha = DrawNumberRow("透明度", st.alpha, 0f, 1f, 0.05f, out bool dirtyA);
+            if (dirtyA) { _dirty = true; }
+
+            // X / Y 也做成可输入 —— 拖画面调不准的时候可以直接敲
+            st.x = DrawNumberRow("X（左右）", st.x, 0f, 1f, 0.01f, out bool dirtyX);
+            if (dirtyX) { _dirty = true; }
+
+            st.y = DrawNumberRow("Y（上下）", st.y, 0f, 1f, 0.01f, out bool dirtyY);
+            if (dirtyY) { _dirty = true; }
 
             EditorGUILayout.LabelField(
-                "位置 " + st.x.ToString("F3") + ", " + st.y.ToString("F3") + "（拖动画面上的画改）",
+                "（也可以直接在画面上拖这张画）",
                 EditorStyles.miniLabel);
 
             if (GUILayout.Button("删掉这张", GUILayout.Width(110f)))
