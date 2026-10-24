@@ -83,8 +83,11 @@ namespace NailongFNAF.EditorTools
                 // 左右脚各一条 —— 交替播才有「有人在走过来」的方位感
                 LoadClip("Assets/Audio/SFX/sfx_footstep_left.mp3"),
                 LoadClip("Assets/Audio/SFX/sfx_footstep_right.mp3"),
-                // 牛来进出厨房时的牛叫（进原调、出降调）
-                LoadClip("Assets/Audio/SFX/sfx_moo_niulai.mp3"));
+                // 牛来进出厨房时的牛叫 —— 两条独立素材：
+                // 进厨房用第一条，出厨房用第二条（专门的「往外走」版本，
+                // 不再靠降调，降调会把音色一起扭曲）
+                LoadClip("Assets/Audio/SFX/sfx_moo_niulai.mp3"),
+                LoadClip("Assets/Audio/SFX/sfx_moo_niulai_leave.mp3"));
 
             EditorUtility.SetDirty(prototype);
             EditorUtility.SetDirty(audio);

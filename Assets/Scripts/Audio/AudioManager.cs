@@ -56,6 +56,15 @@ namespace NailongFNAF.Audio
         /// 玩家不用看画面也能分辨他是在靠近还是走远了。
         /// </summary>
         [SerializeField] private AudioClip _sfxMoo;
+
+        /// <summary>
+        /// **出厨房**专用的那条牛叫。
+        ///
+        /// 早先是同一条素材降调（pitch 0.78）扮演「走远了」，
+        /// 但降调会把音色一起扭曲，听起来像换了只怪物而不是同一只走远了。
+        /// 用户另给了一条专门的「往外走」版本 —— 用它自然得多。
+        /// </summary>
+        [SerializeField] private AudioClip _sfxMooLeave;
         [SerializeField] private AudioClip _sfxPowerOut;
 
         /// <summary>
@@ -233,15 +242,29 @@ namespace NailongFNAF.Audio
         }
 
         /// <summary>
-        /// 播一声牛叫。<paramref name="leaving"/> = true 时**降调**（走远了）。
+        /// 播一声牛叫。<paramref name="leaving"/> = true 时用**出厨房**那条素材。
         ///
         /// 走独立通道 + PlayOneShot：牛叫不该打断门 / 灯 / 脚步。
-        /// 音高用 1.0（进）和 0.78（出）—— 降得够明显能听出来，
-        /// 又不会低到像换了只怪物。
+        ///
+        /// ⚠️ 不再靠降调（pitch）来区分进出 —— 降调会把音色一起扭曲，
+        /// 听起来像换了只怪物。两条独立素材各司其职，pitch 保持 1。
         /// </summary>
         public void PlayMoo(bool leaving, float volumeScale = 1f)
         {
-            if (_sfxMoo == null || _mooSource == null)
+            if (_mooSource == null)
+            {
+                return;
+            }
+
+            AudioClip clip = leaving ? _sfxMooLeave : _sfxMoo;
+
+            // 出厨房那条缺失时退回进厨房那条，至少还有声音
+            if (clip == null)
+            {
+                clip = _sfxMoo;
+            }
+
+            if (clip == null)
             {
                 return;
             }
@@ -249,12 +272,8 @@ namespace NailongFNAF.Audio
             if (volumeScale < 0f) { volumeScale = 0f; }
             if (volumeScale > 1.5f) { volumeScale = 1.5f; }
 
-            _mooSource.pitch = leaving ? 0.78f : 1f;
-            _mooSource.PlayOneShot(_sfxMoo, _sfxVolume * volumeScale);
-
-            // ⚠️ 播完必须把 pitch 拨回去 —— AudioSource.pitch 是**持久**属性，
-            // 不还原的话下一次（甚至别的音效）都会是降调的。
             _mooSource.pitch = 1f;
+            _mooSource.PlayOneShot(clip, _sfxVolume * volumeScale);
         }
 
         /// <summary>
@@ -342,7 +361,7 @@ namespace NailongFNAF.Audio
             AudioClip cameraSwitch, AudioClip footstep, AudioClip powerOut,
             AudioClip powerOutMusic, AudioClip ambDistant = null,
             AudioClip footstepLeft = null, AudioClip footstepRight = null,
-            AudioClip moo = null)
+            AudioClip moo = null, AudioClip mooLeave = null)
         {
             _ambFan = ambFan;
             _ambHum = ambHum;
@@ -350,6 +369,7 @@ namespace NailongFNAF.Audio
             _sfxFootstepLeft = footstepLeft;
             _sfxFootstepRight = footstepRight;
             _sfxMoo = moo;
+            _sfxMooLeave = mooLeave;
             _sfxDoorClose = doorClose;
             _sfxDoorOpen = doorOpen;
             _sfxLightOn = lightOn;
