@@ -1582,11 +1582,11 @@ namespace NailongFNAF.EditorTools
             Texture2D tex = StickerTexture(st.image);
             float aspect = tex != null ? tex.height / (float)tex.width : 1f;
 
-            // 归一化尺寸：宽度按画面比例，高度按原图比例再除画面高
-            float hn = st.width * aspect * (r.width / Mathf.Max(1f, r.height));
-
+            // 归一化尺寸（**和运行时完全一致**）：
+            //   宽 = width 比例（相对画面宽）
+            //   高 = 宽 × 原图高宽比，再按「画面宽 / 画面高」折算成相对画面高的比例
             float hw = st.width * 0.5f;
-            float hh = hn * 0.5f;
+            float hh = st.width * aspect * (r.width / Mathf.Max(1f, r.height)) * 0.5f;
 
             float rad = st.rotation * Mathf.Deg2Rad;
             float cos = Mathf.Cos(rad);

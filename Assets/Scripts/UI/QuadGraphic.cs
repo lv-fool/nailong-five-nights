@@ -33,18 +33,39 @@ namespace NailongFNAF.UI
             {
                 _texture = value;
 
-                // ⚠️ Graphic.mainTexture 是**只读**的 —— 要换图得写到 material 上。
-                // UGUI 默认会复用共享的 UI 材质，所以这里必须先 new 一份自己的，
-                // 否则改一张图会把所有 QuadGraphic 的贴图一起改掉。
-                if (material == null || material == defaultMaterial)
+                // ⚠️ 用**自建的材质**，别去改共享的默认材质 ——
+                // 改了会把所有 QuadGraphic 的贴图一起换掉。
+                //
+                // 也不能用「material == defaultMaterial」判断是否已自建：
+                // 没设过 material 时 material 就**返回** defaultMaterial，
+                // 那个比较永远成立，于是每次设贴图都 new 一个材质（泄漏）。
+                if (_ownMaterial == null)
                 {
-                    material = new Material(Shader.Find("UI/Default"));
+                    var shader = Shader.Find("UI/Default");
+
+                    if (shader == null)
+                    {
+                        shader = Shader.Find("Unlit/Transparent");
+                    }
+
+                    if (shader == null)
+                    {
+                        Debug.LogWarning("[奶龙] QuadGraphic 找不到 UI shader");
+                        return;
+                    }
+
+                    _ownMaterial = new Material(shader);
+                    _ownMaterial.name = "QuadGraphic (instance)";
+                    material = _ownMaterial;
                 }
 
-                material.mainTexture = value;
+                _ownMaterial.mainTexture = value;
                 SetVerticesDirty();
             }
         }
+
+        /// <summary>自己 new 出来的材质（复用同一个实例，避免每次设贴图都泄漏）。</summary>
+        private Material _ownMaterial;
 
         /// <summary>
         /// 设置四个角。顺序：左下、左上、右上、右下（顺时针）。
@@ -58,6 +79,7 @@ namespace NailongFNAF.UI
             _corners[2] = topRight;
             _corners[3] = bottomRight;
 
+            RefreshBounds();
             SetVerticesDirty();
         }
 
@@ -110,6 +132,33 @@ namespace NailongFNAF.UI
             // UGUI 默认不剔除，但反了在某些 shader 下会看不到。
             vh.AddTriangle(0, 1, 2);
             vh.AddTriangle(0, 2, 3);
+        }
+
+        /// <summary>
+        /// 把 rectTransform 的尺寸同步成四角的包围盒。
+        ///
+        /// ⚠️ **必须做**：UGUI 用 rectTransform.rect 做剔除和射线检测边界。
+        /// 我们的形状完全由顶点决定、rectTransform 本来是零尺寸，
+        /// 于是 UGUI 认为整个控件空无一物，**整块剔除不画** ——
+        /// 表现就是「贴图看不见 / 只剩一片白」。
+        /// </summary>
+        public void RefreshBounds()
+        {
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+
+            for (int i = 0; i < 4; i++)
+            {
+                if (_corners[i].x < minX) { minX = _corners[i].x; }
+                if (_corners[i].y < minY) { minY = _corners[i].y; }
+                if (_corners[i].x > maxX) { maxX = _corners[i].x; }
+                if (_corners[i].y > maxY) { maxY = _corners[i].y; }
+            }
+
+            if (rectTransform != null)
+            {
+                rectTransform.sizeDelta = new Vector2(maxX - minX, maxY - minY);
+            }
         }
 
         /// <summary>
