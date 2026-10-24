@@ -374,6 +374,8 @@ namespace NailongFNAF.Diagnostics
                           " 用电档 = " + (gm != null ? Invoke(gm, "CountUsageLevel", null) : null) +
                           " 手机隐藏 = " + PhoneHidden());
 
+                ReportVoice();
+
                 Finish();
             }
         }
@@ -480,6 +482,50 @@ namespace NailongFNAF.Diagnostics
             }
 
             Invoke(tr, "set_rotation", new object[] { Quaternion.Euler(euler) });
+        }
+
+        /// <summary>
+        /// 配音这一组：能加载几条、抽几句看时长。
+        /// 冒烟里听不到声音，所以只能证明「文件在、Resources 找得到、时长不是 0」。
+        /// </summary>
+        private static void ReportVoice()
+        {
+            string[] ids =
+            {
+                "guide_1", "usage_1", "monitor_1", "lightoff_1", "apology_1",
+                "call_guide_first_1", "call_early_1", "call_late_3"
+            };
+
+            int loaded = 0;
+            System.Text.StringBuilder lengths = new System.Text.StringBuilder();
+
+            for (int i = 0; i < ids.Length; i++)
+            {
+                AudioClip clip = NailongFNAF.Audio.VoiceBank.Get(ids[i]);
+                if (clip == null)
+                {
+                    lengths.Append(ids[i]).Append("=缺 ");
+                    continue;
+                }
+
+                loaded++;
+                lengths.Append(ids[i]).Append("=").Append(clip.length.ToString("F2")).Append("s ");
+            }
+
+            Debug.Log("SMOKE: 配音 抽查 " + ids.Length + " 条 / 加载到 " + loaded +
+                      " 条 / 缓存 " + NailongFNAF.Audio.VoiceBank.CachedCount + " 条 · " + lengths);
+
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object src = scene != null ? Get(scene, "_voiceSource") : null;
+            object clipNow = src != null ? Get(src, "clip") : null;
+            Debug.Log("SMOKE: 当前播放的配音 = " + (clipNow != null ? Get(clipNow, "name") : "无") +
+                      " · 是否在播 = " + (src != null ? Get(src, "isPlaying") : "无"));
+
+            // 主动播一句：证明 AudioSource 真的建出来了、clip 真的挂上去并按下了播放
+            object played = scene != null ? Invoke(scene, "PlayVoice", new object[] { "guide_1" }) : null;
+            Debug.Log("SMOKE: 主动播放 guide_1 返回 = " + played +
+                      " · isPlaying = " + (src != null ? Get(src, "isPlaying") : "无") +
+                      " · 音量 = " + (src != null ? Get(src, "volume") : "无"));
         }
 
         /// <summary>手机这一组：在不在、亮没亮、提示字出来没有。</summary>

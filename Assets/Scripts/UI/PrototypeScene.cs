@@ -802,6 +802,9 @@ namespace NailongFNAF.UI
         private float _jumpscareVideoTimer;
         private Image _jumpscareWatermarkMask;
         private AudioSource _jumpscareAudio;
+
+        /// <summary>奶包配音的独立音轨（<see cref="VoiceBank"/> 里的 clip 往这上面放）。</summary>
+        private AudioSource _voiceSource;
         private AudioClip _jumpscareSfx;
         private Image _blackoutCharacter;
         private Font _font;
@@ -3198,6 +3201,16 @@ namespace NailongFNAF.UI
             audio.volume = 0.9f;
             _jumpscareAudio = audio;
 
+            // 奶包配音：再单独一条，别和跳杀抢同一路（跳杀要打断一切，配音只在旁边说话）
+            var voiceGo = new GameObject("NaibaoVoice");
+            voiceGo.transform.SetParent(transform, false);
+            var voice = voiceGo.AddComponent<AudioSource>();
+            voice.playOnAwake = false;
+            voice.loop = false;
+            voice.spatialBlend = 0f;
+            voice.volume = 1f;
+            _voiceSource = voice;
+
             var player = gameObject.AddComponent<VideoPlayer>();
             player.playOnAwake = false;
             player.source = VideoSource.Url;
@@ -3555,6 +3568,7 @@ namespace NailongFNAF.UI
                     _naibaoApologyShown = gm.NaibaoApologyLine;
                     ShowNaibaoLine(gm.NaibaoApologyLine, NaibaoPose.Huffy, 0f);
                     _naibaoHideAt = float.PositiveInfinity;
+                    PlayVoice(gm.NaibaoApologyLineId);
                 }
 
                 _naibaoGroup.alpha = Mathf.MoveTowards(_naibaoGroup.alpha, 1f,
@@ -3597,7 +3611,49 @@ namespace NailongFNAF.UI
 
             // 有持续时间的动作（抢监控、偷加耗电）多留一会儿，纯说话就留 6 秒
             float hold = cue.Seconds > 0f ? cue.Seconds + 3.5f : 6f;
+
+            // 有配音就按录音长度留（念完再留一口气），别让她的话被截断
+            float spoken = PlayVoice(cue.LineId);
+            if (spoken > 0f)
+            {
+                hold = Mathf.Max(hold, spoken + 1.2f);
+            }
+
             ShowNaibaoLine(cue.Line, cue.Pose, hold);
+        }
+
+        /// <summary>
+        /// 放一句配音。返回 clip 时长（秒）；这句没有配音就返回 0，调用方按「只显示字幕」处理。
+        /// </summary>
+        private float PlayVoice(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return 0f;
+            }
+
+            AudioClip clip = VoiceBank.Get(id);
+            if (clip == null)
+            {
+                return 0f;
+            }
+
+            // 第一次要说话时才建音轨：跳杀那一路是懒建的，配音不能跟着它的时机走
+            if (_voiceSource == null)
+            {
+                var voiceGo = new GameObject("NaibaoVoice");
+                voiceGo.transform.SetParent(transform, false);
+                _voiceSource = voiceGo.AddComponent<AudioSource>();
+                _voiceSource.playOnAwake = false;
+                _voiceSource.loop = false;
+                _voiceSource.spatialBlend = 0f;
+                _voiceSource.volume = 1f;
+            }
+
+            _voiceSource.Stop();
+            _voiceSource.clip = clip;
+            _voiceSource.Play();
+            return clip.length;
         }
 
         /// <summary>
@@ -3695,6 +3751,9 @@ namespace NailongFNAF.UI
             // 提示里直接把键位写出来 —— 玩家不知道有快捷键就等于没有。
             _naibaoCallHint.text = "空格 继续 · F 跳过　"
                 + (call.Index + 1) + " / " + call.Count;
+
+            // 每翻一页念一次；没有配音时 PlayVoice 自己会安静地返回 0
+            PlayVoice(line.Id);
         }
 
         /// <summary>

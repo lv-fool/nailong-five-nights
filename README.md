@@ -68,6 +68,13 @@ Unity 2022.3 LTS + C# 写的，只跑 Windows，界面全中文。下面这些�
 （1,453,352 → 59,999 面）导出的 `Assets/Resources/NaibaoPhone/naibao_phone.fbx`，贴图单独放在
 `naibao_phone_color.jpg`；办公室没有实时光照，所以它用的是项目自己的 unlit shader，高亮靠把颜色往暖黄推。
 
+**她现在是会出声的。** 全部 33 句（引导、四件手欠、道歉、通话分档）都合成了 mp3，用的是火山引擎
+「豆包语音合成 2.0」的 Vivi 2.0 音色 —— 就是豆包说话那个调子。文件在 `Assets/Resources/Voice/`，
+台词文本以 `tools/voice_lines.json` 为唯一真源，改词之后跑一句
+`python tools/tts_volc.py --lines tools/voice_lines.json --outdir Assets/Resources/Voice` 重新生成。
+字幕的停留时间会跟着音频长度走（念完再留一口气），所以听得到的和看得见的是同一句。
+缺了某个 mp3 也不会崩，只是那一句退回成纯字幕 —— `VoiceBank` 找不到文件就安静地返回 null。
+
 ## 四种模式
 
 标题页五个按钮，故事模式、自定义夜、永夜模式、成就、退出。
@@ -163,7 +170,7 @@ Unity 2022.3 LTS + C# 写的，只跑 Windows，界面全中文。下面这些�
 
 还欠着的两件：
 
-- **音频是占位的。** 环境音和大部分操作音效现在是脚本合成的，能听出是临时凑的。
+- **环境音和操作音效是占位的。** 现在还是脚本合成的，能听出是临时凑的。奶包的台词已经换成真配音，四只敌人的死亡台词还没有。
 - **只有 Mono 后端。** 本机没装 IL2CPP 模块，要用得先补装。
 
 ## 跑起来

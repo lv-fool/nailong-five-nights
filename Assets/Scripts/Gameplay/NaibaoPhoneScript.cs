@@ -5,6 +5,9 @@ namespace NailongFNAF.Gameplay
     {
         public string Text;
         public NaibaoPose Pose;
+
+        /// <summary>这句的配音 id（对应 Assets/Resources/Voice/&lt;id&gt;.mp3）；没配音就是空串。</summary>
+        public string Id;
     }
 
     /// <summary>
@@ -138,35 +141,51 @@ namespace NailongFNAF.Gameplay
             // 自定义夜优先：它不属于任何一夜
             if (custom)
             {
-                return table.CallLinesFor(callIndex <= 0
-                    ? NaibaoCallLines.KeyCustom
-                    : NaibaoCallLines.KeyRepeat);
+                return callIndex <= 0
+                    ? Tag("call_custom_", table.CallLinesFor(NaibaoCallLines.KeyCustom))
+                    : Tag("call_repeat_", table.CallLinesFor(NaibaoCallLines.KeyRepeat));
             }
 
             if (guide)
             {
                 return callIndex <= 0
-                    ? table.CallLinesFor(NaibaoCallLines.KeyGuideFirst)
-                    : table.CallLinesFor(NaibaoCallLines.KeyGuideAgain);
+                    ? Tag("call_guide_first_", table.CallLinesFor(NaibaoCallLines.KeyGuideFirst))
+                    : Tag("call_guide_again_", table.CallLinesFor(NaibaoCallLines.KeyGuideAgain));
             }
 
             // 同一夜第二次之后就不给新词了：剧情是慢慢给的，不是一次说完
             if (callIndex >= 1)
             {
-                return table.CallLinesFor(NaibaoCallLines.KeyRepeat);
+                return Tag("call_repeat_", table.CallLinesFor(NaibaoCallLines.KeyRepeat));
             }
 
             if (night <= 2)
             {
-                return table.CallLinesFor(NaibaoCallLines.KeyNightEarly);
+                return Tag("call_early_", table.CallLinesFor(NaibaoCallLines.KeyNightEarly));
             }
 
             if (night <= 4)
             {
-                return table.CallLinesFor(NaibaoCallLines.KeyNightMiddle);
+                return Tag("call_mid_", table.CallLinesFor(NaibaoCallLines.KeyNightMiddle));
             }
 
-            return table.CallLinesFor(NaibaoCallLines.KeyNightLate);
+            return Tag("call_late_", table.CallLinesFor(NaibaoCallLines.KeyNightLate));
+        }
+
+        /// <summary>给一组台词按顺序贴上配音 id（<c>前缀 + 序号</c>，序号从 1 开始）。</summary>
+        private static NaibaoCallLine[] Tag(string prefix, NaibaoCallLine[] lines)
+        {
+            if (lines == null)
+            {
+                return new NaibaoCallLine[0];
+            }
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                lines[i].Id = prefix + (i + 1);
+            }
+
+            return lines;
         }
 
         private static NaibaoCallLine Line(string text, NaibaoPose pose)

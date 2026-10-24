@@ -47,6 +47,9 @@ namespace NailongFNAF.Gameplay
         public NaibaoPose Pose;
         public string Line;
 
+        /// <summary>这句话的配音 id（对应 Assets/Resources/Voice/&lt;id&gt;.mp3）。没有配音就是空串。</summary>
+        public string LineId;
+
         /// <summary>持续秒数（只有 <see cref="NaibaoAction.UsageSpike"/> 与
         /// <see cref="NaibaoAction.MonitorGrab"/> 用得上）。</summary>
         public float Seconds;
@@ -300,6 +303,7 @@ namespace NailongFNAF.Gameplay
                     Action = NaibaoAction.Line,
                     Pose = NaibaoPose.Guide,
                     Line = GuideLines[_guideStep],
+                    LineId = "guide_" + (_guideStep + 1),
                     Seconds = 0f,
                 });
 
@@ -322,6 +326,11 @@ namespace NailongFNAF.Gameplay
 
             int index = _mischiefCount;
 
+            string usageLine = PickGroup(NaibaoLines.KeyUsage, index, "usage_", out string usageId);
+            string monitorLine = PickGroup(NaibaoLines.KeyMonitor, index, "monitor_", out string monitorId);
+            string lightLine = PickGroup(NaibaoLines.KeyLightOff, index, "lightoff_", out string lightId);
+            string tauntLine = PickGroup(NaibaoLines.KeyTaunt, index, "taunt_", out string tauntId);
+
             switch (pick)
             {
                 case 0:
@@ -329,7 +338,8 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.UsageSpike,
                         Pose = NaibaoPose.Smug,
-                        Line = PickGroup(NaibaoLines.KeyUsage, index),
+                        Line = usageLine,
+                        LineId = usageId,
                         Seconds = UsageSpikeSeconds,
                     });
                     break;
@@ -339,7 +349,8 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.MonitorGrab,
                         Pose = NaibaoPose.Peek,
-                        Line = PickGroup(NaibaoLines.KeyMonitor, index),
+                        Line = monitorLine,
+                        LineId = monitorId,
                         Seconds = MonitorGrabSeconds,
                     });
                     break;
@@ -349,7 +360,8 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.LightOff,
                         Pose = NaibaoPose.Huffy,
-                        Line = PickGroup(NaibaoLines.KeyLightOff, index),
+                        Line = lightLine,
+                        LineId = lightId,
                         Seconds = 0f,
                     });
                     break;
@@ -359,7 +371,8 @@ namespace NailongFNAF.Gameplay
                     {
                         Action = NaibaoAction.Line,
                         Pose = NaibaoPose.Bored,
-                        Line = PickGroup(NaibaoLines.KeyTaunt, index),
+                        Line = tauntLine,
+                        LineId = tauntId,
                         Seconds = 0f,
                     });
                     break;
@@ -374,14 +387,24 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         private static string PickGroup(string key, int index)
         {
+            string id;
+            return PickGroup(key, index, string.Empty, out id);
+        }
+
+        /// <summary>同上，顺便给出配音 id（<c>前缀 + 序号</c>，序号从 1 开始）。</summary>
+        private static string PickGroup(string key, int index, string idPrefix, out string id)
+        {
             var lines = Lines.LinesFor(key);
 
             if (lines == null || lines.Count == 0)
             {
+                id = string.Empty;
                 return string.Empty;
             }
 
-            return lines[index % lines.Count] ?? string.Empty;
+            int slot = index % lines.Count;
+            id = string.IsNullOrEmpty(idPrefix) ? string.Empty : idPrefix + (slot + 1);
+            return lines[slot] ?? string.Empty;
         }
     }
 }
