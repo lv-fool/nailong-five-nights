@@ -3458,11 +3458,15 @@ namespace NailongFNAF.UI
         private float _lastNearestDistance = -1f;
 
         /// <summary>一串脚步之间的最短间隔（秒）。</summary>
-        private const float FootstepBurstMinGap = 0.9f;
-        private const float FootstepBurstMaxGap = 2.2f;
+        private const float FootstepBurstMinGap = 1.2f;
+        private const float FootstepBurstMaxGap = 2.8f;
 
-        /// <summary>相邻两步之间隔多久（秒）—— 走路的速度感。</summary>
-        private const float FootstepStepGap = 0.42f;
+        /// <summary>
+        /// 相邻两步之间隔多久（秒）—— 走路的速度感。
+        /// 0.62 秒一步 ≈ 每秒 1.6 步，比正常走路慢，听起来像**在黑暗里摸索**。
+        /// （原来是 0.42，太急，像小跑。）
+        /// </summary>
+        private const float FootstepStepGap = 0.62f;
 
         /// <summary>
         /// 敌人「离 YOU 多远」：0 = 刚到走廊、1 = 站在门口。
@@ -3505,7 +3509,7 @@ namespace NailongFNAF.UI
             float distance = NearestEnemyDistance();
 
             // 太远就不该听见 —— 低于这个门槛一律静音
-            const float AudibleFrom = 0.34f;
+            const float AudibleFrom = 0.22f;
 
             // ── 正在放一串 ──
             if (_footstepLeft > 0)
@@ -3570,7 +3574,10 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            float volume = Mathf.Lerp(0.15f, 1f, Mathf.Clamp01(distance));
+            // 更响：最远端从 0.15 提到 0.45（刚进走廊就能听见），
+            // 最近端给到 1.35 —— PlayOneShot 的音量可以超过 1，会自然削顶，
+            // 听感上就是「贴着耳朵踩了一脚」。
+            float volume = Mathf.Lerp(0.45f, 1.35f, Mathf.Clamp01(distance));
 
             _audio.PlayFootstep(_footstepRightFoot, volume);
 
