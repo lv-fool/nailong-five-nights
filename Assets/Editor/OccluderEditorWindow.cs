@@ -539,6 +539,30 @@ namespace NailongFNAF.EditorTools
             return value;
         }
 
+        /// <summary>
+        /// 把某张贴到当前机位中央（默认 18% 宽）。
+        /// 加完自动选中它 —— 刚加的那张通常就是要马上调的。
+        /// </summary>
+        private void AddSticker(string imagePath, LayoutSticker[] stickers)
+        {
+            var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
+
+            list.Add(new LayoutSticker
+            {
+                image = imagePath,
+                x = 0.5f,
+                y = 0.5f,
+                width = 0.18f,
+                rotation = 0f,
+                alpha = 1f
+            });
+
+            Layout(_room).stickers = list.ToArray();
+            _selSticker = list.Count - 1;
+            _dirty = true;
+            GUI.FocusControl(null);
+        }
+
         private void DrawStickerPanel()
         {
             if (_stickerImages.Length == 0)
@@ -551,42 +575,63 @@ namespace NailongFNAF.EditorTools
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("贴图（" + RoomNames[_room] + "）", EditorStyles.boldLabel);
 
-            // ── 加一张 ──
-            EditorGUILayout.BeginHorizontal();
-
+            // ── 加一张：带缩略图的网格（图片多了以后一行放不下）──
             if (_stickerImages.Length == 0)
             {
                 EditorGUILayout.HelpBox("Assets/Resources/Posters 里没有图片", MessageType.Warning);
             }
             else
             {
-                for (int i = 0; i < _stickerImages.Length; i++)
+                GUILayout.Label("加一张（" + _stickerImages.Length + " 张可用）",
+                    EditorStyles.miniBoldLabel);
+
+                // 网格滚动区：固定高度，避免把下面的属性面板顶出屏幕
+                _stickerPickScroll = EditorGUILayout.BeginScrollView(
+                    _stickerPickScroll, GUILayout.Height(140f));
+
+                const int PerRow = 4;
+                const float CellW = 92f;
+                const float ThumbH = 52f;
+
+                for (int i = 0; i < _stickerImages.Length; i += PerRow)
                 {
-                    string shortName = _stickerImages[i].Replace("Posters/", string.Empty);
+                    EditorGUILayout.BeginHorizontal();
 
-                    if (GUILayout.Button(shortName, GUILayout.Width(76f)))
+                    for (int k = 0; k < PerRow && i + k < _stickerImages.Length; k++)
                     {
-                        var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
-                        list.Add(new LayoutSticker
+                        int idx = i + k;
+                        string shortName = _stickerImages[idx].Replace("Posters/", string.Empty);
+
+                        EditorGUILayout.BeginVertical(GUILayout.Width(CellW));
+
+                        Texture2D thumb = StickerTexture(_stickerImages[idx]);
+
+                        if (thumb != null)
                         {
-                            image = _stickerImages[i],
-                            x = 0.5f,
-                            y = 0.5f,
-                            width = 0.18f,
-                            rotation = 0f,
-                            alpha = 1f
-                        });
+                            if (GUILayout.Button(thumb, GUILayout.Width(CellW - 4f),
+                                    GUILayout.Height(ThumbH)))
+                            {
+                                AddSticker(_stickerImages[idx], stickers);
+                                return;
+                            }
+                        }
+                        else if (GUILayout.Button(shortName, GUILayout.Width(CellW - 4f),
+                                     GUILayout.Height(ThumbH)))
+                        {
+                            AddSticker(_stickerImages[idx], stickers);
+                            return;
+                        }
 
-                        Layout(_room).stickers = list.ToArray();
-                        _selSticker = list.Count - 1;
-                        _dirty = true;
-                        GUI.FocusControl(null);
-                        return;
+                        GUILayout.Label(shortName, EditorStyles.miniLabel, GUILayout.Width(CellW));
+
+                        EditorGUILayout.EndVertical();
                     }
-                }
-            }
 
-            EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.EndHorizontal();
+                }
+
+                EditorGUILayout.EndScrollView();
+            }
 
             if (GUILayout.Button("刷新图片列表", GUILayout.Width(110f)))
             {
@@ -1221,6 +1266,9 @@ namespace NailongFNAF.EditorTools
 
         /// <summary>当前选中的贴图下标（-1 = 没选）。</summary>
         private int _selSticker = -1;
+
+        /// <summary>「加一张」网格的滚动位置。</summary>
+        private Vector2 _stickerPickScroll;
 
         /// <summary>拖动中的状态。</summary>
         private int _dragSticker = -1;
