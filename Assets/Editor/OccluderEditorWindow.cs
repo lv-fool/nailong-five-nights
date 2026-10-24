@@ -981,13 +981,18 @@ namespace NailongFNAF.EditorTools
             // 范围内，点击就先被 HandleStickerInput 吃掉（它 e.Use()），
             // 表现就是「按钮点不到」。
             //
-            // 预留多少由**可拖动的分隔条**决定（StickerAreas 用同一个比例算）。
+            // 贴图模式下：面板**占满**图片下沿到页脚之间的全部空间，
+            // 所以这里预留的是「(1 − 比例) 那块高度之外的全部」——
+            // 也就是图片只能画到画面区的那一截，剩下的全归面板。
+            //
+            // 换句话说 PanelHeightRatio 现在决定「画面占多少」：
+            // 比例大 = 面板大 = 画面小。
             float panelReserve = 0f;
 
             if (_mode == Mode.Stickers)
             {
                 float usable = Mathf.Max(1f, position.height - top - bottom);
-                panelReserve = usable * PanelHeightRatio + SplitterHeight;
+                panelReserve = SplitterHeight + usable * PanelHeightRatio;
             }
 
             float availW = position.width - 20f;
@@ -1388,25 +1393,21 @@ namespace NailongFNAF.EditorTools
         /// <summary>
         /// 算出面板区和分隔条的矩形。
         ///
-        /// 面板高度 = 可用高度 × <see cref="PanelHeightRatio"/>，
-        /// 并夹在「至少 90px」和「至少给画面留 120px」之间 ——
-        /// 拖到极限也不会把某一边完全挤没。
+        /// 面板**占满**图片下沿到页脚之间的全部空间 —— 不再按比例只取一部分。
+        /// 原来按 46% 算，剩下 54% 就是一大块什么都没画、露出窗口底色的
+        /// 灰色区域（用户看到的就是这个）。
+        ///
+        /// <see cref="PanelHeightRatio"/> 现在只决定「画面 / 面板」的分界位置，
+        /// 也就是说它决定**画面画多大**，而不是面板留多高 ——
+        /// 面板永远把剩下的空间吃干。
         /// </summary>
         private Rect StickerAreas(Rect imageRect, out Rect splitterRect)
         {
-            const float MinImage = 120f;
-            const float MinPanel = 90f;
             const float BottomBar = 56f;
 
-            // 从图片下沿到页脚上方，是这块区域能用的全部高度
             float top = imageRect.yMax + SplitterHeight;
             float bottom = position.height - BottomBar;
-            float available = Mathf.Max(MinPanel, bottom - top);
-
-            // 面板高度 = 可用高度 × 比例，并夹住两头：
-            // 面板不小于 90px，同时给上方画面至少留 120px。
-            float maxPanel = Mathf.Max(MinPanel, available - MinImage);
-            float panelH = Mathf.Clamp(available * PanelHeightRatio, MinPanel, maxPanel);
+            float panelH = Mathf.Max(90f, bottom - top);
 
             // 分隔条贴在图片下沿
             splitterRect = new Rect(
