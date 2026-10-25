@@ -103,11 +103,13 @@ Shader "NailongFNAF/MonitorStatic"
                 // 合成：按强度把雪花/撕裂混进底图
                 fixed4 result = baseColor;
 
-                // 撕裂行：把该行换成更亮的雪花
-                result.rgb = lerp(result.rgb, snow * 1.15, tear * _Strength);
+                // 撕裂行：把该行换成更亮的雪花（也留 25% 底图）
+                result.rgb = lerp(result.rgb, snow * 1.15, tear * _Strength * 0.75);
 
-                // 雪花：强度高时占比大；切机位的一瞬基本全是雪花
-                float snowMix = _Strength * (0.35 + 0.65 * _Strength);
+                // 雪花：**半透明** —— 即使强度拉满也只混到 55%，
+                // 底图（机位画面）一直隐约透出来，像隔着干扰看监控，
+                // 而不是把画面整个糊成雪花。
+                float snowMix = _Strength * (0.20 + 0.35 * _Strength);
                 result.rgb = lerp(result.rgb, snow * scan, snowMix);
 
                 // 扫描线压暗

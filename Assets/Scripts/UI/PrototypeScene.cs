@@ -5483,13 +5483,20 @@ namespace NailongFNAF.UI
             // 这样编辑器预览里的「归一化坐标 / 设计像素」和运行时是同一套，
             // 摆多大就是多大；窗口不是 16:9 时留黑边，而不是把画面拉扁或裁掉。
             // 1.57) 雪花噪点层：切机位的一瞬炸一下（见 BurstStatic / UpdateStatic）。
-            //       程序化 shader，无贴图。挂在 overlay 顶层（平板容器之外），
-            //       盖住整个监控（含黑壳）。
+            //       程序化 shader，无贴图。
+            //       ⚠️ 挂在**平板容器**里 —— 只笼罩 16:9 画面框，
+            //       不要盖住黑壳外的糊办公室（那是「隔着一台监控看房间」的感觉）。
+            //       顺序：现在还在 BuildMonitorLayer 前段创建，等所有子物体
+            //       建完后会 SetAsLastSibling 重新置顶（在平板内置顶）。
             var staticGo = new GameObject("MonitorStatic", typeof(RectTransform), typeof(UnityEngine.UI.RawImage));
-            staticGo.transform.SetParent(_monitorOverlay.transform, false);
+            staticGo.transform.SetParent(_monitorTablet, false);
 
             _staticOverlay = staticGo.GetComponent<UnityEngine.UI.RawImage>();
-            StretchToParent(_staticOverlay.rectTransform);
+            _staticOverlay.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _staticOverlay.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _staticOverlay.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            _staticOverlay.rectTransform.anchoredPosition = Vector2.zero;
+            _staticOverlay.rectTransform.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
             _staticOverlay.raycastTarget = false;
             _staticOverlay.enabled = false;
 
