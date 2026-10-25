@@ -2293,14 +2293,6 @@ namespace NailongFNAF.UI
                     scale *= custom.scale;
                 }
                 rect.localScale = new Vector3(scale, scale, 1f);
-
-                // ── 可视区裁剪：立绘探出监控画面框的部分不画 ──
-                //
-                // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会
-                // 画到框外、盖住黑壳 —— 看着像穿模。
-                // 把画面框（设计区 ±960/±540）换算到**立绘本地坐标**写进
-                // shader 的 _ViewRect，超出的像素在 frag 里 clip 掉。
-                //
             }
 
             // 只给「远档」的敌人套遮挡（近档站在家具前面，不裁）
@@ -2311,32 +2303,37 @@ namespace NailongFNAF.UI
             // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会画到
             // 框外、盖住黑壳 —— 穿模。
             //
-            // 做法：**用黑壳内沿的世界四角**当裁剪框。shader 端（MonitorCharacter）
-            // 顶点已改算世界坐标，_ViewRect 也直接给世界坐标 ——
-            // 两端同一坐标系，零换算歧义。黑壳内沿 = 画面框边界，天然合理。
+            // 坐标系（两轮踩坑后定的）：立绘的 anchoredPosition 本来就是
+            // **Area 本地系**（设计像素 1920×1080、中心原点）；shader 端用
+            // v.vertex.xy × _SelfScale + _SelfPos 算出同一系的"父坐标"。
+            // _ViewRect 直接给设计像素的画面框（±960/±540）—— 同一把尺。
             //
-            // ⚠️ 不能用 RectMask2D：它是 IMaterialModifier，UGUI 会把自定义
-            // shader 换成模板材质，家具遮挡直接失效（历史踩坑）。
-            if (_monitorBezel != null)
+            // ⚠️ 世界坐标方案失败：Screen Space Overlay 的
+            // unity_ObjectToWorld 尺度含 canvas scaleFactor，与
+            // GetWorldCorners 对不上，会把立绘整个裁没（刚踩过）。
+            // ⚠️ 也不能用 RectMask2D：IMaterialModifier 会换掉自定义
+            // shader，家具遮挡失效（更早的坑）。
+            Vector4 viewRect = new Vector4(
+                -MonitorDesignWidth * 0.5f, -MonitorDesignHeight * 0.5f,
+                 MonitorDesignWidth * 0.5f,  MonitorDesignHeight * 0.5f);
+
+            foreach (var img in _monitorCharacters)
             {
-                var cs = new Vector3[4];
-                _monitorBezel.GetWorldCorners(cs);
-
-                // cs 顺序：左下(0) 左上(1) 右上(2) 右下(3) —— 取 min/max
-                Vector4 viewRect = new Vector4(
-                    Mathf.Min(cs[0].x, cs[2].x), Mathf.Min(cs[0].y, cs[2].y),
-                    Mathf.Max(cs[0].x, cs[2].x), Mathf.Max(cs[0].y, cs[2].y));
-
-                foreach (var img in _monitorCharacters)
+                if (img == null || img.material == null
+                    || !img.material.HasProperty("_ViewRect"))
                 {
-                    if (img == null || img.material == null
-                        || !img.material.HasProperty("_ViewRect"))
-                    {
-                        continue;
-                    }
-
-                    img.material.SetVector("_ViewRect", viewRect);
+                    continue;
                 }
+
+                var rect = img.rectTransform;
+
+                // shader 自算"父坐标"要的两个量，每帧同步
+                // （anchoredPosition 就是 Area 本地系坐标，零换算）
+                img.material.SetVector("_SelfScale",
+                    new Vector4(rect.localScale.x, rect.localScale.y, 0f, 0f));
+                img.material.SetVector("_SelfPos",
+                    new Vector4(rect.anchoredPosition.x, rect.anchoredPosition.y, 0f, 0f));
+                img.material.SetVector("_ViewRect", viewRect);
             }
         }
 

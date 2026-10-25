@@ -47,7 +47,7 @@ Shader "NailongFNAF/MonitorCharacter"
             struct v2f
             {
                 float4 vertex   : SV_POSITION;
-                float2 worldPos : TEXCOORD1;
+                float2 parentPos : TEXCOORD1;
                 fixed4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
             };
@@ -59,16 +59,24 @@ Shader "NailongFNAF/MonitorCharacter"
             float4 _OccluderRect;
             float _DebugMode;
             float4 _ViewRect;
+            float4 _SelfScale;   // xy = 本地缩放（立绘 rect.localScale）
+            float4 _SelfPos;     // xy = 本地位置（rect.anchoredPosition）
 
             v2f vert(appdata_t v)
             {
                 v2f OUT;
                 OUT.vertex = UnityObjectToClipPos(v.vertex);
                 OUT.texcoord = v.texcoord;
-                // 世界坐标 xy —— _ViewRect 也用世界坐标，两边一一对应，
-                // 免掉本地系/缩放/pivot 的所有换算歧义。
-                float3 wp = mul(unity_ObjectToWorld, v.vertex).xyz;
-                OUT.worldPos = wp.xy;
+                // ⚠️ 裁剪不用世界坐标 —— Screen Space Overlay 的
+                // unity_ObjectToWorld 尺度特殊（含 canvas scaleFactor），
+                // 和 GetWorldCorners 对不上（踩过）。
+                //
+                // 改用 **shader 自算的"父节点坐标"**：
+                //   parent = localPos * localScale + localPosition
+                // UGUI 元素没有旋转，这个公式精确成立。
+                // _ViewRect 由 C# 给出：Area 本地系（即设计区 1920×1080）。
+                // 材质上另设 _SelfScale / _SelfPos 每帧同步。
+                OUT.parentPos = v.vertex.xy * _SelfScale.xy + _SelfPos.xy;
                 OUT.color = v.color * _Color;
                 return OUT;
             }
@@ -77,12 +85,12 @@ Shader "NailongFNAF/MonitorCharacter"
             {
                 fixed4 c = tex2D(_MainTex, i.texcoord) * i.color;
 
-                // 可视区裁剪：世界坐标超出 _ViewRect 的像素整个丢弃。
+                // 可视区裁剪：父节点坐标超出 _ViewRect 的像素整个丢弃。
                 // 敌人立在监控画面边缘时，探出画面框的那截就被切掉。
-                clip(i.worldPos.x - _ViewRect.x);
-                clip(i.worldPos.y - _ViewRect.y);
-                clip(_ViewRect.z - i.worldPos.x);
-                clip(_ViewRect.w - i.worldPos.y);
+                clip(i.parentPos.x - _ViewRect.x);
+                clip(i.parentPos.y - _ViewRect.y);
+                clip(_ViewRect.z - i.parentPos.x);
+                clip(_ViewRect.w - i.parentPos.y);
 
                 float2 suv = _OccluderRect.xy + i.texcoord * _OccluderRect.zw;
 
