@@ -5484,12 +5484,9 @@ namespace NailongFNAF.UI
             // 摆多大就是多大；窗口不是 16:9 时留黑边，而不是把画面拉扁或裁掉。
             // 1.57) 雪花噪点层：切机位的一瞬炸一下（见 BurstStatic / UpdateStatic）。
             //       程序化 shader，无贴图。
-            //       ⚠️ 挂在**平板容器**里 —— 只笼罩 16:9 画面框，
-            //       不要盖住黑壳外的糊办公室（那是「隔着一台监控看房间」的感觉）。
-            //       顺序：现在还在 BuildMonitorLayer 前段创建，等所有子物体
-            //       建完后会 SetAsLastSibling 重新置顶（在平板内置顶）。
+            //       ⚠️ 创建时**先不挂父**（那时 MonitorArea 还没建），
+            //       方法末尾统一挂到 MonitorArea 下（继承等比缩放）并置顶。
             var staticGo = new GameObject("MonitorStatic", typeof(RectTransform), typeof(UnityEngine.UI.RawImage));
-            staticGo.transform.SetParent(_monitorTablet, false);
 
             _staticOverlay = staticGo.GetComponent<UnityEngine.UI.RawImage>();
             _staticOverlay.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
@@ -5737,13 +5734,14 @@ namespace NailongFNAF.UI
             _monitorMapGroup.alpha = 0f;
             _monitorMapGroup.blocksRaycasts = false;
 
-            // ⚠️ 噪点层的创建代码在平板容器**之前**执行 —— 那时
-            // _monitorTablet 还是 null，SetParent(null) 把它挂到了场景根上，
-            // 不在 Canvas 里 → **雪花完全看不见**。
-            // 现在平板已建好，在这里重新挂父 + 置顶（挂在平板里 = 只盖画面框）。
-            if (_staticOverlay != null && _monitorTablet != null)
+            // ⚠️ 噪点层**必须挂在 MonitorArea 下，不是 Tablet 下** ——
+            // 等比缩放（localScale ≈ 0.75）是设在 MonitorArea 上的，
+            // 挂在 Tablet 下会以 1920×1080 原尺寸铺开，比画面框大一圈
+            // （实测 Area x[314,1311] 而 Static x[149,1476]，雪花溢出画面）。
+            // 挂进 Area 就自动继承缩放，和画面框一比一对齐。
+            if (_staticOverlay != null && _monitorArea != null)
             {
-                _staticOverlay.transform.SetParent(_monitorTablet, false);
+                _staticOverlay.transform.SetParent(_monitorArea, false);
 
                 _staticOverlay.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
                 _staticOverlay.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
