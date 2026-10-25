@@ -8,6 +8,10 @@ Shader "NailongFNAF/MonitorCharacter"
         _UseOccluder ("Use Occluder", Float) = 0
         _OccluderRect ("Occluder Rect", Vector) = (0,0,1,1)
         _DebugMode ("Debug", Float) = 0
+        // 可视区（本地坐标，xy=min, zw=max）。立绘超出监控画面框的
+        // 部分直接丢弃像素 —— 敌人半个身子探出画面外时，框外那截不能画。
+        // 关闭裁剪：设成一个巨大范围（如 -10000,10000）即可。
+        _ViewRect ("View Rect (local min/max)", Vector) = (-10000,-10000,10000,10000)
     }
 
     SubShader
@@ -43,6 +47,7 @@ Shader "NailongFNAF/MonitorCharacter"
             struct v2f
             {
                 float4 vertex   : SV_POSITION;
+                float2 localPos : TEXCOORD1;
                 fixed4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
             };
@@ -53,12 +58,14 @@ Shader "NailongFNAF/MonitorCharacter"
             float _UseOccluder;
             float4 _OccluderRect;
             float _DebugMode;
+            float4 _ViewRect;
 
             v2f vert(appdata_t v)
             {
                 v2f OUT;
                 OUT.vertex = UnityObjectToClipPos(v.vertex);
                 OUT.texcoord = v.texcoord;
+                OUT.localPos = v.vertex.xy;
                 OUT.color = v.color * _Color;
                 return OUT;
             }
@@ -66,6 +73,13 @@ Shader "NailongFNAF/MonitorCharacter"
             fixed4 frag(v2f i) : SV_Target
             {
                 fixed4 c = tex2D(_MainTex, i.texcoord) * i.color;
+
+                // 可视区裁剪：本地坐标超出 _ViewRect 的像素整个丢弃。
+                // 敌人立在监控画面边缘时，探出画面框的那截就被切掉。
+                clip(i.localPos.x - _ViewRect.x);
+                clip(i.localPos.y - _ViewRect.y);
+                clip(_ViewRect.z - i.localPos.x);
+                clip(_ViewRect.w - i.localPos.y);
 
                 float2 suv = _OccluderRect.xy + i.texcoord * _OccluderRect.zw;
 

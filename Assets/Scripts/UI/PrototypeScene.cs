@@ -2286,6 +2286,33 @@ namespace NailongFNAF.UI
                     scale *= custom.scale;
                 }
                 rect.localScale = new Vector3(scale, scale, 1f);
+
+                // ── 可视区裁剪：立绘探出监控画面框的部分不画 ──
+                //
+                // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会
+                // 画到框外、盖住黑壳 —— 看着像穿模。
+                // 把画面框（设计区 ±960/±540）换算到**立绘本地坐标**写进
+                // shader 的 _ViewRect，超出的像素在 frag 里 clip 掉。
+                //
+                // 本地→设计区：local × lossyScale + 世界位置 − Area 中心。
+                // 用 InverseTransformPoint 直接算，不用手推矩阵。
+                if (img.material != null && img.material.HasProperty("_ViewRect"))
+                {
+                    // Area 的对角两点（世界坐标）→ 立绘本地坐标。
+                    // InverseTransformPoint 已含缩放/旋转/位移，无需手除。
+                    var areaRect = MonitorAreaRect();
+                    Vector3 areaMin = _monitorArea.TransformPoint(
+                        new Vector3(-areaRect.width * 0.5f, -areaRect.height * 0.5f, 0f));
+                    Vector3 areaMax = _monitorArea.TransformPoint(
+                        new Vector3(areaRect.width * 0.5f, areaRect.height * 0.5f, 0f));
+
+                    Vector2 min = rect.InverseTransformPoint(areaMin);
+                    Vector2 max = rect.InverseTransformPoint(areaMax);
+
+                    img.material.SetVector("_ViewRect", new Vector4(
+                        Mathf.Min(min.x, max.x), Mathf.Min(min.y, max.y),
+                        Mathf.Max(min.x, max.x), Mathf.Max(min.y, max.y)));
+                }
             }
 
             // 只给「远档」的敌人套遮挡（近档站在家具前面，不裁）
