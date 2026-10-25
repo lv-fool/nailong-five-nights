@@ -74,6 +74,8 @@ namespace NailongFNAF.UI
         private CustomNightConfig _customConfig;
 
         // 成就界面：计数 + 每行的名称 / 描述（顺序照 AchievementCatalog.All）
+        private readonly Text[] _nightFragmentTexts = new Text[NightCount];
+        private Text _achvFragmentText;
         private Text _achvCountText;
         private readonly Text[] _achvLineTexts = new Text[AchievementCatalog.All.Length];
 
@@ -213,11 +215,11 @@ namespace NailongFNAF.UI
             _levelView = MakeFullScreenPanel("LevelView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
 
             MakeLabel(_levelView.transform, "选择夜晚", 52, new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 90f));
+                new Vector2(0.5f, 0.88f), new Vector2(0.5f, 0.88f), new Vector2(0f, 0f), new Vector2(900f, 90f));
 
-            MakeLabel(_levelView.transform, "灰色的夜还没解锁 —— 通关前一晚会点亮下一夜。", 20,
-                new Color(0.55f, 0.55f, 0.6f),
-                new Vector2(0.5f, 0.71f), new Vector2(0.5f, 0.71f), new Vector2(0f, 0f), new Vector2(1100f, 40f));
+            MakeLabel(_levelView.transform, "通关前一晚，点亮下一夜。", 26,
+                new Color(0.84f, 0.85f, 0.89f),
+                new Vector2(0.5f, 0.79f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1100f, 44f));
 
             // 6 个夜晚按钮排两行。⚠️ 按钮 320px 宽 ≈ 画布 0.20，列距必须 ≥ 0.21 才不互相压边；
             // 锁着的按钮**不加「未解锁」后缀** —— 字一长就撑破按钮、和隔壁撞在一起，
@@ -227,8 +229,10 @@ namespace NailongFNAF.UI
                 int night = i;
                 int col = i % 3;
                 int row = i / 3;
-                float x = (col - 1) * 0.21f;
-                float y = 0.56f - row * 0.14f;
+                float x = (col - 1) * 0.27f;
+                float y = 0.65f - row * 0.29f;
+                MakeMenuCard(_levelView.transform, "NightCard" + i,
+                    new Vector2(0.5f + x, y - 0.065f), new Vector2(470f, 270f));
 
                 bool unlocked = i <= UnlockedNight;
                 string label = NightName(i);
@@ -237,10 +241,22 @@ namespace NailongFNAF.UI
                     new Vector2(0.5f + x, y),
                     unlocked ? (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)) : null);
                 btn.interactable = unlocked;
+
+                // 独立于开局按钮：已解锁的夜晚可在局外慢慢读，不打断防守。
+                Text fragment = MakeLabel(_levelView.transform, unlocked ? StoryFragments.Night(i) : "……", 28,
+                    new Color(0.91f, 0.90f, 0.85f), new Vector2(0.5f + x, y - 0.115f),
+                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(414f, 132f));
+                fragment.horizontalOverflow = HorizontalWrapMode.Wrap;
+                fragment.verticalOverflow = VerticalWrapMode.Truncate;
+                fragment.lineSpacing = 1.15f;
+                fragment.alignment = TextAnchor.UpperLeft;
+                _nightFragmentTexts[i] = fragment;
+                fragment.name = "NightFragment" + i;
+                fragment.raycastTarget = false;
             }
 
             MakeMenuButton(_levelView.transform, "返回", Vector2.zero,
-                new Vector2(0.5f, 0.16f), OpenTitle);
+                new Vector2(0.5f, 0.09f), OpenTitle);
         }
 
         /// <summary>
@@ -465,34 +481,119 @@ namespace NailongFNAF.UI
 
             MakeLabel(_achvView.transform, "成就", 52, new Color(0.95f, 0.85f, 0.3f),
                 new Vector2(0.5f, 0.86f), new Vector2(0.5f, 0.86f), new Vector2(0f, 0f), new Vector2(900f, 80f));
-            _achvCountText = MakeLabel(_achvView.transform, "", 22, new Color(0.7f, 0.7f, 0.75f),
+            _achvCountText = MakeLabel(_achvView.transform, "", 28, new Color(0.85f, 0.87f, 0.92f),
                 new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 40f));
 
-            int rowsPerColumn = (AchievementCatalog.All.Length + 1) / 2;
+            // 固定阅读窗口，条目在内部滚动；底部旁白与返回不受滚动影响。
+            var scrollGo = new GameObject("AchievementScroll", typeof(RectTransform), typeof(ScrollRect));
+            scrollGo.transform.SetParent(_achvView.transform, false);
+            var scrollRect = (RectTransform)scrollGo.transform;
+            scrollRect.anchorMin = new Vector2(0.10f, 0.23f);
+            scrollRect.anchorMax = new Vector2(0.90f, 0.76f);
+            scrollRect.offsetMin = scrollRect.offsetMax = Vector2.zero;
+
+            var viewportGo = new GameObject("Viewport", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image), typeof(RectMask2D));
+            viewportGo.transform.SetParent(scrollGo.transform, false);
+            var viewport = (RectTransform)viewportGo.transform;
+            viewport.anchorMin = Vector2.zero;
+            viewport.anchorMax = Vector2.one;
+            viewport.offsetMin = viewport.offsetMax = Vector2.zero;
+            viewportGo.GetComponent<Image>().color = new Color(0.025f, 0.035f, 0.055f, 1f);
+
+            var contentGo = new GameObject("Content", typeof(RectTransform));
+            contentGo.transform.SetParent(viewport, false);
+            var content = (RectTransform)contentGo.transform;
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = Vector2.one;
+            content.pivot = new Vector2(0.5f, 1f);
+            const float rowHeight = 142f;
+            content.sizeDelta = new Vector2(0f, AchievementCatalog.All.Length * rowHeight + 12f);
+            content.anchoredPosition = Vector2.zero;
+
+            var scroll = scrollGo.GetComponent<ScrollRect>();
+            scroll.viewport = viewport;
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 55f;
+            scroll.inertia = true;
+
+            viewport.offsetMax = new Vector2(-28f, 0f);
+            Image track = MakeMenuCard(scrollGo.transform, "Scrollbar", new Vector2(1f, 0.5f), Vector2.zero);
+            var trackRect = (RectTransform)track.transform;
+            trackRect.anchorMin = new Vector2(1f, 0f);
+            trackRect.anchorMax = Vector2.one;
+            trackRect.pivot = new Vector2(1f, 0.5f);
+            trackRect.sizeDelta = new Vector2(18f, 0f);
+            trackRect.anchoredPosition = Vector2.zero;
+            Image handle = MakeMenuCard(track.transform, "Handle", new Vector2(0.5f, 0.5f), Vector2.zero);
+            var handleRect = (RectTransform)handle.transform;
+            handleRect.anchorMin = Vector2.zero;
+            handleRect.anchorMax = Vector2.one;
+            handleRect.offsetMin = handleRect.offsetMax = Vector2.zero;
+            handle.color = new Color(0.85f, 0.71f, 0.37f, 1f);
+            var scrollbar = track.gameObject.AddComponent<Scrollbar>();
+            scrollbar.handleRect = handleRect;
+            scrollbar.targetGraphic = handle;
+            scrollbar.direction = Scrollbar.Direction.BottomToTop;
+            scroll.verticalScrollbar = scrollbar;
 
             for (int i = 0; i < AchievementCatalog.All.Length; i++)
             {
-                int column = i < rowsPerColumn ? 0 : 1;
-                int row = i % rowsPerColumn;
-
-                float x = column == 0 ? 0.26f : 0.74f;
-                float y = 0.66f - row * 0.050f;
-
-                Text line = MakeLabel(_achvView.transform, "", 16, Color.white,
-                    new Vector2(x, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(720f, 34f));
+                Image card = MakeMenuCard(content, "AchievementCard" + i,
+                    new Vector2(0.5f, 1f), new Vector2(0f, 130f));
+                var cardRect = (RectTransform)card.transform;
+                cardRect.anchorMin = new Vector2(0f, 1f);
+                cardRect.anchorMax = Vector2.one;
+                cardRect.sizeDelta = new Vector2(-24f, 130f);
+                cardRect.anchoredPosition = new Vector2(0f, -12f - i * rowHeight - 65f);
+                Text line = MakeLabel(card.transform, "", 38, Color.white,
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
+                line.rectTransform.anchorMin = Vector2.zero;
+                line.rectTransform.anchorMax = Vector2.one;
+                line.rectTransform.offsetMin = new Vector2(32f, 12f);
+                line.rectTransform.offsetMax = new Vector2(-32f, -12f);
+                line.horizontalOverflow = HorizontalWrapMode.Wrap;
+                line.verticalOverflow = VerticalWrapMode.Truncate;
+                line.alignment = TextAnchor.MiddleLeft;
+                line.supportRichText = true;
                 line.raycastTarget = false;
+                int achievementIndex = i;
+                var target = card.gameObject.AddComponent<Button>();
+                target.targetGraphic = card;
+                SetMenuButtonColors(target);
+                target.onClick.AddListener(() => ShowAchievementFragment(achievementIndex));
                 _achvLineTexts[i] = line;
             }
 
             MakeMenuButton(_achvView.transform, "返回", Vector2.zero,
-                new Vector2(0.5f, 0.10f), OpenTitle);
+                new Vector2(0.5f, 0.045f), OpenTitle);
 
+            Image fragmentCard = MakeMenuCard(_achvView.transform, "AchievementMemory",
+                new Vector2(0.5f, 0.12f), new Vector2(1450f, 92f));
+            _achvFragmentText = MakeLabel(fragmentCard.transform, "点一下已解锁的成就。", 28,
+                new Color(1f, 0.90f, 0.66f), new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1380f, 88f));
+            _achvFragmentText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _achvFragmentText.raycastTarget = false;
             _achvView.SetActive(false);
+        }
+
+        private void ShowAchievementFragment(int index)
+        {
+            if (index < 0 || index >= AchievementCatalog.All.Length) return;
+            AchievementCatalog.Def def = AchievementCatalog.All[index];
+            _achvFragmentText.text = !AchievementStore.IsUnlocked(def.Id)
+                ? "这一页还没有留下字。"
+                : (string.IsNullOrEmpty(def.Flavor) ? "这一页暂时没有别的字。" : def.Flavor);
         }
 
         /// <summary>成就界面每次打开都刷新一遍（可能在别的局里刚解锁过）。</summary>
         private void RefreshAchievementsView()
         {
+            _achvFragmentText.text = "点一下已解锁的成就。";
             _achvCountText.text = "已解锁 " + AchievementStore.UnlockedCount()
                 + " / " + AchievementCatalog.All.Length;
 
@@ -505,10 +606,11 @@ namespace NailongFNAF.UI
                 string title = masked ? "???" : def.Title;
                 string desc = masked ? "???" : def.Description;
 
-                _achvLineTexts[i].text = (unlocked ? "★ " : "☆ ") + title + "   ·   " + desc;
+                _achvLineTexts[i].text = (unlocked ? "★ " : "☆ ") + "<b>" + title + "</b>"
+                    + "\n<size=30>" + desc + "</size>";
                 _achvLineTexts[i].color = unlocked
-                    ? new Color(0.95f, 0.85f, 0.3f)
-                    : (masked ? new Color(0.38f, 0.38f, 0.42f) : new Color(0.5f, 0.5f, 0.56f));
+                    ? new Color(1f, 0.88f, 0.53f)
+                    : (masked ? new Color(0.67f, 0.71f, 0.79f) : new Color(0.88f, 0.91f, 0.96f));
             }
         }
 
@@ -1055,6 +1157,12 @@ namespace NailongFNAF.UI
 
         private void RefreshLevelButtons()
         {
+            for (int i = 0; i < NightCount; i++)
+            {
+                if (_nightFragmentTexts[i] != null)
+                    _nightFragmentTexts[i].text = i <= UnlockedNight ? StoryFragments.Night(i) : "……";
+            }
+
             var buttons = _levelView.GetComponentsInChildren<Button>(true);
             int index = 0;
             for (int i = 0; i < NightCount; i++)
@@ -1774,6 +1882,34 @@ namespace NailongFNAF.UI
         // 小工具（菜单专用，和主文件里的辅助并存）
         // ---------------------------------------------------------------
 
+        private Image MakeMenuCard(Transform parent, string name, Vector2 anchor, Vector2 size)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+            PlaceRect((RectTransform)go.transform, anchor, new Vector2(0.5f, 0.5f), Vector2.zero, size);
+            Image image = go.GetComponent<Image>();
+            image.sprite = MakeRoundedSprite();
+            image.type = Image.Type.Sliced;
+            image.color = new Color(0.085f, 0.11f, 0.16f, 1f);
+            var outline = go.AddComponent<Outline>();
+            outline.effectColor = new Color(0.42f, 0.49f, 0.61f, 0.55f);
+            outline.effectDistance = new Vector2(1f, -1f);
+            return image;
+        }
+
+        private static void SetMenuButtonColors(Button button)
+        {
+            button.transition = Selectable.Transition.ColorTint;
+            ColorBlock colors = button.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1.45f, 1.45f, 1.45f);
+            colors.selectedColor = new Color(1.3f, 1.3f, 1.3f);
+            colors.pressedColor = new Color(0.7f, 0.7f, 0.7f);
+            colors.disabledColor = new Color(0.65f, 0.65f, 0.65f, 1f);
+            colors.fadeDuration = 0.12f;
+            button.colors = colors;
+        }
+
         private GameObject MakeFullScreenPanel(string name, Color color, Transform parent)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
@@ -1824,17 +1960,10 @@ namespace NailongFNAF.UI
                 button.onClick.AddListener(onClick);
             }
 
-            // 悬停 / 按下反馈：缩放 + 变亮。用 colorMultiplier 让 ColorTint 生效。
-            image.type = Image.Type.Simple;
-            button.transition = Selectable.Transition.ColorTint;
-            var colors = button.colors;
-            colors.normalColor = Color.white;
-            colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f);
-            colors.pressedColor = new Color(0.9f, 0.9f, 0.9f);
-            colors.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.55f);
-            button.colors = colors;
+            image.type = Image.Type.Sliced;
+            SetMenuButtonColors(button);
 
-            var labelText = MakeLabel(go.transform, label, 28, Color.white,
+            var labelText = MakeLabel(go.transform, label, 32, new Color(1f, 0.96f, 0.85f),
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(320f, 84f));
             labelText.raycastTarget = false;
 

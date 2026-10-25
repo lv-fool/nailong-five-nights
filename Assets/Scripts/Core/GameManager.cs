@@ -450,7 +450,7 @@ namespace NailongFNAF.Core
             }
 
             NaibaoCall call = new NaibaoCall(
-                NaibaoPhoneScript.ForCall(night, Naibao.IsGuide, NaibaoCallCount, custom));
+                NaibaoPhoneScript.ForCall(night, Naibao.IsGuide, NaibaoCallCount, custom, !EndlessMode && !custom));
 
             if (call.Count <= 0)
             {

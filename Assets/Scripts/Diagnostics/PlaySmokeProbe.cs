@@ -49,7 +49,7 @@ namespace NailongFNAF.Diagnostics
 
         private void Awake()
         {
-            _outDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", ".setup", "play"));
+            _outDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", ".workbuddy-ai", "screenshots", "story"));
             Directory.CreateDirectory(_outDir);
             Application.logMessageReceived += OnLog;
         }
@@ -238,7 +238,18 @@ namespace NailongFNAF.Diagnostics
 
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "RefreshAchievementsView", null);
+                Invoke(scene, "ShowAchievementFragment", new object[] { 8 });
                 Snap("12_achv_unlocked");
+                var achievementScroll = UnityEngine.Object.FindObjectOfType<UnityEngine.UI.ScrollRect>();
+                if (achievementScroll != null)
+                {
+                    Canvas.ForceUpdateCanvases();
+                    achievementScroll.verticalNormalizedPosition = 0f;
+                    Canvas.ForceUpdateCanvases();
+                    Debug.Log("SMOKE: 成就滚动到底 = " + achievementScroll.verticalNormalizedPosition
+                        + " 内容高度 = " + achievementScroll.content.rect.height
+                        + " 窗口高度 = " + achievementScroll.viewport.rect.height);
+                }
                 ReportAchievements();
             }
             else if (_step == 18 && elapsed > 24.0f)
