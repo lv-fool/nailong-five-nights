@@ -659,7 +659,7 @@ namespace NailongFNAF.UI
 
         /// <summary>
         /// 黑壳节点 —— 它的**内沿**就是画面框边界。
-        /// 敌人立绘用它的世界四角做像素裁剪（_ViewRect），
+        /// 敌人立绘按画面框的**屏幕像素矩形**裁剪（_ScreenRect，见 MonitorAreaScreenRect），
         /// 溢出画面的部分不画（不能用 RectMask2D：会换掉自定义 shader，见 BuildMonitorLayer 注释）。
         /// </summary>
         private RectTransform _monitorBezel;
@@ -2303,63 +2303,59 @@ namespace NailongFNAF.UI
             // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会画到
             // 框外、盖住黑壳 —— 穿模。
             //
-            // 坐标系：**Area 本地系**（设计像素 1920×1080、中心原点）。
-            // shader 端按 v.vertex.xy × _SelfScale + _SelfPos 还原出同系的坐标，
-            // _ViewRect 直接给画面框（±960/±540）—— 两端同一把尺。
+            // ⚠️ 坐标系只认**屏幕像素**（2026-10-25 第四版，前三个方案都翻车）：
+            //   · 拿 anchoredPosition 当父坐标 → 父节点 pivot 在画面下沿，差半个画面
+            //   · 拿世界坐标 → Overlay Canvas 的 unity_ObjectToWorld 含 scaleFactor，对不上
+            //   · 拿 TransformPoint 反算父坐标 → 数值看着对，实机仍然削掉敌人下半身
+            // 现在 C# 只负责把**画面框的屏幕像素矩形**算好，shader 用 ComputeScreenPos
+            // 把片元换到同一把尺上比较 —— 只有一个参照系，没有换算歧义。
             //
-            // ⚠️ **_SelfPos 不能直接拿 anchoredPosition**（2026-10-25 修）：
-            // 立绘的父节点 `MonitorCharacterMask` 锚在 Area 的**底部中央**、
-            // pivot 也在底部，所以 anchoredPosition 的原点是画面下沿、不是画面中心，
-            // 两者差整整半个画面高（540 设计像素）。拿它当 _SelfPos，裁剪框就整体
-            // 下移半屏 —— 站在画面中间的敌人脑袋被削掉，看着像「遮罩比例不对」。
-            // 现在用 TransformPoint + InverseTransformPoint 走**整条父链**换算，
-            // pivot / 中间层偏移 / 自身缩放都不用手算。
-            //
-            // ⚠️ 世界坐标方案失败过：Screen Space Overlay 的 unity_ObjectToWorld
-            // 尺度含 canvas scaleFactor，和 GetWorldCorners 对不上，会把立绘整个裁没。
             // ⚠️ 也不能用 RectMask2D：IMaterialModifier 会换掉自定义 shader，
             // 家具遮挡失效（更早的坑）。
-            Vector4 viewRect = new Vector4(
-                -MonitorDesignWidth * 0.5f, -MonitorDesignHeight * 0.5f,
-                 MonitorDesignWidth * 0.5f,  MonitorDesignHeight * 0.5f);
+            Vector4 screenRect = MonitorAreaScreenRect();
 
             foreach (var img in _monitorCharacters)
             {
                 if (img == null || img.material == null
-                    || !img.material.HasProperty("_ViewRect"))
+                    || !img.material.HasProperty("_ScreenRect"))
                 {
                     continue;
                 }
 
-                var rect = img.rectTransform;
-
-                // 顶点 (0,0) = 立绘 pivot；沿 ±x/±y 走一个本地单位，
-                // 三点就能定出「本地顶点 → Area 本地」这条仿射映射
-                Vector3 origin = AreaLocalPoint(rect, Vector3.zero);
-                Vector3 axisX = AreaLocalPoint(rect, Vector3.right) - origin;
-                Vector3 axisY = AreaLocalPoint(rect, Vector3.up) - origin;
-
-                img.material.SetVector("_SelfScale",
-                    new Vector4(axisX.x, axisY.y, 0f, 0f));
-                img.material.SetVector("_SelfPos",
-                    new Vector4(origin.x, origin.y, 0f, 0f));
-                img.material.SetVector("_ViewRect", viewRect);
+                img.material.SetVector("_ScreenRect", screenRect);
             }
         }
 
         /// <summary>
-        /// 把 <paramref name="rect"/> 本地的一个点换算到 **MonitorArea 本地系**
-        /// （设计像素、中心原点）—— 走整条父链，所以中间层的锚点 / pivot / 缩放
-        /// 都不用自己算。
+        /// 监控画面框（<see cref="MonitorArea"/>）在屏幕上的像素矩形：
+        /// <c>xy</c> = 左下角，<c>zw</c> = 右上角，原点在屏幕左下。
         /// </summary>
-        private Vector3 AreaLocalPoint(RectTransform rect, Vector3 localPoint)
+        private Vector4 MonitorAreaScreenRect()
         {
-            if (rect == null || _monitorArea == null)
+            if (_monitorArea == null)
             {
-                return Vector3.zero;
+                return new Vector4(-10000f, -10000f, 10000f, 10000f);
             }
 
-            return _monitorArea.InverseTransformPoint(rect.TransformPoint(localPoint));
+            var corners = new Vector3[4];
+            _monitorArea.GetWorldCorners(corners);
+
+            float minX = float.MaxValue;
+            float minY = float.MaxValue;
+            float maxX = float.MinValue;
+            float maxY = float.MinValue;
+
+            for (int i = 0; i < corners.Length; i++)
+            {
+                // Overlay Canvas 传 null 相机：世界坐标就是画布坐标，直接换成屏幕像素
+                Vector2 p = RectTransformUtility.WorldToScreenPoint(null, corners[i]);
+                minX = Mathf.Min(minX, p.x);
+                minY = Mathf.Min(minY, p.y);
+                maxX = Mathf.Max(maxX, p.x);
+                maxY = Mathf.Max(maxY, p.y);
+            }
+
+            return new Vector4(minX, minY, maxX, maxY);
         }
 
         /// <summary>
