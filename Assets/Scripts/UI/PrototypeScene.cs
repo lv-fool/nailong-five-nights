@@ -2303,16 +2303,22 @@ namespace NailongFNAF.UI
             // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会画到
             // 框外、盖住黑壳 —— 穿模。
             //
-            // 坐标系（两轮踩坑后定的）：立绘的 anchoredPosition 本来就是
-            // **Area 本地系**（设计像素 1920×1080、中心原点）；shader 端用
-            // v.vertex.xy × _SelfScale + _SelfPos 算出同一系的"父坐标"。
-            // _ViewRect 直接给设计像素的画面框（±960/±540）—— 同一把尺。
+            // 坐标系：**Area 本地系**（设计像素 1920×1080、中心原点）。
+            // shader 端按 v.vertex.xy × _SelfScale + _SelfPos 还原出同系的坐标，
+            // _ViewRect 直接给画面框（±960/±540）—— 两端同一把尺。
             //
-            // ⚠️ 世界坐标方案失败：Screen Space Overlay 的
-            // unity_ObjectToWorld 尺度含 canvas scaleFactor，与
-            // GetWorldCorners 对不上，会把立绘整个裁没（刚踩过）。
-            // ⚠️ 也不能用 RectMask2D：IMaterialModifier 会换掉自定义
-            // shader，家具遮挡失效（更早的坑）。
+            // ⚠️ **_SelfPos 不能直接拿 anchoredPosition**（2026-10-25 修）：
+            // 立绘的父节点 `MonitorCharacterMask` 锚在 Area 的**底部中央**、
+            // pivot 也在底部，所以 anchoredPosition 的原点是画面下沿、不是画面中心，
+            // 两者差整整半个画面高（540 设计像素）。拿它当 _SelfPos，裁剪框就整体
+            // 下移半屏 —— 站在画面中间的敌人脑袋被削掉，看着像「遮罩比例不对」。
+            // 现在用 TransformPoint + InverseTransformPoint 走**整条父链**换算，
+            // pivot / 中间层偏移 / 自身缩放都不用手算。
+            //
+            // ⚠️ 世界坐标方案失败过：Screen Space Overlay 的 unity_ObjectToWorld
+            // 尺度含 canvas scaleFactor，和 GetWorldCorners 对不上，会把立绘整个裁没。
+            // ⚠️ 也不能用 RectMask2D：IMaterialModifier 会换掉自定义 shader，
+            // 家具遮挡失效（更早的坑）。
             Vector4 viewRect = new Vector4(
                 -MonitorDesignWidth * 0.5f, -MonitorDesignHeight * 0.5f,
                  MonitorDesignWidth * 0.5f,  MonitorDesignHeight * 0.5f);
@@ -2327,14 +2333,33 @@ namespace NailongFNAF.UI
 
                 var rect = img.rectTransform;
 
-                // shader 自算"父坐标"要的两个量，每帧同步
-                // （anchoredPosition 就是 Area 本地系坐标，零换算）
+                // 顶点 (0,0) = 立绘 pivot；沿 ±x/±y 走一个本地单位，
+                // 三点就能定出「本地顶点 → Area 本地」这条仿射映射
+                Vector3 origin = AreaLocalPoint(rect, Vector3.zero);
+                Vector3 axisX = AreaLocalPoint(rect, Vector3.right) - origin;
+                Vector3 axisY = AreaLocalPoint(rect, Vector3.up) - origin;
+
                 img.material.SetVector("_SelfScale",
-                    new Vector4(rect.localScale.x, rect.localScale.y, 0f, 0f));
+                    new Vector4(axisX.x, axisY.y, 0f, 0f));
                 img.material.SetVector("_SelfPos",
-                    new Vector4(rect.anchoredPosition.x, rect.anchoredPosition.y, 0f, 0f));
+                    new Vector4(origin.x, origin.y, 0f, 0f));
                 img.material.SetVector("_ViewRect", viewRect);
             }
+        }
+
+        /// <summary>
+        /// 把 <paramref name="rect"/> 本地的一个点换算到 **MonitorArea 本地系**
+        /// （设计像素、中心原点）—— 走整条父链，所以中间层的锚点 / pivot / 缩放
+        /// 都不用自己算。
+        /// </summary>
+        private Vector3 AreaLocalPoint(RectTransform rect, Vector3 localPoint)
+        {
+            if (rect == null || _monitorArea == null)
+            {
+                return Vector3.zero;
+            }
+
+            return _monitorArea.InverseTransformPoint(rect.TransformPoint(localPoint));
         }
 
         /// <summary>
