@@ -657,6 +657,13 @@ namespace NailongFNAF.UI
         /// <summary>黑壳颜色：近黑略带一点冷灰，别用纯黑（和画面里的黑糊成一片）。</summary>
         private static readonly Color MonitorBezelColor = new Color(0.055f, 0.065f, 0.070f, 1f);
 
+        /// <summary>
+        /// 黑壳节点 —— 它的**内沿**就是画面框边界。
+        /// 敌人立绘用它的世界四角做像素裁剪（_ViewRect），
+        /// 溢出画面的部分不画（不能用 RectMask2D：会换掉自定义 shader，见 BuildMonitorLayer 注释）。
+        /// </summary>
+        private RectTransform _monitorBezel;
+
         /// <summary>壳内沿那圈细亮线比画面框外扩多少（设计像素）。</summary>
         private const float MonitorBezelRimPad = 3f;
 
@@ -2294,29 +2301,43 @@ namespace NailongFNAF.UI
                 // 把画面框（设计区 ±960/±540）换算到**立绘本地坐标**写进
                 // shader 的 _ViewRect，超出的像素在 frag 里 clip 掉。
                 //
-                // 本地→设计区：local × lossyScale + 世界位置 − Area 中心。
-                // 用 InverseTransformPoint 直接算，不用手推矩阵。
-                if (img.material != null && img.material.HasProperty("_ViewRect"))
-                {
-                    // Area 的对角两点（世界坐标）→ 立绘本地坐标。
-                    // InverseTransformPoint 已含缩放/旋转/位移，无需手除。
-                    var areaRect = MonitorAreaRect();
-                    Vector3 areaMin = _monitorArea.TransformPoint(
-                        new Vector3(-areaRect.width * 0.5f, -areaRect.height * 0.5f, 0f));
-                    Vector3 areaMax = _monitorArea.TransformPoint(
-                        new Vector3(areaRect.width * 0.5f, areaRect.height * 0.5f, 0f));
-
-                    Vector2 min = rect.InverseTransformPoint(areaMin);
-                    Vector2 max = rect.InverseTransformPoint(areaMax);
-
-                    img.material.SetVector("_ViewRect", new Vector4(
-                        Mathf.Min(min.x, max.x), Mathf.Min(min.y, max.y),
-                        Mathf.Max(min.x, max.x), Mathf.Max(min.y, max.y)));
-                }
             }
 
             // 只给「远档」的敌人套遮挡（近档站在家具前面，不裁）
             ApplyOccluderToCharacters(cam);
+
+            // ── 可视区裁剪：立绘探出监控画面框的部分不画 ──
+            //
+            // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会画到
+            // 框外、盖住黑壳 —— 穿模。
+            //
+            // 做法：**用黑壳内沿的世界四角**当裁剪框。shader 端（MonitorCharacter）
+            // 顶点已改算世界坐标，_ViewRect 也直接给世界坐标 ——
+            // 两端同一坐标系，零换算歧义。黑壳内沿 = 画面框边界，天然合理。
+            //
+            // ⚠️ 不能用 RectMask2D：它是 IMaterialModifier，UGUI 会把自定义
+            // shader 换成模板材质，家具遮挡直接失效（历史踩坑）。
+            if (_monitorBezel != null)
+            {
+                var cs = new Vector3[4];
+                _monitorBezel.GetWorldCorners(cs);
+
+                // cs 顺序：左下(0) 左上(1) 右上(2) 右下(3) —— 取 min/max
+                Vector4 viewRect = new Vector4(
+                    Mathf.Min(cs[0].x, cs[2].x), Mathf.Min(cs[0].y, cs[2].y),
+                    Mathf.Max(cs[0].x, cs[2].x), Mathf.Max(cs[0].y, cs[2].y));
+
+                foreach (var img in _monitorCharacters)
+                {
+                    if (img == null || img.material == null
+                        || !img.material.HasProperty("_ViewRect"))
+                    {
+                        continue;
+                    }
+
+                    img.material.SetVector("_ViewRect", viewRect);
+                }
+            }
         }
 
         /// <summary>
@@ -5565,6 +5586,8 @@ namespace NailongFNAF.UI
             //      挂在设计区里（跟着一起缩放），排在垫底之前 —— 只露出发给框外的那一圈。
             var bezelGo = new GameObject("MonitorBezel", typeof(RectTransform), typeof(Image));
             bezelGo.transform.SetParent(_monitorArea, false);
+
+            _monitorBezel = bezelGo.GetComponent<RectTransform>();
 
             var bezelRect = bezelGo.GetComponent<RectTransform>();
             bezelRect.anchorMin = new Vector2(0.5f, 0.5f);

@@ -47,7 +47,7 @@ Shader "NailongFNAF/MonitorCharacter"
             struct v2f
             {
                 float4 vertex   : SV_POSITION;
-                float2 localPos : TEXCOORD1;
+                float2 worldPos : TEXCOORD1;
                 fixed4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
             };
@@ -65,7 +65,10 @@ Shader "NailongFNAF/MonitorCharacter"
                 v2f OUT;
                 OUT.vertex = UnityObjectToClipPos(v.vertex);
                 OUT.texcoord = v.texcoord;
-                OUT.localPos = v.vertex.xy;
+                // 世界坐标 xy —— _ViewRect 也用世界坐标，两边一一对应，
+                // 免掉本地系/缩放/pivot 的所有换算歧义。
+                float3 wp = mul(unity_ObjectToWorld, v.vertex).xyz;
+                OUT.worldPos = wp.xy;
                 OUT.color = v.color * _Color;
                 return OUT;
             }
@@ -74,12 +77,12 @@ Shader "NailongFNAF/MonitorCharacter"
             {
                 fixed4 c = tex2D(_MainTex, i.texcoord) * i.color;
 
-                // 可视区裁剪：本地坐标超出 _ViewRect 的像素整个丢弃。
+                // 可视区裁剪：世界坐标超出 _ViewRect 的像素整个丢弃。
                 // 敌人立在监控画面边缘时，探出画面框的那截就被切掉。
-                clip(i.localPos.x - _ViewRect.x);
-                clip(i.localPos.y - _ViewRect.y);
-                clip(_ViewRect.z - i.localPos.x);
-                clip(_ViewRect.w - i.localPos.y);
+                clip(i.worldPos.x - _ViewRect.x);
+                clip(i.worldPos.y - _ViewRect.y);
+                clip(_ViewRect.z - i.worldPos.x);
+                clip(_ViewRect.w - i.worldPos.y);
 
                 float2 suv = _OccluderRect.xy + i.texcoord * _OccluderRect.zw;
 
