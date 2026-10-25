@@ -5737,11 +5737,21 @@ namespace NailongFNAF.UI
             _monitorMapGroup.alpha = 0f;
             _monitorMapGroup.blocksRaycasts = false;
 
-            // ⚠️ 噪点层**必须置顶** —— 它创建在平板容器之前，后面建的
-            // MonitorTablet / 小地图等 sibling 会排到它上面，把雪花全盖住。
-            // 在这里（所有监控子物体都建完）再置顶一次才是真的最上。
-            if (_staticOverlay != null)
+            // ⚠️ 噪点层的创建代码在平板容器**之前**执行 —— 那时
+            // _monitorTablet 还是 null，SetParent(null) 把它挂到了场景根上，
+            // 不在 Canvas 里 → **雪花完全看不见**。
+            // 现在平板已建好，在这里重新挂父 + 置顶（挂在平板里 = 只盖画面框）。
+            if (_staticOverlay != null && _monitorTablet != null)
             {
+                _staticOverlay.transform.SetParent(_monitorTablet, false);
+
+                _staticOverlay.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+                _staticOverlay.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+                _staticOverlay.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                _staticOverlay.rectTransform.anchoredPosition = Vector2.zero;
+                _staticOverlay.rectTransform.sizeDelta = new Vector2(
+                    MonitorDesignWidth, MonitorDesignHeight);
+
                 _staticOverlay.transform.SetAsLastSibling();
             }
         }
