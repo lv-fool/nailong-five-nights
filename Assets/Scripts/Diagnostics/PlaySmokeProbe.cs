@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
+using NailongFNAF.UI;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -387,8 +389,157 @@ namespace NailongFNAF.Diagnostics
 
                 ReportVoice();
 
+                // 贝利亚之夜：切进模式，开局白送的「拉钩」三张卡应该立刻弹出来
+                object gmBelial = Instance("NailongFNAF.Core.GameManager");
+                Invoke(gmBelial, "SetBelial", new object[] { true });
+                Invoke(gmBelial, "Restart", null);
+                Debug.Log("SMOKE: 贝利亚之夜已开局");
+            }
+            else if (_step == 31 && elapsed > 40.0f)
+            {
+                _step = 32;
+                SnapStraight("19_belial_support");
+                ReportBelial("白送那次");
+            }
+            else if (_step == 32 && elapsed > 41.2f)
+            {
+                _step = 33;
+
+                object gmBelial2 = Instance("NailongFNAF.Core.GameManager");
+                object night = Get(gmBelial2, "Belial");
+                object picked = Call(night, "Choose", new object[] { 0 });
+                Call(gmBelial2, "ApplySupport", new object[] { picked });
+                Canvas.ForceUpdateCanvases();
+                Debug.Log("SMOKE: 选完「拉钩」后还等选择 = " + Get(night, "AwaitingChoice") +
+                          " · 已拿 = " + Get(night, "Picks") +
+                          " · timeScale = " + Time.timeScale);
+                SnapStraight("20_belial_after_pick");
+            }
+            else if (_step == 33 && elapsed > 42.6f)
+            {
+                _step = 34;
+
+                // 白送之后补的那一次正常三选一：再挑一张，局面应该解除暂停
+                object gmBelial3 = Instance("NailongFNAF.Core.GameManager");
+                object night2 = Get(gmBelial3, "Belial");
+                object picked2 = Call(night2, "Choose", new object[] { 0 });
+                Call(gmBelial3, "ApplySupport", new object[] { picked2 });
+                Canvas.ForceUpdateCanvases();
+                Debug.Log("SMOKE: 第二次挑完 · 还等选择 = " + Get(night2, "AwaitingChoice") +
+                          " · 已拿 = " + Get(night2, "Picks") +
+                          " · timeScale = " + Time.timeScale);
+                SnapStraight("21_belial_resumed");
+            }
+            else if (_step == 34 && elapsed > 43.8f)
+            {
+                _step = 35;
+                ReportBelial("两张都挑完之后");
+
+                // 开始看贝利亚本人：先让模式进入第二阶段，再把 encounter 摆到左门外
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                gm.GetType().GetMethod("SetBelial").Invoke(gm, new object[] { true });
+                gm.GetType().GetMethod("Restart").Invoke(gm, null);
+
+                // 前面几步可能已经被怪抓了，先把死亡状态和面板清掉再摆贝利亚
+                gm.GetType().GetProperty("HasBeenCaught").GetSetMethod(true)
+                    .Invoke(gm, new object[] { false });
+
+                object scene = FindScene();
+                Invoke(scene, "ClearJumpscare", null);
+                object endView = Get(scene, "_endView");
+
+                if (endView is GameObject endGo)
+                {
+                    endGo.SetActive(false);
+                }
+
+                // 画面冻住再摆贝利亚：不然怪会在截图前又把玩家吃了
+                UnityEngine.Time.timeScale = 0f;
+                var menuFlags = BindingFlags.NonPublic | BindingFlags.Instance;
+                var shownField = scene.GetType().GetField("_endShown", menuFlags);
+
+                if (shownField != null)
+                {
+                    shownField.SetValue(scene, false);
+                }
+
+                object night = Get(gm, "Belial");
+                night.GetType().GetMethod("AdvanceHours").Invoke(night, new object[] { 6 });
+
+                // 把开局那张白送的牌收起来，别挡着贝利亚
+                var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+                night.GetType().GetField("_offer", flags).SetValue(night, null);
+
+                ForceBelial((GameManager)gm, false, 0);
+            }
+            else if (_step == 35 && elapsed > 45.2f)
+            {
+                _step = 36;
+                SnapPan("22_belial_dark", -1f);
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                object night = Get(gm, "Belial");
+                object h = night.GetType().GetProperty("Hours").GetValue(night);
+                object a = night.GetType().GetProperty("BelialActive").GetValue(night);
+                Debug.Log("SMOKE: 贝利亚外观 小时 = " + h + " 已上场 = " + a +
+                    " 在门口 = " + Get(gm, "BelialEncounter") + " 提示 = [" +
+                    (Get(FindScene(), "_belialHint") != null ? Get(Get(FindScene(), "_belialHint"), "text") : "") + "]");
+            }
+            else if (_step == 36 && elapsed > 46.2f)
+            {
+                _step = 37;
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                ForceBelial((GameManager)gm, true, 0);
+            }
+            else if (_step == 37 && elapsed > 47.4f)
+            {
+                _step = 38;
+                SnapPan("23_belial_white", -1f);
+            }
+            else if (_step == 38 && elapsed > 48.6f)
+            {
+                // 截图是异步落盘的，多等一帧再退出，不然最后一张会丢
+                _step = 39;
                 Finish();
             }
+        }
+
+        /// <summary>找到运行中的 PrototypeScene。</summary>
+        private static UnityEngine.Object FindScene()
+        {
+            return UnityEngine.Object.FindObjectOfType<PrototypeScene>();
+        }
+
+        /// <summary>把贝利亚之夜的当前状态打出来（小时 / 抽到第几张 / 桌上摆着哪些卡）。</summary>
+        private void ReportBelial(string title)
+        {
+            object gm = Instance("NailongFNAF.Core.GameManager");
+            object night = gm != null ? Get(gm, "Belial") : null;
+
+            if (night == null)
+            {
+                Debug.Log("SMOKE: 贝利亚[" + title + "] 账本为空");
+                return;
+            }
+
+            var titles = new List<string>();
+            object offer = Get(night, "Offer");
+
+            if (offer is Array cards)
+            {
+                foreach (object card in cards)
+                {
+                    titles.Add(card != null ? Get(card, "Title") as string : "?");
+                }
+            }
+
+            Debug.Log("SMOKE: 贝利亚[" + title + "] 小时 = " + Get(night, "Hours") +
+                      " 阶段 = " + Get(night, "Phase") +
+                      " 已拿 = " + Get(night, "Picks") +
+                      " 等选择 = " + Get(night, "AwaitingChoice") +
+                      " 白送 = " + Get(night, "IsForcedOffer") +
+                      " 桌上 = [" + string.Join(", ", titles.ToArray()) + "]" +
+                      " 当前电量 = " + (gm != null ? Get(gm, "Power") == null ? "?" : Get(Get(gm, "Power"), "Level") : "?") +
+                      " timeScale = " + Time.timeScale);
         }
 
         /// <summary>把手机各个 renderer 的世界包围盒打出来 —— 用来判断模型的长轴 / 朝向。</summary>
@@ -475,6 +626,19 @@ namespace NailongFNAF.Diagnostics
             if (room != null)
             {
                 Invoke(room, "SetPan", new object[] { 0f });
+            }
+
+            Snap(name);
+        }
+
+        /// <summary>把视角摆到指定 pan 再截图（-1 最左，+1 最右）。</summary>
+        private void SnapPan(string name, float pan)
+        {
+            object scene = Instance("NailongFNAF.UI.PrototypeScene");
+            object room = scene != null ? Get(scene, "_room") : null;
+            if (room != null)
+            {
+                Invoke(room, "SetPan", new object[] { pan });
             }
 
             Snap(name);
@@ -775,6 +939,26 @@ namespace NailongFNAF.Diagnostics
             Debug.Log("SMOKE: 结算主按钮 = [" + Get(Get(scene, "_endPrimaryLabel"), "text") + "]");
         }
 
+        /// <summary>冒烟里没法真等到第 6 小时，直接把贝利亚摆到门口看一眼外观。</summary>
+        private static void ForceBelial(GameManager gm, bool white, int side)
+        {
+            object enc = Get(gm, "BelialEncounter");
+
+            if (enc == null)
+            {
+                return;
+            }
+
+            var t = enc.GetType();
+            var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            t.GetField("_atDoor", flags).SetValue(enc, true);
+            t.GetField("_retreating", flags).SetValue(enc, false);
+            t.GetField("_kill", flags).SetValue(enc, false);
+            t.GetField("_flashes", flags).SetValue(enc, 3);
+            t.GetField("_side", flags).SetValue(enc, side == 0 ? BelialSide.Left : BelialSide.Right);
+            t.GetField("_whiteLeft", flags).SetValue(enc, white ? 0.85f : 0f);
+        }
+
         private void Finish()
         {            for (int i = 0; i < _errors.Count && i < 12; i++)
             {
@@ -875,6 +1059,26 @@ namespace NailongFNAF.Diagnostics
 
             mi.Invoke(target, args);
             return true;
+        }
+
+        /// <summary>和 <see cref="Invoke"/> 一样，但把返回值拿出来（选卡这类要拿对象的用它）。</summary>
+        private static object Call(object target, string name, object[] args)
+        {
+            if (target == null)
+            {
+                return null;
+            }
+
+            MethodInfo mi = target.GetType().GetMethod(
+                name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+            if (mi == null)
+            {
+                Debug.LogError("SMOKE: 找不到方法 " + name);
+                return null;
+            }
+
+            return mi.Invoke(target, args);
         }
 
         /// <summary>改自动属性的幕后字段（探针专用，比如把结算周期临时压短）。</summary>

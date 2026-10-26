@@ -12,8 +12,18 @@ namespace NailongFNAF.Gameplay
     /// </summary>
     public class PowerSystem
     {
-        /// <summary>电量上限（百分比）。</summary>
-        public const float MaxLevel = 100f;
+        /// <summary>默认电量上限（百分比）。实际上限是实例上的 <see cref="MaxLevel"/>。</summary>
+        public const float DefaultMaxLevel = 100f;
+
+        private float _maxLevel;
+
+        /// <summary>
+        /// 这一局的电量上限（百分比）。默认 100，拿到「舍曲林」之类的支援会被抬高。
+        /// </summary>
+        public float MaxLevel
+        {
+            get { return _maxLevel; }
+        }
 
         /// <summary>
         /// 开局电量（百分比）。FNAF 1 从 99% 开始 —— 不是满的，
@@ -44,15 +54,45 @@ namespace NailongFNAF.Gameplay
 
         /// <summary>以满电量创建。</summary>
         public PowerSystem()
-            : this(MaxLevel)
+            : this(DefaultMaxLevel)
         {
         }
 
         /// <summary>以指定电量创建（测试与调试用）。</summary>
         public PowerSystem(float initialLevel)
         {
+            _maxLevel = DefaultMaxLevel;
             Level = Clamp(initialLevel, 0f, MaxLevel);
             UsageLevel = MinUsageLevel;
+        }
+
+        /// <summary>
+        /// 改这一局的电量上限（「舍曲林」翻倍、加量 +30% 都走这里）。
+        /// 只改上限，不动当前电量；当前电量超了新上限会被夹回来。
+        /// </summary>
+        public void SetMaxLevel(float maxLevel)
+        {
+            if (maxLevel <= 0f)
+            {
+                return;
+            }
+
+            _maxLevel = maxLevel;
+            if (Level > _maxLevel)
+            {
+                Level = _maxLevel;
+            }
+        }
+
+        /// <summary>把上限乘以一个倍数（1.15 = 提高一成半）。</summary>
+        public void MultiplyMaxLevel(float factor)
+        {
+            if (factor <= 0f)
+            {
+                return;
+            }
+
+            SetMaxLevel(_maxLevel * factor);
         }
 
         /// <summary>
@@ -86,6 +126,12 @@ namespace NailongFNAF.Gameplay
         /// 直接扣掉指定百分点 —— 用于设备耗电之外的原因，比如奶龙偷电。
         /// 与设备无关，因此不乘使用等级。
         /// </summary>
+        /// <summary>
+        /// 掉电倍率：1 = 正常。贝利亚之夜的「血清素」「文拉法辛」「安非他酮」这类支援
+        /// 按比例往下压（0.75 = 只掉四分之三）。不改变使用等级，只改变每一档掉得多快。
+        /// </summary>
+        public float DrainScale { get; set; } = 1f;
+
         public void DrainAmount(float percent)
         {
             if (percent <= 0f || IsDepleted)
@@ -93,7 +139,14 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
-            Level = Clamp(Level - percent, 0f, MaxLevel);
+            float scale = DrainScale;
+
+            if (scale < 0f)
+            {
+                scale = 0f;
+            }
+
+            Level = Clamp(Level - percent * scale, 0f, MaxLevel);
         }
 
         /// <summary>

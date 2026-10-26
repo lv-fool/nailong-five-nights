@@ -113,7 +113,24 @@ namespace NailongFNAF.Gameplay
         /// <summary>自定义夜全 20，通关时电量还剩 1% 以上。</summary>
         public const string FullHouse = "full_house";
 
-        /// <summary>全部成就，按展示顺序（普通 9 条 → 彩蛋 10 条）。</summary>
+        // ---- 贝利亚之夜（2026-10-26 加，全部隐藏）----
+
+        /// <summary>第一次在贝利亚之夜见到他。</summary>
+        public const string BelialFirst = "belial_first";
+
+        /// <summary>第一次把他照成白贝。</summary>
+        public const string BelialWhite = "belial_white";
+
+        /// <summary>一局里把他照成白贝 12 下。</summary>
+        public const string BelialFlashTwelve = "belial_flash12";
+
+        /// <summary>撑满贝利亚之夜的 12 小时。</summary>
+        public const string BelialClear = "belial_clear";
+
+        /// <summary>被他抓住过一次。</summary>
+        public const string BelialDeath = "belial_death";
+
+        /// <summary>全部成就，按展示顺序（普通 9 条 → 彩蛋 10 条 → 贝利亚 5 条）。</summary>
         public static readonly Def[] All =
         {
             // 普通成就：名字是意象，描述照旧写清条件
@@ -152,6 +169,18 @@ namespace NailongFNAF.Gameplay
                 true, "手比脑子先记住这屋里的规矩。"),
             new Def(FullHouse, "满格", "自定义夜四只全 20，通关时电量还剩 1% 以上",
                 true, "满格的恶意，一格的电。"),
+
+            // 贝利亚之夜：本来就不该被提前看到
+            new Def(BelialFirst, "它先到的", "在贝利亚之夜第一次遇见贝利亚",
+                true, "你还没走到门口，它已经在那儿了。"),
+            new Def(BelialWhite, "白了一下", "第一次把贝利亚照成白贝",
+                true, "有那么半秒，它看起来像个人。"),
+            new Def(BelialFlashTwelve, "一直照", "一局里把贝利亚照成白贝 12 下",
+                true, "灯关掉以后，暗处还留着一点白。"),
+            new Def(BelialClear, "值班的人没换", "撑满贝利亚之夜的 12 小时",
+                true, "外面的天一直没亮，可你还在。"),
+            new Def(BelialDeath, "开门的人", "被贝利亚抓住",
+                true, "它记得你每一次开门。"),
         };
 
         /// <summary>按 id 找定义；找不到返回 null。</summary>

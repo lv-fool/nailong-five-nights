@@ -1340,6 +1340,12 @@ namespace NailongFNAF.UI
                 PlayerPrefs.Save();
             }
 
+            // 通关第 5 夜也是「贝利亚之夜」的第一个解锁条件（另一个是听完一通电话）。
+            if (wasLast)
+            {
+                BelialUnlock.MarkNight5Cleared();
+            }
+
             string achievementLine = CheckWinAchievements(gm, current, custom, wasLast);
 
             _endTitleText.text = custom ? "自定义夜 通关" : (wasLast ? "全部通关！" : NightName(current) + " 通关");
@@ -1518,6 +1524,12 @@ namespace NailongFNAF.UI
 
             bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
+
+            // 被咬死的次数是「贝利亚之夜」的第一个解锁条件（只算前五夜，自定义夜不算）。
+            if (!custom)
+            {
+                BelialUnlock.NoteDeath();
+            }
 
             _endTitleText.text = "你被抓住了";
             _endBodyText.text = (custom
