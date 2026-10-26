@@ -1193,6 +1193,18 @@ namespace NailongFNAF.UI
         /// <summary>噪点完全平息所需秒数。</summary>
         private const float StaticFadeSeconds = 0.28f;
 
+        /// <summary>
+        /// 敌人挪窝时抖的那一下有多强。切机位是 1（整屏炸），
+        /// 这个要明显轻 —— 是「画面被人碰了一下」，不是「换台」。
+        /// </summary>
+        private const float MonitorMoveStaticStrength = 0.5f;
+
+        /// <summary>上一帧这一机位上的敌人组成（id + 姿势），用来判断「有人动了」。</summary>
+        private int _monitorEnemySignature;
+
+        /// <summary>签名是否有效。刚抬起监控的第一帧不算「有人动」。</summary>
+        private bool _monitorEnemySignatureReady;
+
         /// <summary>噪点覆盖层（全屏 RawImage，盖在画面框之上）。</summary>
         private UnityEngine.UI.RawImage _staticOverlay;
 
@@ -1219,12 +1231,46 @@ namespace NailongFNAF.UI
                     _staticStrength, 0f, Time.unscaledDeltaTime / StaticFadeSeconds);
 
                 _staticOverlay.enabled = true;
-                _staticMaterial.SetFloat("_Strength", _staticStrength);
+
+                // 强度走**顶点色 alpha**（shader 里读 IN.color.a）。
+                // ⚠️ 别改回 `_staticMaterial.SetFloat("_Strength", ...)`：
+                // 材质上读得到、渲染时却是 0，整层透明 —— 踩过。
+                //
+                // 用 Graphic.color 而不是 CanvasRenderer.SetAlpha：
+                // 后者只改渲染器层的乘数，不确定会落到顶点色里，
+                // 而这个 quad 本来就要跟着监控一起重建，多它一个不多。
+                _staticOverlay.color = new Color(1f, 1f, 1f, _staticStrength);
             }
             else if (_staticOverlay.enabled)
             {
                 _staticOverlay.enabled = false;
             }
+        }
+
+        /// <summary>
+        /// 监控画面里的敌人换了位置 / 换了姿势 → 抖一层雪花。
+        ///
+        /// 只认**当前这一机位看得见的**敌人：没在看的地方有人走动不该有反应，
+        /// 否则玩家能靠雪花反推自己没看的房间发生了什么。
+        /// 「有人动了」在监控上的表现本来就是「画面里的人忽然挪了 / 没了」，
+        /// 这一下抖动是把那个跳变糊过去，而不是额外报信。
+        /// </summary>
+        private void DetectMonitorEnemyMovement(EnemyId[] ids, CharacterPose[] poses, int count)
+        {
+            int signature = 17;
+            for (int i = 0; i < count; i++)
+            {
+                signature = signature * 31 + ((int)ids[i] + 1) * 7 + (int)poses[i];
+            }
+
+            // 刚抬起监控的第一帧不抖 —— 那是「打开」，不是「有人动」
+            if (_monitorEnemySignatureReady && signature != _monitorEnemySignature)
+            {
+                BurstStatic(MonitorMoveStaticStrength);
+            }
+
+            _monitorEnemySignature = signature;
+            _monitorEnemySignatureReady = true;
         }
 
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
@@ -1777,6 +1823,9 @@ namespace NailongFNAF.UI
         /// <summary>把所有监控角色槽位收起来。</summary>
         private void HideMonitorCharacters()
         {
+            // 收起 = 这一帧的画面作废。下次抬起监控的第一帧不该被判成「有人动」。
+            _monitorEnemySignatureReady = false;
+
             if (_monitorCharacters == null)
             {
                 return;
@@ -2207,6 +2256,10 @@ namespace NailongFNAF.UI
                 poses[count] = CharacterPose.Peek;
                 count++;
             }
+
+            // 这一机位上「谁在、谁什么姿势」跟上一帧不一样 → 抖一层雪花。
+            // 放在摆位之前：抖的是「刚刚发生的变化」，和这一帧怎么摆无关。
+            DetectMonitorEnemyMovement(ids, poses, count);
 
             // ⚠️ **位置和角色绑定，不按「当前有几个」重排**。
             // 以前是按 count 均分（1 个居中 / 2 个 ±130 / 3 个 ±230）——
@@ -5575,7 +5628,6 @@ namespace NailongFNAF.UI
             if (staticShader != null)
             {
                 _staticMaterial = new Material(staticShader);
-                _staticMaterial.SetFloat("_Strength", 0f);
                 _staticOverlay.material = _staticMaterial;
                 _staticOverlay.color = Color.white;
                 _staticOverlay.texture = Texture2D.whiteTexture;

@@ -5,16 +5,16 @@ Shader "NailongFNAF/MonitorStatic"
     // 三层叠加：
     //   1. 每帧随机灰点（雪花）—— hash(uv + time) 逐像素随机
     //   2. 横向滚动扫描线 —— 暗带从上往下滚，老式 CRT 的味道
-    //   3. 整体闪烁 —— 亮度随时间小幅抖动
+    //   3. 随机横向撕裂 —— 某几行更亮
     //
-    // _Strength 控制总强度：切机位的一瞬推到 1，平时 0，
-    // 用一个参数就能做出「一切换就炸雪花然后平息」的经典过渡。
+    // _Strength 控制总强度：切机位的一瞬推到 1，敌人挪窝时推 0.5，
+    // 之后衰减回 0。**强度只走 alpha**，颜色始终是压暗的噪点 ——
+    // 底下的机位画面要一直透得出来，不能糊成一片白。
 
     Properties
     {
         [PerRendererData] _MainTex ("Sprite Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
-        _Strength ("Static Strength", Range(0, 1)) = 0
         _TimeScale ("Time Scroll Speed", Float) = 37.0
     }
 
@@ -59,7 +59,6 @@ Shader "NailongFNAF/MonitorStatic"
             sampler2D _MainTex;
             float4 _MainTex_ST;
             fixed4 _Color;
-            float _Strength;
             float _TimeScale;
 
             v2f vert(appdata_t IN)
@@ -79,46 +78,39 @@ Shader "NailongFNAF/MonitorStatic"
 
             fixed4 frag(v2f IN) : SV_Target
             {
-                // 底图（机位画面）本身
-                fixed4 baseColor = tex2D(_MainTex, IN.texcoord) * IN.color;
-
-                if (_Strength <= 0.001)
-                {
-                    return baseColor;
-                }
+                // 强度走 **顶点色 alpha**（C# 每帧写 RawImage.color.a）。
+                //
+                // ⚠️ 不要改回自定义 uniform（`_Strength`）：试过，设了
+                // SetFloat 材质上读得到、渲染时却是 0，整层透明 ——
+                // 顶点色是 UI 一定会传的通道，绕开这个坑。
+                float strength = IN.color.a;
 
                 float t = _Time.y * _TimeScale;
 
-                // ① 雪花：逐像素随机灰度
+                // ① 雪花：逐像素随机灰度（0.12 ~ 0.67）——
+                //    纯白噪点糊在深色监控画面上会整片发白，看着像过曝。
                 float n = Hash(floor(IN.texcoord * float2(640, 360)) + floor(t));
-                float3 snow = n.xxx;
+                float snow = n * 0.55 + 0.12;
 
                 // ② 扫描线：几条暗带从上往下滚
                 float scan = 0.75 + 0.25 * sin(IN.texcoord.y * 240.0 + _Time.y * 9.0);
 
-                // ③ 随机横向撕裂：某几行水平错位
+                // ③ 随机横向撕裂：某几行水平错位（这几行稍亮一点，才看得出「撕」）
                 float row = floor(IN.texcoord.y * 90.0);
                 float tear = step(0.975, Hash(float2(row, floor(_Time.y * 11.0))));
 
-                // 合成：按强度把雪花/撕裂混进底图
-                fixed4 result = baseColor;
+                float3 col = snow * scan * (1.0 + tear * 0.45);
 
-                // 撕裂行：把该行换成更亮的雪花（也留 25% 底图）
-                result.rgb = lerp(result.rgb, snow * 1.15, tear * _Strength * 0.75);
+                // ④ alpha 上限 0.34：满强度也只盖住三成多，
+                //    机位画面一直隐约透出来，像隔着干扰看监控，
+                //    而不是把画面糊成一片白。
+                //
+                //    ⚠️ 早先的写法是 lerp(纯白底图, 雪花, 强度)：
+                //    这一层的底图其实是 whiteTexture，等于「白色盖在监控上」，
+                //    强度一高整屏发白 —— 雪花「太亮」就是这么来的。
+                float alpha = strength * 0.34;
 
-                // 雪花：**半透明** —— 即使强度拉满也只混到 55%，
-                // 底图（机位画面）一直隐约透出来，像隔着干扰看监控，
-                // 而不是把画面整个糊成雪花。
-                float snowMix = _Strength * (0.20 + 0.35 * _Strength);
-                result.rgb = lerp(result.rgb, snow * scan, snowMix);
-
-                // 扫描线压暗
-                result.rgb *= lerp(1.0, scan, 0.5 * _Strength);
-
-                // 闪烁
-                result.rgb *= 1.0 + (Hash(float2(floor(_Time.y * 24.0), 7.0)) - 0.5) * 0.22 * _Strength;
-
-                return result;
+                return fixed4(col, alpha);
             }
             ENDCG
         }
