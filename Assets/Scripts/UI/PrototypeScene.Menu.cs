@@ -36,6 +36,9 @@ namespace NailongFNAF.UI
         /// <summary>永夜模式的纪录存档键：存「撑过的真实秒数」，越大越好。</summary>
         public const string EndlessBestKey = "nailong.endlessBest";
 
+        /// <summary>永夜模式历史最高分。</summary>
+        public const string EndlessBestScoreKey = "nailong.endlessBestScore";
+
         /// <summary>永夜模式的进度存档键：一行文本，格式见 <see cref="EternalNightSave"/>。</summary>
         public const string EternalSaveKey = "nailong.eternalSave";
 
@@ -1561,12 +1564,22 @@ namespace NailongFNAF.UI
             int best = EndlessBestSeconds;
 
             bool isRecord = survived > best;
+            int score = gm.Score != null ? gm.Score.Score : EndlessScore.ScoreFor(survived, 0, secondsPerHour);
+            int bestScore = EndlessBestScore;
+
+            if (score > bestScore)
+            {
+                PlayerPrefs.SetInt(EndlessBestScoreKey, score);
+                bestScore = score;
+            }
+
             if (isRecord)
             {
                 PlayerPrefs.SetInt(EndlessBestKey, survived);
-                PlayerPrefs.Save();
                 best = survived;
             }
+
+            PlayerPrefs.Save();
 
             // 永夜成就：一局撑过 12 小时
             var newly = new System.Collections.Generic.List<AchievementCatalog.Def>();
@@ -1580,7 +1593,10 @@ namespace NailongFNAF.UI
             _endTitleText.text = isRecord ? "新纪录！" : "永夜模式结束";
             _endBodyText.text = "撑过 " + FormatSpan(survived, secondsPerHour)
                 + (isRecord ? " · 这是你的最好成绩" : " · 最佳 " + FormatSpan(best, secondsPerHour))
+                + " · 得分 " + score + " · 挡了 " + (gm.Score != null ? gm.Score.Blocks : 0)
+                + " 次 · 历史最高 " + bestScore
                 + achievementLine;
+
             _endPrimaryLabel.text = "再来一局";
             _endPrimaryButton.interactable = true;
 
@@ -1619,6 +1635,16 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>永夜模式最好成绩（真实秒数），没打过就是 0。</summary>
+        /// <summary>永夜模式历史最高分（没有存档就是 0）。</summary>
+        private static int EndlessBestScore
+        {
+            get
+            {
+                int value = PlayerPrefs.GetInt(EndlessBestScoreKey, 0);
+                return value < 0 ? 0 : value;
+            }
+        }
+
         private static int EndlessBestSeconds
         {
             get

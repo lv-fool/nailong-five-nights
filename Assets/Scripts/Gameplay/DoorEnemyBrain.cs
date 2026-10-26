@@ -485,6 +485,7 @@ namespace NailongFNAF.Gameplay
             // Stage 归零（看着像走了）、IsAttacking 却是 true（下一帧立刻判突破），
             // 玩家会看到它明明退了、却照样跳杀。
             LastChanceTimer = 0f;
+            NoteBlocked();
             Retreat();
         }
 

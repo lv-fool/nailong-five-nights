@@ -644,6 +644,14 @@ namespace NailongFNAF.Gameplay
 
                 pair.Value.Tick(brainDt, ctx);
 
+                // 挡住一次就报一次（永夜计分）。取增量，避免每帧重复记。
+                int blockedNow = pair.Value.ConsumeBlocks();
+
+                if (blockedNow > 0)
+                {
+                    game.NoteBlocked(blockedNow);
+                }
+
                 // 噜噜被手电筒逼退 —— 计进本夜次数（成就「闪光灯大师」用）
                 if (pair.Key == EnemyId.Lulu && pair.Value.RetreatedThisTick)
                 {

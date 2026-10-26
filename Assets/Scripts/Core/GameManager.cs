@@ -37,6 +37,9 @@ namespace NailongFNAF.Core
         /// <summary>永夜模式的换电账本（普通模式下为 null）。</summary>
         public EndlessRecharge Recharge { get; private set; }
 
+        /// <summary>永夜模式的得分（不是永夜时为 null）。</summary>
+        public EndlessScore Score { get; private set; }
+
         /// <summary>贝利亚之夜（12 小时肉鸽）模式下为 true。和 <see cref="EndlessMode"/> 互斥。</summary>
         public bool BelialMode { get; private set; }
 
@@ -314,6 +317,69 @@ namespace NailongFNAF.Core
         }
 
         /// <summary>
+        /// 挡住一次怪物（永夜计分用）。非永夜模式直接忽略 —— 故事模式没有分。
+        /// </summary>
+        public void NoteBlocked(int count = 1)
+        {
+            if (Score != null)
+            {
+                Score.AddBlocks(count);
+            }
+        }
+
+        /// <summary>
+        /// 调试用：把游戏时间往前推一段（F1 面板上的「+2 分钟 / +2 小时」）。
+        ///
+        /// 按 1 秒一步推进，这样整点结算（永夜补电、贝利亚发卡）都会正常触发；
+        /// 一次 Tick(7200) 会把中间这些整点全跳过去。
+        /// </summary>
+        public void DebugAdvanceGameSeconds(float seconds)
+        {
+            if (Clock == null || seconds <= 0f)
+            {
+                return;
+            }
+
+            int steps = Mathf.CeilToInt(seconds);
+            float step = seconds / steps;
+
+            for (int i = 0; i < steps; i++)
+            {
+                Clock.Tick(step);
+
+                if (Score != null)
+                {
+                    Score.Tick(step);
+                }
+
+                if (EndlessMode && Recharge != null)
+                {
+                    float grant = Recharge.Tick(step);
+
+                    if (grant > 0f && Power != null)
+                    {
+                        float actual = Power.Grant(grant);
+                        Recharge.NoteGranted(actual);
+                        LastGain = actual;
+                        LastGainAge = 0f;
+                    }
+                }
+            }
+
+            if (BelialMode && Belial != null)
+            {
+                // 贝利亚模式没走 endless 账本，这里只要把小时对齐
+                while (Belial.Hours < Clock.CurrentHour)
+                {
+                    if (!Belial.AdvanceHours(1))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// 记录「哪一侧被突破了」。照 FNAF 1：突破的瞬间该侧门与灯就废了，
         /// 玩家按了也没用 —— 只是还没跳杀而已（要等监控放下才动手）。
         /// </summary>
@@ -377,6 +443,12 @@ namespace NailongFNAF.Core
 
             // 闹钟 / 失眠：时间流速改一改（敌人和电量照常按真实时间走）
             Clock.Tick(dt * TimeScaleFactor);
+
+            // 永夜得分：和时钟一样按时间累积
+            if (Score != null)
+            {
+                Score.Tick(dt * TimeScaleFactor);
+            }
 
             TickBelial();
             TickBelialEncounter(dt);
@@ -565,6 +637,7 @@ namespace NailongFNAF.Core
             Power = new PowerSystem(PowerSystem.InitialLevel);
             Clock = new NightClock(_secondsPerHour, EndlessMode || BelialMode);
             Recharge = EndlessMode ? new EndlessRecharge() : null;
+            Score = EndlessMode ? new EndlessScore(_secondsPerHour) : null;
             Belial = BelialMode ? new BelialNight() : null;
             BelialEncounter = BelialMode ? new BelialEncounter(new SystemRandomSource()) : null;
             _belialHours = 0;

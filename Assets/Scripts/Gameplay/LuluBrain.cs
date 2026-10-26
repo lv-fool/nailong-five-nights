@@ -227,6 +227,7 @@ namespace NailongFNAF.Gameplay
 
                 if (FlashCount >= FlashesToRetreat)
                 {
+                    NoteBlocked();
                     Retreat();
                     return;
                 }

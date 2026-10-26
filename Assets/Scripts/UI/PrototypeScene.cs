@@ -4650,6 +4650,7 @@ namespace NailongFNAF.UI
             sb.Append(" · ").Append(Mathf.CeilToInt(recharge.SecondsToNext)).Append(" 秒后补 ");
             sb.Append(Mathf.RoundToInt(recharge.NextGain)).Append("%");
             sb.Append(" · 危险 ").Append(danger).Append("/").Append(NightCount);
+            sb.Append(" · 得分 ").Append(gm.Score != null ? gm.Score.Score : 0);
             if (overload)
             {
                 sb.Append("（过载）");
@@ -6032,6 +6033,14 @@ namespace NailongFNAF.UI
                 DebugEnterBelial);
             MakeDebugButton(panel.transform, "回故事模式", 840f, -104f, 150f, 34f,
                 DebugLeaveBelial);
+
+            // ── 时间推进（调试）──
+            // 永夜要撑十几分钟才看得出分数曲线，贝利亚要两小时才换阶段，
+            // 真等不现实，所以按一下往前跳一段。
+            MakeDebugButton(panel.transform, "+2 分钟", 680f, -146f, 150f, 34f,
+                DebugAdvanceTwoMinutes);
+            MakeDebugButton(panel.transform, "+2 小时", 840f, -146f, 150f, 34f,
+                DebugAdvanceTwoHours);
         }
 
         /// <summary>
@@ -6387,6 +6396,30 @@ namespace NailongFNAF.UI
             gm.Restart();
             ClearJumpscare();
             CloseOverlaysForModeSwitch();
+        }
+
+        /// <summary>调试用：时间往前跳 2 分钟。</summary>
+        private void DebugAdvanceTwoMinutes()
+        {
+            var gm = GameManager.Instance;
+
+            if (gm != null)
+            {
+                gm.DebugAdvanceGameSeconds(120f);
+            }
+        }
+
+        /// <summary>调试用：时间往前跳 2 个游戏小时（按当前时钟的每小时秒数换算）。</summary>
+        private void DebugAdvanceTwoHours()
+        {
+            var gm = GameManager.Instance;
+
+            if (gm == null || gm.Clock == null)
+            {
+                return;
+            }
+
+            gm.DebugAdvanceGameSeconds(gm.Clock.SecondsPerHour * 2f);
         }
 
         /// <summary>调试用：从贝利亚之夜退回普通故事模式（下一步重新开局）。</summary>
