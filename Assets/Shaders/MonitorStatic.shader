@@ -87,10 +87,11 @@ Shader "NailongFNAF/MonitorStatic"
 
                 float t = _Time.y * _TimeScale;
 
-                // ① 雪花：逐像素随机灰度（0.12 ~ 0.67）——
-                //    纯白噪点糊在深色监控画面上会整片发白，看着像过曝。
+                // ① 雪花：逐像素随机灰度（0.14 ~ 0.76）——
+                //    纯白噪点糊在深色监控画面上会整片发白，看着像过曝；
+                //    但压得太狠又看不见颗粒，这个范围是两版试出来的中间值。
                 float n = Hash(floor(IN.texcoord * float2(640, 360)) + floor(t));
-                float snow = n * 0.55 + 0.12;
+                float snow = n * 0.62 + 0.14;
 
                 // ② 扫描线：几条暗带从上往下滚
                 float scan = 0.75 + 0.25 * sin(IN.texcoord.y * 240.0 + _Time.y * 9.0);
@@ -101,14 +102,14 @@ Shader "NailongFNAF/MonitorStatic"
 
                 float3 col = snow * scan * (1.0 + tear * 0.45);
 
-                // ④ alpha 上限 0.34：满强度也只盖住三成多，
+                // ④ alpha 上限 0.44：满强度也只盖住四成多，
                 //    机位画面一直隐约透出来，像隔着干扰看监控，
                 //    而不是把画面糊成一片白。
                 //
                 //    ⚠️ 早先的写法是 lerp(纯白底图, 雪花, 强度)：
                 //    这一层的底图其实是 whiteTexture，等于「白色盖在监控上」，
                 //    强度一高整屏发白 —— 雪花「太亮」就是这么来的。
-                float alpha = strength * 0.34;
+                float alpha = strength * 0.44;
 
                 return fixed4(col, alpha);
             }
