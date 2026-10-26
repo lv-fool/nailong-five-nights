@@ -172,6 +172,23 @@ namespace NailongFNAF.Gameplay
             return Tag("call_late_", table.CallLinesFor(NaibaoCallLines.KeyNightLate));
         }
 
+        /// <summary>故事模式额外一句无配音闲话；永夜与自定义夜不使用这层。</summary>
+        public static NaibaoCallLine[] ForCall(int night, bool guide, int callIndex, bool custom, bool story)
+        {
+            NaibaoCallLine[] original = ForCall(night, guide, callIndex, custom);
+            if (!story || custom || callIndex > 0 || original.Length >= MaxLinesPerCall)
+            {
+                return original;
+            }
+
+            NaibaoCallLine fragment = StoryFragments.Phone(night);
+            if (string.IsNullOrEmpty(fragment.Text)) return original;
+            var result = new NaibaoCallLine[original.Length + 1];
+            System.Array.Copy(original, result, original.Length);
+            result[original.Length] = fragment;
+            return result;
+        }
+
         /// <summary>给一组台词按顺序贴上配音 id（<c>前缀 + 序号</c>，序号从 1 开始）。</summary>
         private static NaibaoCallLine[] Tag(string prefix, NaibaoCallLine[] lines)
         {
