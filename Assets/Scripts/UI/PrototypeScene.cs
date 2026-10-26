@@ -6019,6 +6019,19 @@ namespace NailongFNAF.UI
             posLabel.alignment = TextAnchor.MiddleLeft;
 
             BuildDebugEnemyPositionRows(panel.transform, -104f);
+
+            // ── 模式入口（开发用）──
+            // 正式入口在标题页，按解锁条件才露；调试时不该被那个条件卡住。
+            Text modeLabel = MakeLabel(panel.transform, "模式：", 17,
+                new Color(0.9f, 0.75f, 0.95f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(620f, -104f), new Vector2(52f, 34f));
+            modeLabel.alignment = TextAnchor.MiddleLeft;
+
+            MakeDebugButton(panel.transform, "贝利亚之夜", 680f, -104f, 150f, 34f,
+                DebugEnterBelial);
+            MakeDebugButton(panel.transform, "回故事模式", 840f, -104f, 150f, 34f,
+                DebugLeaveBelial);
         }
 
         /// <summary>
@@ -6344,6 +6357,83 @@ namespace NailongFNAF.UI
             ClearJumpscare();
             gm.MarkCaught();
             OnEnemyAttacked(id);
+        }
+
+        /// <summary>
+        /// 调试用：直接进「贝利亚之夜」。
+        ///
+        /// 正式入口在标题页，要等解锁条件满足才露（`BelialUnlock`）；
+        /// 但调试的时候不该被那个条件卡住 —— 而且这个模式现在还没做完整，
+        /// 每次都要先打五夜才能看一眼也不现实。
+        ///
+        /// 难度先按第 3 夜起手（中段），模式内部自己按小时往上爬。
+        /// </summary>
+        private void DebugEnterBelial()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            gm.SetEndless(false);
+            gm.SetBelial(true);
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.SetNight(3);
+            }
+
+            gm.Restart();
+            ClearJumpscare();
+            CloseOverlaysForModeSwitch();
+        }
+
+        /// <summary>调试用：从贝利亚之夜退回普通故事模式（下一步重新开局）。</summary>
+        private void DebugLeaveBelial()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            gm.SetBelial(false);
+            gm.SetEndless(false);
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.SetNight(0);
+            }
+
+            gm.Restart();
+            ClearJumpscare();
+            CloseOverlaysForModeSwitch();
+        }
+
+        /// <summary>切模式时把上一层留下的面板/暂停全部收掉，否则会卡在黑屏或 0 倍速。</summary>
+        private void CloseOverlaysForModeSwitch()
+        {
+            if (_menuRoot != null)
+            {
+                _menuRoot.SetActive(false);
+            }
+
+            if (_endView != null)
+            {
+                _endView.SetActive(false);
+            }
+
+            if (_pauseView != null)
+            {
+                _pauseView.SetActive(false);
+            }
+
+            _menuOpen = false;
+            _paused = false;
+            _endShown = false;
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
         }
 
         private void DebugSetPower(int percent)

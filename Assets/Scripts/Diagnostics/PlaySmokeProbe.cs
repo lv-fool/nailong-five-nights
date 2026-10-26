@@ -553,8 +553,45 @@ namespace NailongFNAF.Diagnostics
             }
             else if (_step == 40 && elapsed > 51.2f)
             {
-                // 截图是异步落盘的，多等一帧再退出，不然最后一张会丢
+                // 把 F1 面板亮出来 —— 平时它靠 Input 开关，冒烟里没有输入，只能直接改 alpha
+                object scene = FindScene();
+                object group = Get(scene, "_debugGroup");
+                var alphaProp = group != null
+                    ? group.GetType().GetProperty("alpha")
+                    : null;
+
+                if (alphaProp != null)
+                {
+                    alphaProp.SetValue(group, 1f, null);
+                }
+
                 _step = 41;
+                SnapStraight("25_debug_panel");
+            }
+            else if (_step == 41 && elapsed > 52.6f)
+            {
+                _step = 42;
+
+                object scene = FindScene();
+                Invoke(scene, "DebugEnterBelial", null);
+
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                object belial = Get(gm, "Belial");
+                object hours = Get(gm, "_belialHours");
+
+                Debug.Log("SMOKE: 调试入口进贝利亚 = " + Get(gm, "BelialMode") +
+                    " 账本 = " + (belial != null ? "有" : "无") +
+                    " 撑了几小时 = " + (hours != null ? hours.ToString() : "?"));
+            }
+            else if (_step == 42 && elapsed > 53.8f)
+            {
+                _step = 43;
+                SnapStraight("26_dev_belial");
+            }
+            else if (_step == 43 && elapsed > 55.0f)
+            {
+                // 截图是异步落盘的，多等一帧再退出，不然最后一张会丢
+                _step = 44;
                 Finish();
             }
         }
