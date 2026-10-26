@@ -251,6 +251,12 @@ namespace NailongFNAF.Gameplay
                 }
             }
         }
+        /// <summary>当前机位路径的副本（「今天出门了」要按它换格子，别直接改内部数组）。</summary>
+        public int[] CameraPath
+        {
+            get { return _cameraPath != null ? (int[])_cameraPath.Clone() : null; }
+        }
+
         /// <summary>
         /// 当前停在哪个监控机位（下标）。**站在门口**（<see cref="Stage"/> 到顶）、
         /// 或没配路径时返回 -1 —— 两者都不属于任何机位。

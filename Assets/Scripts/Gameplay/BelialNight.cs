@@ -378,6 +378,73 @@ namespace NailongFNAF.Gameplay
             return best * AmplifyFactor;
         }
 
+        /// <summary>谷维素：门口不开灯也看得见有没有人来。</summary>
+        public bool DoorSightActive
+        {
+            get { return Has(SupportEffect.DoorSightWithoutLight); }
+        }
+
+        /// <summary>咖啡因：切机位之后残影停留的秒数（0 = 没有残影）。</summary>
+        public float CameraGhostSeconds
+        {
+            get { return TotalOf(SupportEffect.CameraRefresh); }
+        }
+
+        /// <summary>一通电话：每个阶段开头报一次准确机位。</summary>
+        public bool StageSpotActive
+        {
+            get { return Has(SupportEffect.StageAccurateSpot); }
+        }
+
+        /// <summary>今天出门了：开局要空出来的机位数量。</summary>
+        public int SafeSpotCount
+        {
+            get { return (int)TotalOf(SupportEffect.SafeSpots); }
+        }
+
+        /// <summary>复诊：监控里给敌人标弱点。</summary>
+        public bool WeakPointActive
+        {
+            get { return Has(SupportEffect.WeakPointHighlight); }
+        }
+
+        /// <summary>查房：1 层只报噜噜和牛来，2 层全报。</summary>
+        public int RevealLevel
+        {
+            get { return (int)TotalOf(SupportEffect.RevealEnemies); }
+        }
+
+        /// <summary>闹钟 / 失眠：时间流速倍数。</summary>
+        public float TimeScaleFactor
+        {
+            get { return Has(SupportEffect.TimeScale) ? ProductOf(SupportEffect.TimeScale) : 1f; }
+        }
+
+        /// <summary>熬夜：手电照得远（倍数）。</summary>
+        public float FlashlightRangeScale
+        {
+            get { return Has(SupportEffect.RiskFlashlight) ? MaxOf(SupportEffect.RiskFlashlight) : 1f; }
+        }
+
+        /// <summary>熬夜的代价：关门判定窗口缩短的秒数（正数）。</summary>
+        public float AttackWindowPenalty
+        {
+            get
+            {
+                float penalty = 0f;
+
+                for (int i = 0; i < _owned.Count; i++)
+                {
+                    if (_owned[i].Effect == SupportEffect.RiskFlashlight && _owned[i].Value2 > penalty)
+                    {
+                        penalty = _owned[i].Value2;
+                    }
+                }
+
+                return penalty;
+            }
+        }
+
         /// <summary>某个类别是不是被「加量」这类支援禁掉了。</summary>
         public bool IsBanned(SupportCategory category)
         {

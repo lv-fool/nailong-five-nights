@@ -497,9 +497,98 @@ namespace NailongFNAF.Diagnostics
             }
             else if (_step == 38 && elapsed > 48.6f)
             {
-                // 截图是异步落盘的，多等一帧再退出，不然最后一张会丢
+                // 支援效果：把八条一口气塞进去，看监控界面有没有反应
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                GrantSupport((GameManager)gm, "wardround");
+                GrantSupport((GameManager)gm, "wardround");
+                GrantSupport((GameManager)gm, "recheck");
+                GrantSupport((GameManager)gm, "outing");
+                GrantSupport((GameManager)gm, "phone");
+                GrantSupport((GameManager)gm, "oryzanol");
+                GrantSupport((GameManager)gm, "alarm");
+                GrantSupport((GameManager)gm, "caffeine");
+
+                UnityEngine.Time.timeScale = 1f;
+                gm.GetType().GetMethod("SetPaused").Invoke(gm, new object[] { false });
+
+                // 这一路已经死过人了，先把死亡状态与面板清掉，不然截图全是结算界面
+                gm.GetType().GetProperty("HasBeenCaught").GetSetMethod(true)
+                    .Invoke(gm, new object[] { false });
+
+                object scene = FindScene();
+                Invoke(scene, "ClearJumpscare", null);
+                var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+                object endView = Get(scene, "_endView");
+
+                if (endView is GameObject endGo)
+                {
+                    endGo.SetActive(false);
+                }
+
+                var shown = scene.GetType().GetField("_endShown", flags);
+
+                if (shown != null)
+                {
+                    shown.SetValue(scene, false);
+                }
+
+                gm.GetType().GetMethod("ToggleMonitor").Invoke(gm, null);
+                UnityEngine.Time.timeScale = 0f;
                 _step = 39;
+            }
+            else if (_step == 39 && elapsed > 50.0f)
+            {
+                _step = 40;
+                SnapStraight("24_support_monitor");
+
+                object gm = Instance("NailongFNAF.Core.GameManager");
+                var safe = Get(gm, "SafeCameras") as int[];
+                var safeText = safe == null ? "无" : string.Join(",", Array.ConvertAll(safe, v => v.ToString()));
+                Debug.Log("SMOKE: 支援效果 查房 = " + Get(gm, "RevealLevel") +
+                    " 弱点 = " + Get(gm, "WeakPointActive") +
+                    " 谷维素 = " + Get(gm, "DoorSightActive") +
+                    " 残影 = " + Get(gm, "CameraGhostSeconds") +
+                    " 时间流速 = " + Get(gm, "TimeScaleFactor") +
+                    " 安全机位 = [" + safeText + "]");
+            }
+            else if (_step == 40 && elapsed > 51.2f)
+            {
+                // 截图是异步落盘的，多等一帧再退出，不然最后一张会丢
+                _step = 41;
                 Finish();
+            }
+        }
+
+        /// <summary>直接把某条支援塞进这一局的账本里（冒烟用，跳过抽卡）。</summary>
+        private static void GrantSupport(GameManager gm, string id)
+        {
+            object night = Get(gm, "Belial");
+
+            if (night == null)
+            {
+                return;
+            }
+
+            var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+            var field = night.GetType().GetField("_owned", flags);
+
+            if (field == null)
+            {
+                return;
+            }
+
+            var owned = field.GetValue(night) as System.Collections.Generic.List<SupportDef>;
+
+            if (owned == null)
+            {
+                return;
+            }
+
+            SupportDef def = SupportCatalog.Get(id);
+
+            if (def != null)
+            {
+                owned.Add(def);
             }
         }
 

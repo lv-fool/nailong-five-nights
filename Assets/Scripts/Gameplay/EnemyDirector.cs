@@ -98,6 +98,12 @@ namespace NailongFNAF.Gameplay
         [Tooltip("音乐停下之后、动手之前的漆黑（秒）—— 只剩一个勉强能辨认的轮廓。")]
         [SerializeField] private float _blackoutDarkSeconds = BlackoutSequence.DefaultDarkSeconds;
 
+        /// <summary>本局被「今天出门了」空出来的机位（没有就是 null）。</summary>
+        public int[] SafeCameras
+        {
+            get { return _game != null ? _game.SafeCameras : null; }
+        }
+
         /// <summary>某个敌人动手了。参数是敌人代号，用来挑对应的跳杀视频 / 惊吓图。</summary>
         public event Action<EnemyId> Attacked;
 
@@ -259,6 +265,107 @@ namespace NailongFNAF.Gameplay
             _brains[EnemyId.Nailong] = _nailong;
 
             ApplyDifficulty();
+            AvoidSafeCameras();
+        }
+
+        /// <summary>
+        /// 「今天出门了」：把被标成安全的机位从每只敌人的路线里换掉 ——
+        /// 换成一个没人占、也不在安全名单里的房间。
+        ///
+        /// 只换**路径里**的格子，路径长度不变，所以「走到第几格 = 走到哪间」
+        /// 的语义和门口判定都不受影响。
+        /// </summary>
+        /// <summary>中途拿到「今天出门了」之后，让各条路线立刻避开新挑出来的空房间。</summary>
+        public void RefreshSafeCameras()
+        {
+            AvoidSafeCameras();
+        }
+
+        private void AvoidSafeCameras()
+        {
+            int[] safe = _game != null ? _game.SafeCameras : null;
+
+            if (safe == null || safe.Length == 0)
+            {
+                return;
+            }
+
+            var daishu = GetBrain(EnemyId.Daishu) as DoorEnemyBrain;
+            if (daishu != null)
+            {
+                daishu.SetCameraPath(ReplaceSafe(daishu.CameraPath, safe));
+            }
+
+            var niulai = GetBrain(EnemyId.Niulai) as DoorEnemyBrain;
+            if (niulai != null)
+            {
+                niulai.SetCameraPath(ReplaceSafe(niulai.CameraPath, safe));
+            }
+
+            var lulu = GetBrain(EnemyId.Lulu) as LuluBrain;
+            if (lulu != null)
+            {
+                lulu.SetCameraPath(ReplaceSafe(lulu.CameraPath, safe));
+            }
+
+            if (_nailong != null)
+            {
+                _nailong.SetCameraPath(ReplaceSafe(_nailong.CameraPath, safe));
+            }
+        }
+
+        private int[] ReplaceSafe(int[] path, int[] safe)
+        {
+            if (path == null || path.Length == 0)
+            {
+                return path;
+            }
+
+            var copy = (int[])path.Clone();
+            bool changed = false;
+
+            for (int i = 0; i < copy.Length; i++)
+            {
+                if (System.Array.IndexOf(safe, copy[i]) < 0)
+                {
+                    continue;
+                }
+
+                copy[i] = FreeCamera(copy, safe);
+                changed = true;
+            }
+
+            return changed ? copy : path;
+        }
+
+        /// <summary>找一个不重复、不在安全名单、也不是厨房的房间号。</summary>
+        private int FreeCamera(int[] path, int[] safe)
+        {
+            int slots = _cameraCount > 0 ? _cameraCount : 11;
+
+            for (int step = 0; step < slots; step++)
+            {
+                int candidate = step % slots;
+
+                if (candidate == 9)
+                {
+                    continue;   // 厨房只有声音
+                }
+
+                if (System.Array.IndexOf(safe, candidate) >= 0)
+                {
+                    continue;
+                }
+
+                if (System.Array.IndexOf(path, candidate) >= 0)
+                {
+                    continue;
+                }
+
+                return candidate;
+            }
+
+            return 0;
         }
 
         /// <summary>

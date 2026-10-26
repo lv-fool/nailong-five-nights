@@ -545,6 +545,12 @@ namespace NailongFNAF.UI
         private static readonly Color DoorOn = new Color(0.78f, 0.16f, 0.16f);
         private static readonly Color DoorOff = new Color(0.40f, 0.11f, 0.11f);
         private static readonly Color LightOn = new Color(0.32f, 0.72f, 0.30f);
+
+        /// <summary>小地图：这一间今天没人来（「今天出门了」）。</summary>
+        private static readonly Color CameraSafeMark = new Color(0.30f, 0.52f, 0.78f);
+
+        /// <summary>小地图：这一间现在有人在（「查房」）。</summary>
+        private static readonly Color CameraEnemyMark = new Color(0.86f, 0.36f, 0.30f);
         private static readonly Color LightOff = new Color(0.13f, 0.32f, 0.14f);
 
         /// <summary>被敌人突破后，该侧门灯按钮的颜色（几乎全黑，看得出按不动）。</summary>
@@ -609,6 +615,10 @@ namespace NailongFNAF.UI
         private Sprite _belialDarkSprite;
         private Sprite _belialWhiteSprite;
         private Text _belialHint;
+        private Text _supportTip;
+        private float _supportTipLeft;
+        private int _announcedStage;
+        private object _announcedFor;
 
 
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
@@ -952,6 +962,7 @@ namespace NailongFNAF.UI
             TryNaibaoPhoneClick(gm);
             HandleNaibaoCallKeys(gm);
             UpdateVisuals(gm);
+            UpdateSupportTip(gm, Time.deltaTime);
             UpdateHud(gm);
             UpdateBelialAchievements(gm);
             UpdateJumpscareShake();
@@ -1535,7 +1546,11 @@ namespace NailongFNAF.UI
             // 门关不关**不影响能不能看见** —— 灯照亮的是门外走廊，
             // 门板挡的是人不是光。所以关门后玩家也能开灯确认「它走了没有」，
             // 不用冒险开门（开门可能正好撞上它的移动机会）。
-            if (!lightOn)
+            // 谷维素：黑里也能认出门口有没有人；熬夜的光柱够远，侧门也照得到
+            bool doorSight = gm.DoorSightActive;
+            bool longBeam = gm.FlashlightOn && gm.FlashlightRangeScale > 1f;
+
+            if (!lightOn && !doorSight && !longBeam)
             {
                 return false;
             }
@@ -1997,7 +2012,7 @@ namespace NailongFNAF.UI
 
             SetMonitorFrame(frame != null ? frame : _solidSprite,
                 frame != null ? Color.white : MonitorFallback);
-            _monitorLabel.text = CameraName(index);
+            _monitorLabel.text = CameraName(index) + MonitorSupportSuffix(gm, index);
 
             // 底图的平移 / 缩放（编辑器里拖过才有）
             ApplyMonitorBackground(index);
@@ -2022,12 +2037,135 @@ namespace NailongFNAF.UI
             }
         }
 
+        /// <summary>
+        /// 监控标题后面挂一截支援信息：「查房」报谁在这间，「复诊」报这家怎么打。
+        /// </summary>
+        private string MonitorSupportSuffix(GameManager gm, int cameraIndex)
+        {
+            var boss = new StringBuilder();
+            int reveal = gm.RevealLevel;
+            bool weak = gm.WeakPointActive;
+
+            if (reveal <= 0 && !weak)
+            {
+                return string.Empty;
+            }
+
+            foreach (var pair in EnemiesOnCamera(cameraIndex, reveal))
+            {
+                string name = EnemyNameOf(pair.Key);
+                boss.Append("　·　").Append(name);
+
+                if (weak)
+                {
+                    boss.Append("（").Append(WeaknessOf(pair.Key)).Append("）");
+                }
+            }
+
+            return boss.ToString();
+        }
+
+        /// <summary>这一机位上能拍到的敌人（查房层级决定报几个）。</summary>
+        private List<KeyValuePair<EnemyId, int>> EnemiesOnCamera(int cameraIndex, int revealLevel)
+        {
+            var found = new List<KeyValuePair<EnemyId, int>>();
+
+            if (_enemyDirector == null || revealLevel <= 0)
+            {
+                return found;
+            }
+
+            if (_enemyDirector.GetBrain(EnemyId.Lulu) is LuluBrain lulu
+                && !lulu.IsAttacking && lulu.Stage < lulu.MaxStage
+                && lulu.PathCameraIndex == cameraIndex)
+            {
+                found.Add(new KeyValuePair<EnemyId, int>(EnemyId.Lulu, cameraIndex));
+            }
+
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                if (!(brain is DoorEnemyBrain door) || door is NailongBrain || door.IsAttacking)
+                {
+                    continue;
+                }
+
+                if (door.Id == EnemyId.Niulai && revealLevel < 1)
+                {
+                    continue;
+                }
+
+                if ((door.Id == EnemyId.Daishu || door.Id == EnemyId.Nailong) && revealLevel < 2)
+                {
+                    continue;
+                }
+
+                if (door.PathCameraIndex == cameraIndex)
+                {
+                    found.Add(new KeyValuePair<EnemyId, int>(door.Id, cameraIndex));
+                }
+            }
+
+            if (revealLevel >= 2 && _enemyDirector.GetBrain(EnemyId.Nailong) is NailongBrain nailong
+                && !nailong.IsAttacking && nailong.Stage < nailong.MaxStage
+                && NailongCameraOf(nailong) == cameraIndex
+                && found.TrueForAll(pair => pair.Key != EnemyId.Nailong))
+            {
+                found.Add(new KeyValuePair<EnemyId, int>(EnemyId.Nailong, cameraIndex));
+            }
+
+            return found;
+        }
+
+        private static string EnemyNameOf(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai: return "牛来";
+                case EnemyId.Daishu: return "袋鼠";
+                case EnemyId.Lulu: return "噜噜";
+                default: return "奶龙";
+            }
+        }
+
+        /// <summary>复诊：这一家的弱点在哪儿。</summary>
+        private static string WeaknessOf(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai: return "关门";
+                case EnemyId.Daishu: return "关门";
+                case EnemyId.Lulu: return "手电筒";
+                default: return "看着它";
+            }
+        }
+
         /// <summary>小地图上把当前机位那一格点亮。</summary>
         private void UpdateCameraBoxes(int index)
         {
+            int[] safe = _enemyDirector != null && _enemyDirector.SafeCameras != null
+                ? _enemyDirector.SafeCameras
+                : null;
+            int reveal = 0;
+
+            if (GameManager.Instance != null)
+            {
+                reveal = GameManager.Instance.RevealLevel;
+            }
+
             for (int i = 0; i < _camBoxes.Length; i++)
             {
-                _camBoxes[i].color = i == index ? CamBoxOn : CamBoxOff;
+                Color color = i == index ? CamBoxOn : CamBoxOff;
+
+                if (safe != null && System.Array.IndexOf(safe, i) >= 0)
+                {
+                    color = CameraSafeMark;
+                }
+                else if (reveal > 0 && EnemiesOnCamera(i, reveal).Count > 0)
+                {
+                    color = CameraEnemyMark;
+                }
+
+                _camBoxes[i].color = color;
             }
         }
 
@@ -3773,6 +3911,12 @@ namespace NailongFNAF.UI
 
             var chosen = gm.Belial.Choose(index);
             gm.ApplySupport(chosen);
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.RefreshSafeCameras();
+            }
+
             RebuildSupportPanel(gm);
         }
 
@@ -3908,6 +4052,59 @@ namespace NailongFNAF.UI
             _knockSource.Stop();
             _knockSource.clip = _knockSfx;
             _knockSource.Play();
+        }
+
+        /// <summary>
+        /// 「一通电话」：每个阶段开头她报一次准确机位，说完 6 秒收起来。
+        /// 阶段 = 1（前 6 小时）/ 2（贝利亚上场后）。
+        /// </summary>
+        private void UpdateSupportTip(GameManager gm, float dt)
+        {
+            if (_supportTip != null && _supportTipLeft > 0f)
+            {
+                _supportTipLeft -= dt;
+
+                if (_supportTipLeft <= 0f)
+                {
+                    _supportTip.gameObject.SetActive(false);
+                }
+            }
+
+            if (_supportTip == null || _enemyDirector == null
+                || !gm.StageSpotActive || gm.Belial == null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(_announcedFor, gm.Belial))
+            {
+                _announcedFor = gm.Belial;
+                _announcedStage = 0;
+            }
+
+            int stage = gm.Belial.BelialActive ? 2 : 1;
+
+            if (_announcedStage >= stage)
+            {
+                return;
+            }
+
+            for (int i = 0; i < CameraNames.Length; i++)
+            {
+                var here = EnemiesOnCamera(i, 2);
+
+                if (here.Count == 0)
+                {
+                    continue;
+                }
+
+                _announcedStage = stage;
+                _supportTip.text = "她：那边有人 —— " + CameraName(i) + "（" +
+                    EnemyNameOf(here[0].Key) + "）";
+                _supportTip.gameObject.SetActive(true);
+                _supportTipLeft = 6f;
+                return;
+            }
         }
 
         /// <summary>
@@ -5412,6 +5609,12 @@ namespace NailongFNAF.UI
                 new Vector2(40f, 62f), new Vector2(110f, 30f));
 
             // 永夜模式那一行（普通模式直接隐藏）：摆在电量条正上方
+            _supportTip = MakeText(hud.transform, "SupportTip", string.Empty,
+                TextAnchor.LowerCenter, 24, new Color(0.62f, 0.86f, 0.72f));
+            PlaceRect((RectTransform)_supportTip.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 424f), new Vector2(1200f, 40f));
+            _supportTip.gameObject.SetActive(false);
+
             _belialHint = MakeText(hud.transform, "BelialHint", string.Empty,
                 TextAnchor.MiddleCenter, 30, new Color(0.95f, 0.72f, 0.42f));
             PlaceRect((RectTransform)_belialHint.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),

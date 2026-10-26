@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 
@@ -67,7 +68,9 @@ namespace NailongFNAF.Core
                     return 0f;
                 }
 
-                return Belial.TotalOf(SupportEffect.InputGrace) + Belial.TotalOf(SupportEffect.DoorLinger);
+                return Belial.TotalOf(SupportEffect.InputGrace)
+                    + Belial.TotalOf(SupportEffect.DoorLinger)
+                    - Belial.AttackWindowPenalty;
             }
         }
 
@@ -159,6 +162,54 @@ namespace NailongFNAF.Core
         /// 给隐藏成就判定用。每 <see cref="Restart"/> 一份新的。
         /// </summary>
         public NightStats Stats { get; private set; }
+
+        /// <summary>谷维素：不开灯也能看清门口有没有人。</summary>
+        public bool DoorSightActive
+        {
+            get { return BelialMode && Belial != null && Belial.DoorSightActive; }
+        }
+
+        /// <summary>咖啡因：切机位残影秒数。</summary>
+        public float CameraGhostSeconds
+        {
+            get { return BelialMode && Belial != null ? Belial.CameraGhostSeconds : 0f; }
+        }
+
+        /// <summary>一通电话：阶段开头报准确机位。</summary>
+        public bool StageSpotActive
+        {
+            get { return BelialMode && Belial != null && Belial.StageSpotActive; }
+        }
+
+        /// <summary>复诊：监控里标弱点。</summary>
+        public bool WeakPointActive
+        {
+            get { return BelialMode && Belial != null && Belial.WeakPointActive; }
+        }
+
+        /// <summary>查房层级（0 / 1 / 2）。</summary>
+        public int RevealLevel
+        {
+            get { return BelialMode && Belial != null ? Belial.RevealLevel : 0; }
+        }
+
+        /// <summary>熬夜：手电照得远（倍数）。</summary>
+        public float FlashlightRangeScale
+        {
+            get { return BelialMode && Belial != null ? Belial.FlashlightRangeScale : 1f; }
+        }
+
+        /// <summary>时间流速倍数（闹钟 / 失眠）。</summary>
+        public float TimeScaleFactor
+        {
+            get { return BelialMode && Belial != null ? Belial.TimeScaleFactor : 1f; }
+        }
+
+        /// <summary>本局被「今天出门了」空出来的机位（敌人不会进这几间）。</summary>
+        public int[] SafeCameras { get; private set; }
+
+        /// <summary>机位总数 —— 必须与 PrototypeScene.CameraNames 的长度一致。</summary>
+        public const int CameraSlotCount = 11;
 
         /// <summary>
         /// 奶包。第 1 夜只说话引导，之后每夜手欠（加耗电 / 抢监控 / 关灯 / 嘲讽）。
@@ -324,7 +375,8 @@ namespace NailongFNAF.Core
             // 奶包：引导期到点说话，之后到点手欠。她只在玩家还能动的时候闹
             TickNaibao(dt);
 
-            Clock.Tick(dt);
+            // 闹钟 / 失眠：时间流速改一改（敌人和电量照常按真实时间走）
+            Clock.Tick(dt * TimeScaleFactor);
 
             TickBelial();
             TickBelialEncounter(dt);
@@ -468,6 +520,45 @@ namespace NailongFNAF.Core
             _naibaoApology.Note(cue.Action);
         }
 
+        /// <summary>
+        /// 「今天出门了」开局空出来的机位。不重复，且**不挑厨房**
+        /// —— 厨房本来就只有声音，把它标成「安全」等于什么也没说。
+        /// </summary>
+        private static int[] PickSafeCameras(int count)
+        {
+            if (count <= 0)
+            {
+                return null;
+            }
+
+            int slots = CameraSlotCount;
+            var picked = new List<int>(count);
+            var rng = new System.Random();
+
+            int guard = 0;
+
+            while (picked.Count < count && guard < 200)
+            {
+                guard++;
+                int candidate = rng.Next(0, slots);
+
+                if (picked.Contains(candidate))
+                {
+                    continue;
+                }
+
+                // 厨房（9）画面上什么都没有，不选
+                if (candidate == 9)
+                {
+                    continue;
+                }
+
+                picked.Add(candidate);
+            }
+
+            return picked.ToArray();
+        }
+
         /// <summary>重开一夜。</summary>
         public void Restart()
         {
@@ -489,6 +580,10 @@ namespace NailongFNAF.Core
                 // 开局白送三张一样的「拉钩」—— 这不是选择，是剧情。
                 Belial.Begin();
             }
+
+            SafeCameras = Belial != null && Belial.SafeSpotCount > 0
+                ? PickSafeCameras(Belial.SafeSpotCount)
+                : null;
             Stats = new NightStats();
             LastGain = 0f;
             LastGainAge = 0f;
@@ -584,6 +679,12 @@ namespace NailongFNAF.Core
 
                 case SupportEffect.Placebo:
                     Power.Grant(def.Value);
+                    break;
+
+                case SupportEffect.SafeSpots:
+                    // 这张是「开局空出两间」，可它往往是第 2 小时才抽到 ——
+                    // 所以在这里补挑，而不是在 Restart 里一次定死。
+                    SafeCameras = PickSafeCameras(Belial != null ? Belial.SafeSpotCount : 0);
                     break;
 
                 case SupportEffect.PowerRescue:

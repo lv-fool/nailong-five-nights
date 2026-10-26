@@ -392,5 +392,87 @@ namespace NailongFNAF.Tests
 
             Assert.Greater(offers, 2, "应该还抽了好几次");
         }
+        [Test]
+        public void 谷维素让不开灯也看得见门口()
+        {
+            var night = AfterOpening(0);
+            Grant(night, "oryzanol");
+
+            Assert.IsTrue(night.DoorSightActive);
+        }
+
+        [Test]
+        public void 咖啡因切机位会留残影()
+        {
+            var night = AfterOpening(0);
+            Grant(night, "caffeine");
+
+            Assert.AreEqual(0.3f, night.CameraGhostSeconds, Tolerance);
+        }
+
+        [Test]
+        public void 一通电话每个阶段报一次机位()
+        {
+            var night = AfterOpening(0);
+            Grant(night, "phone");
+
+            Assert.IsTrue(night.StageSpotActive);
+        }
+
+        [Test]
+        public void 今天出门了要空出两个机位()
+        {
+            var night = AfterOpening(0);
+            Grant(night, "outing");
+
+            Assert.AreEqual(2, night.SafeSpotCount);
+        }
+
+        [Test]
+        public void 复诊会在监控上标弱点()
+        {
+            var night = AfterOpening(0);
+            Assert.IsFalse(night.WeakPointActive);
+
+            Grant(night, "recheck");
+
+            Assert.IsTrue(night.WeakPointActive);
+        }
+
+        [Test]
+        public void 查房叠两层才能全看()
+        {
+            var night = AfterOpening(0);
+
+            Grant(night, "wardround");
+            Assert.AreEqual(1, night.RevealLevel);
+
+            Grant(night, "wardround");
+            Assert.AreEqual(2, night.RevealLevel);
+        }
+
+        [Test]
+        public void 闹钟让时间走快失眠让时间走慢()
+        {
+            var fast = AfterOpening(0);
+            Grant(fast, "alarm");
+            Assert.AreEqual(1.15f, fast.TimeScaleFactor, Tolerance);
+
+            var slow = AfterOpening(1);
+            Grant(slow, "insomnia");
+            Assert.AreEqual(0.9f, slow.TimeScaleFactor, Tolerance);
+        }
+
+        [Test]
+        public void 熬夜照得远但判定窗口更短()
+        {
+            var night = AfterOpening(0);
+            Assert.AreEqual(1f, night.FlashlightRangeScale, Tolerance);
+
+            Grant(night, "allnighter");
+
+            Assert.AreEqual(1.5f, night.FlashlightRangeScale, Tolerance);
+            Assert.AreEqual(0.2f, night.AttackWindowPenalty, Tolerance);
+        }
     }
 }
