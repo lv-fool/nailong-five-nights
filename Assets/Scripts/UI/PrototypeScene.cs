@@ -564,9 +564,10 @@ namespace NailongFNAF.UI
         private static readonly Color UsageRed = new Color(0.90f, 0.26f, 0.22f);
         private static readonly Color UsageOff = new Color(0.20f, 0.20f, 0.22f);
 
-        // 小地图 —— 照官方原图：房间只描边不填色，CAM 标号是深色小方块
-        private static readonly Color MapPanelFill = new Color(0.055f, 0.065f, 0.075f, 1f);
-        private static readonly Color MapRoomFill = new Color(0.075f, 0.085f, 0.095f, 1f);
+        // 小地图 —— 照官方原图：房间只描边不填色，CAM 标号是深色小方块。
+        // 底色半透明（2026-10-25）：整块黑底改成能透出监控画面的暗玻璃
+        private static readonly Color MapPanelFill = new Color(0.055f, 0.065f, 0.075f, 0.60f);
+        private static readonly Color MapRoomFill = new Color(0.075f, 0.085f, 0.095f, 0.55f);
         private static readonly Color MapRoomBorder = new Color(0.42f, 0.47f, 0.44f, 0.90f);
         private static readonly Color MapCorridorColor = new Color(0.34f, 0.38f, 0.36f, 0.85f);
         private static readonly Color MapButtonFill = new Color(0.11f, 0.12f, 0.14f, 1f);
@@ -1057,6 +1058,13 @@ namespace NailongFNAF.UI
                 // 画面整个被监控盖住了，跟手转头毫无反馈，还会让切回来的
                 // 瞬间视角莫名其妙在边上。冻结当前视角（_panTarget 不动），
                 // 放下监控的那一刻就是抬头前的方向。
+            }
+            else if (gm.NaibaoTalking)
+            {
+                // ⚠️ 和奶包通电话时**也不许转头** ——
+                // 手机就摆在桌上，她的话音正对着你；一歪头手机就跑出画面中间，
+                // 通话面板和桌面手机对不上，氛围也散了。
+                // 冻结视角（_panTarget 不动），挂断后从原方向接着看。
             }
             else
             {
