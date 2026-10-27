@@ -78,6 +78,16 @@ namespace NailongFNAF.UI
 
         // 成就界面：计数 + 每行的名称 / 描述（顺序照 AchievementCatalog.All）
         private readonly Text[] _nightFragmentTexts = new Text[NightCount];
+
+        /// <summary>
+        /// 选夜界面的「第 N 夜」按钮，下标 = 夜序号。
+        ///
+        /// ⚠️ 以前刷新时用 <c>GetComponentsInChildren&lt;Button&gt;()</c> +
+        /// <c>label.text.Contains("夜")</c> 现查现配 —— 那个 <c>index</c> 同时充当
+        /// 夜序号和按钮下标，一旦有一次没命中，后面所有夜就永久错位到同一个按钮上。
+        /// 建按钮时存进数组，别再靠文本猜。
+        /// </summary>
+        private readonly Button[] _nightButtons = new Button[NightCount];
         private Text _achvFragmentText;
         private Text _achvCountText;
         private readonly Text[] _achvLineTexts = new Text[AchievementCatalog.All.Length];
@@ -240,10 +250,18 @@ namespace NailongFNAF.UI
                 bool unlocked = i <= UnlockedNight;
                 string label = NightName(i);
 
+                // ⚠️ 监听器**无条件绑定**，解锁与否只交给 interactable 管 ——
+                // Button.onClick 在 interactable == false 时本来就不会触发，安全。
+                //
+                // 以前是「没解锁就传 null」，而 BuildMenu 只在 Awake() 里跑一次：
+                // 那一刻还锁着的夜**永远没有监听器**，之后通关解锁时
+                // RefreshLevelButtons 只把 interactable 打开，点下去毫无反应 ——
+                // 玩家必须重启游戏才恢复（2026-10-27 定位）。
                 var btn = MakeMenuButton(_levelView.transform, label, Vector2.zero,
                     new Vector2(0.5f + x, y),
-                    unlocked ? (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)) : null);
+                    (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)));
                 btn.interactable = unlocked;
+                _nightButtons[i] = btn;
 
                 // 独立于开局按钮：已解锁的夜晚可在局外慢慢读，不打断防守。
                 Text fragment = MakeLabel(_levelView.transform, unlocked ? StoryFragments.Night(i) : "……", 28,
@@ -1159,31 +1177,37 @@ namespace NailongFNAF.UI
             get { return PlayerPrefs.GetInt(CustomUnlockedKey, 0) == 1; }
         }
 
+        /// <summary>
+        /// 刷新选夜界面：文字、解锁态。
+        ///
+        /// ⚠️ **只改 interactable 和文字，绝不动 onClick** ——
+        /// 监听器在 BuildMenu 里无条件绑好了（那时可能还没解锁）。
+        /// 这个方法是「解锁后回标题」时唯一会跑的刷新路径，
+        /// 以前它只开 interactable、不补监听器，于是刚解锁的夜点不动。
+        /// </summary>
         private void RefreshLevelButtons()
         {
             for (int i = 0; i < NightCount; i++)
             {
-                if (_nightFragmentTexts[i] != null)
-                    _nightFragmentTexts[i].text = i <= UnlockedNight ? StoryFragments.Night(i) : "……";
-            }
+                bool unlocked = i <= UnlockedNight;
 
-            var buttons = _levelView.GetComponentsInChildren<Button>(true);
-            int index = 0;
-            for (int i = 0; i < NightCount; i++)
-            {
-                // 顺序里跳过末尾的「返回」按钮，只改夜晚按钮
-                if (index >= buttons.Length)
+                if (_nightFragmentTexts[i] != null)
                 {
-                    break;
+                    _nightFragmentTexts[i].text = unlocked ? StoryFragments.Night(i) : "……";
                 }
 
-                var label = buttons[index].GetComponentInChildren<Text>();
-                if (label != null && label.text.Contains("夜"))
+                Button btn = _nightButtons[i];
+                if (btn == null)
                 {
-                    bool unlocked = i <= UnlockedNight;
-                    buttons[index].interactable = unlocked;
+                    continue;
+                }
+
+                btn.interactable = unlocked;
+
+                var label = btn.GetComponentInChildren<Text>();
+                if (label != null)
+                {
                     label.text = NightName(i);
-                    index++;
                 }
             }
         }
