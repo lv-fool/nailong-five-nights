@@ -89,5 +89,34 @@ namespace NailongFNAF.Tests
 
             Assert.AreEqual(100f, power.Level, Tolerance);
         }
+
+        [Test]
+        public void 舍曲林把电量上限抬到两百()
+        {
+            PowerSystem power = new PowerSystem(99f);
+            Assert.AreEqual(100f, power.MaxLevel, Tolerance, "默认上限还是一百");
+
+            power.MultiplyMaxLevel(2f);
+            Assert.AreEqual(200f, power.MaxLevel, Tolerance);
+
+            power.Grant(500f);
+            Assert.AreEqual(200f, power.Level, Tolerance, "上限抬了之后能补到两百");
+        }
+
+        [Test]
+        public void 上限调低时当前电量跟着夹回来()
+        {
+            PowerSystem power = new PowerSystem(99f);
+            power.MultiplyMaxLevel(2f);
+            power.Grant(500f);
+            Assert.AreEqual(200f, power.Level, Tolerance);
+
+            power.SetMaxLevel(130f);
+            Assert.AreEqual(130f, power.MaxLevel, Tolerance);
+            Assert.AreEqual(130f, power.Level, Tolerance);
+
+            power.SetMaxLevel(0f);
+            Assert.AreEqual(130f, power.MaxLevel, Tolerance, "非正数的上限要忽略");
+        }
     }
 }

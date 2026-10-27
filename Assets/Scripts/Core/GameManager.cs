@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 
@@ -36,11 +37,83 @@ namespace NailongFNAF.Core
         /// <summary>永夜模式的换电账本（普通模式下为 null）。</summary>
         public EndlessRecharge Recharge { get; private set; }
 
+        /// <summary>永夜模式的得分（不是永夜时为 null）。</summary>
+        public EndlessScore Score { get; private set; }
+
+        /// <summary>贝利亚之夜（12 小时肉鸽）模式下为 true。和 <see cref="EndlessMode"/> 互斥。</summary>
+        public bool BelialMode { get; private set; }
+
+        /// <summary>这一局的支援账本（12 小时、每两小时一次「来自奶包的支援」）。非贝利亚之夜为 null。</summary>
+        public BelialNight Belial { get; private set; }
+
+        /// <summary>
+        /// 贝利亚本人（老板 2026-10-26 定）：第二阶段起会站到左右某一扇门外，
+        /// 挡他的方式是**开门 + 用手电筒照**，照够五下他就走。
+        /// </summary>
+        public BelialEncounter BelialEncounter { get; private set; }
+
+        /// <summary>敌人还要被冻住多少秒（「褪黑素」整点冻结给的值）。</summary>
+        public float EnemyFreezeLeft
+        {
+            get { return _enemyFreezeLeft; }
+        }
+
+        /// <summary>敌人推进速度倍率（「多巴胺」让它变慢）；1 = 正常。</summary>
+        public float EnemySpeedScale { get; private set; }
+
+        /// <summary>门口读条额外宽限的秒数（「去甲肾上腺素」加判定窗口 + 「喹硫平」让人多站一会儿）。</summary>
+        public float DoorGraceBonus
+        {
+            get
+            {
+                if (!BelialMode || Belial == null)
+                {
+                    return 0f;
+                }
+
+                return Belial.TotalOf(SupportEffect.InputGrace)
+                    + Belial.TotalOf(SupportEffect.DoorLinger)
+                    - Belial.AttackWindowPenalty;
+            }
+        }
+
+        /// <summary>奶龙偷到电之后要静止多少秒（「一二三木头人」）。</summary>
+        public float NailongStealFreeze
+        {
+            get
+            {
+                if (!BelialMode || Belial == null)
+                {
+                    return 0f;
+                }
+
+                return Belial.TotalOf(SupportEffect.NailongSilence);
+            }
+        }
+
         /// <summary>最近一次行动补给拿到多少电量（百分点），给 HUD 弹「+8%」用。</summary>
         public float LastGain { get; private set; }
 
         /// <summary>距离 <see cref="LastGain"/> 过去了多久（秒），HUD 用它决定要不要淡出。</summary>
         public float LastGainAge { get; private set; }
+
+        /// <summary>已经同步进 <see cref="Belial"/> 的小时数（防止重复推进）。</summary>
+        private int _belialHours;
+
+        /// <summary>敌人被冻结的剩余秒数（整点冻结用）。</summary>
+        private float _enemyFreezeLeft;
+
+        /// <summary>已经看到贝利亚来过几次（用来判「新的一次」）。</summary>
+        private int _belialVisitsSeen;
+
+        /// <summary>「致命判定改成擦过」还剩几次（贝利亚之夜的支援给的）。</summary>
+        private int _grazeLeft;
+
+        /// <summary>「备用电源」还剩几次 —— 电量归零时被强行拉回来。</summary>
+        private int _rescueLeft;
+
+        /// <summary>备用电源拉回来的电量（百分比）。</summary>
+        private float _rescuePercent;
 
         /// <summary>
         /// 是否暂停中（只有永夜模式能暂停）。暂停靠 <see cref="Time.timeScale"/> = 0
@@ -93,6 +166,54 @@ namespace NailongFNAF.Core
         /// </summary>
         public NightStats Stats { get; private set; }
 
+        /// <summary>谷维素：不开灯也能看清门口有没有人。</summary>
+        public bool DoorSightActive
+        {
+            get { return BelialMode && Belial != null && Belial.DoorSightActive; }
+        }
+
+        /// <summary>咖啡因：切机位残影秒数。</summary>
+        public float CameraGhostSeconds
+        {
+            get { return BelialMode && Belial != null ? Belial.CameraGhostSeconds : 0f; }
+        }
+
+        /// <summary>一通电话：阶段开头报准确机位。</summary>
+        public bool StageSpotActive
+        {
+            get { return BelialMode && Belial != null && Belial.StageSpotActive; }
+        }
+
+        /// <summary>复诊：监控里标弱点。</summary>
+        public bool WeakPointActive
+        {
+            get { return BelialMode && Belial != null && Belial.WeakPointActive; }
+        }
+
+        /// <summary>查房层级（0 / 1 / 2）。</summary>
+        public int RevealLevel
+        {
+            get { return BelialMode && Belial != null ? Belial.RevealLevel : 0; }
+        }
+
+        /// <summary>熬夜：手电照得远（倍数）。</summary>
+        public float FlashlightRangeScale
+        {
+            get { return BelialMode && Belial != null ? Belial.FlashlightRangeScale : 1f; }
+        }
+
+        /// <summary>时间流速倍数（闹钟 / 失眠）。</summary>
+        public float TimeScaleFactor
+        {
+            get { return BelialMode && Belial != null ? Belial.TimeScaleFactor : 1f; }
+        }
+
+        /// <summary>本局被「今天出门了」空出来的机位（敌人不会进这几间）。</summary>
+        public int[] SafeCameras { get; private set; }
+
+        /// <summary>机位总数 —— 必须与 PrototypeScene.CameraNames 的长度一致。</summary>
+        public const int CameraSlotCount = 11;
+
         /// <summary>
         /// 奶包。第 1 夜只说话引导，之后每夜手欠（加耗电 / 抢监控 / 关灯 / 嘲讽）。
         /// 菜单在开局前调 <see cref="SetNaibao"/> 塞进来；永夜模式暂时不接她，为 null。
@@ -136,7 +257,20 @@ namespace NailongFNAF.Core
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
         {
-            get { return Clock != null && Clock.IsNightComplete; }
+            get
+            {
+                if (Clock == null)
+                {
+                    return false;
+                }
+
+                if (BelialMode)
+                {
+                    return Belial != null && Belial.IsComplete;
+                }
+
+                return Clock.IsNightComplete;
+            }
         }
 
         /// <summary>是否已经断电。</summary>
@@ -157,6 +291,18 @@ namespace NailongFNAF.Core
         /// <summary>被敌人抓到，冻结本夜。</summary>
         public void MarkCaught()
         {
+            // 贝利亚之夜的支援：这一下能不能躲过去（「摔了一跤」扑空 / 「氯硝西泮」擦过）
+            if (_grazeLeft > 0)
+            {
+                _grazeLeft--;
+                return;
+            }
+
+            if (Belial != null && Belial.ConsumeMiss())
+            {
+                return;
+            }
+
             HasBeenCaught = true;
 
             // 死因归到奶包头上？那就把她这句道歉钉住，死亡面板会显示
@@ -167,6 +313,69 @@ namespace NailongFNAF.Core
             if (Stats != null && Clock != null)
             {
                 Stats.MarkEnded(Clock.ElapsedSeconds, Clock.SecondsPerHour);
+            }
+        }
+
+        /// <summary>
+        /// 挡住一次怪物（永夜计分用）。非永夜模式直接忽略 —— 故事模式没有分。
+        /// </summary>
+        public void NoteBlocked(int count = 1)
+        {
+            if (Score != null)
+            {
+                Score.AddBlocks(count);
+            }
+        }
+
+        /// <summary>
+        /// 调试用：把游戏时间往前推一段（F1 面板上的「+2 分钟 / +2 小时」）。
+        ///
+        /// 按 1 秒一步推进，这样整点结算（永夜补电、贝利亚发卡）都会正常触发；
+        /// 一次 Tick(7200) 会把中间这些整点全跳过去。
+        /// </summary>
+        public void DebugAdvanceGameSeconds(float seconds)
+        {
+            if (Clock == null || seconds <= 0f)
+            {
+                return;
+            }
+
+            int steps = Mathf.CeilToInt(seconds);
+            float step = seconds / steps;
+
+            for (int i = 0; i < steps; i++)
+            {
+                Clock.Tick(step);
+
+                if (Score != null)
+                {
+                    Score.Tick(step);
+                }
+
+                if (EndlessMode && Recharge != null)
+                {
+                    float grant = Recharge.Tick(step);
+
+                    if (grant > 0f && Power != null)
+                    {
+                        float actual = Power.Grant(grant);
+                        Recharge.NoteGranted(actual);
+                        LastGain = actual;
+                        LastGainAge = 0f;
+                    }
+                }
+            }
+
+            if (BelialMode && Belial != null)
+            {
+                // 贝利亚模式没走 endless 账本，这里只要把小时对齐
+                while (Belial.Hours < Clock.CurrentHour)
+                {
+                    if (!Belial.AdvanceHours(1))
+                    {
+                        break;
+                    }
+                }
             }
         }
 
@@ -232,7 +441,17 @@ namespace NailongFNAF.Core
             // 奶包：引导期到点说话，之后到点手欠。她只在玩家还能动的时候闹
             TickNaibao(dt);
 
-            Clock.Tick(dt);
+            // 闹钟 / 失眠：时间流速改一改（敌人和电量照常按真实时间走）
+            Clock.Tick(dt * TimeScaleFactor);
+
+            // 永夜得分：和时钟一样按时间累积
+            if (Score != null)
+            {
+                Score.Tick(dt * TimeScaleFactor);
+            }
+
+            TickBelial();
+            TickBelialEncounter(dt);
 
             // 彩蛋账本：厨房机位停留计时 + 天亮那一刻的结束时刻
             if (Stats != null)
@@ -246,9 +465,19 @@ namespace NailongFNAF.Core
             }
 
             // 断电、天亮、被抓到之后手电筒也要灭（按住状态可能来不及松手）
-            if (!CanOperate())
+            if (!CanOperate() && !FreeFlashlightActive)
             {
                 FlashlightOn = false;
+            }
+
+            // 「备用电源」：归零的这一瞬间把人拉回来一次（贝利亚之夜的支援）
+            if (Power.IsDepleted && _rescueLeft > 0)
+            {
+                _rescueLeft--;
+                float before = Power.Level;
+                Power.SetLevel(_rescuePercent);
+                LastGain = Power.Level - before;
+                LastGainAge = 0f;
             }
 
             // 断电的一瞬间所有设备一起熄火 —— 门弹开、灯灭、监控掉线。
@@ -257,6 +486,8 @@ namespace NailongFNAF.Core
             {
                 ReleaseAllDevices();
             }
+
+            SyncBelialModifiers();
 
             Power.SetUsageLevel(CountUsageLevel());
             Power.Tick(dt);
@@ -361,12 +592,71 @@ namespace NailongFNAF.Core
             _naibaoApology.Note(cue.Action);
         }
 
+        /// <summary>
+        /// 「今天出门了」开局空出来的机位。不重复，且**不挑厨房**
+        /// —— 厨房本来就只有声音，把它标成「安全」等于什么也没说。
+        /// </summary>
+        private static int[] PickSafeCameras(int count)
+        {
+            if (count <= 0)
+            {
+                return null;
+            }
+
+            int slots = CameraSlotCount;
+            var picked = new List<int>(count);
+            var rng = new System.Random();
+
+            int guard = 0;
+
+            while (picked.Count < count && guard < 200)
+            {
+                guard++;
+                int candidate = rng.Next(0, slots);
+
+                if (picked.Contains(candidate))
+                {
+                    continue;
+                }
+
+                // 厨房（9）画面上什么都没有，不选
+                if (candidate == 9)
+                {
+                    continue;
+                }
+
+                picked.Add(candidate);
+            }
+
+            return picked.ToArray();
+        }
+
         /// <summary>重开一夜。</summary>
         public void Restart()
         {
             Power = new PowerSystem(PowerSystem.InitialLevel);
-            Clock = new NightClock(_secondsPerHour, EndlessMode);
+            Clock = new NightClock(_secondsPerHour, EndlessMode || BelialMode);
             Recharge = EndlessMode ? new EndlessRecharge() : null;
+            Score = EndlessMode ? new EndlessScore(_secondsPerHour) : null;
+            Belial = BelialMode ? new BelialNight() : null;
+            BelialEncounter = BelialMode ? new BelialEncounter(new SystemRandomSource()) : null;
+            _belialHours = 0;
+            _belialVisitsSeen = 0;
+            _enemyFreezeLeft = 0f;
+            EnemySpeedScale = 1f;
+            _grazeLeft = 0;
+            _rescueLeft = 0;
+            _rescuePercent = 0f;
+
+            if (Belial != null)
+            {
+                // 开局白送三张一样的「拉钩」—— 这不是选择，是剧情。
+                Belial.Begin();
+            }
+
+            SafeCameras = Belial != null && Belial.SafeSpotCount > 0
+                ? PickSafeCameras(Belial.SafeSpotCount)
+                : null;
             Stats = new NightStats();
             LastGain = 0f;
             LastGainAge = 0f;
@@ -410,6 +700,228 @@ namespace NailongFNAF.Core
         public void SetEndless(bool endless)
         {
             EndlessMode = endless;
+
+            if (endless)
+            {
+                BelialMode = false;
+            }
+        }
+
+        /// <summary>
+        /// 设置贝利亚之夜（下一局 <see cref="Restart"/> 生效）。
+        /// 和永夜模式互斥 —— 它自己就带「撑满 12 小时」的计时。
+        /// </summary>
+        public void SetBelial(bool belial)
+        {
+            BelialMode = belial;
+
+            if (belial)
+            {
+                EndlessMode = false;
+            }
+        }
+
+        /// <summary>手电不耗电、断电能开的那条支援有没有拿到。</summary>
+        private bool FreeFlashlightActive
+        {
+            get { return Belial != null && Belial.Has(SupportEffect.FreeFlashlight); }
+        }
+
+        /// <summary>
+        /// 选完一张支援之后立刻生效的那部分（改电量上限、一次性的补电与保险次数都算「拿了就改」）。
+        /// 靠使用等级 / 掉电倍率起作用的那些不用调这里，每帧会自己算。
+        /// </summary>
+        public void ApplySupport(SupportDef def)
+        {
+            if (def == null || Power == null)
+            {
+                return;
+            }
+
+            switch (def.Effect)
+            {
+                case SupportEffect.PowerCapBoost:
+                    Power.MultiplyMaxLevel(def.Value);
+                    Power.Grant(def.Value2);
+                    break;
+
+                case SupportEffect.RiskNoPower:
+                    Power.Grant(def.Value);
+                    Power.MultiplyMaxLevel(1f + def.Value2);
+                    break;
+
+                case SupportEffect.Placebo:
+                    Power.Grant(def.Value);
+                    break;
+
+                case SupportEffect.SafeSpots:
+                    // 这张是「开局空出两间」，可它往往是第 2 小时才抽到 ——
+                    // 所以在这里补挑，而不是在 Restart 里一次定死。
+                    SafeCameras = PickSafeCameras(Belial != null ? Belial.SafeSpotCount : 0);
+                    break;
+
+                case SupportEffect.PowerRescue:
+                    _rescueLeft += Mathf.Max(1, (int)(def.Value2 + 0.5f));
+                    _rescuePercent = def.Value;
+                    break;
+
+                case SupportEffect.LethalToGraze:
+                case SupportEffect.LethalToWound:
+                    _grazeLeft += Mathf.Max(1, (int)(def.Value + 0.5f));
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 每帧按手上已有的支援重算掉电倍率。「血清素」压整体速度，
+        /// 「文拉法辛」只在门/灯开着时打折，「安非他酮」只对手电打折。
+        /// </summary>
+        private void SyncBelialModifiers()
+        {
+            if (Power == null)
+            {
+                return;
+            }
+
+            if (!BelialMode || Belial == null)
+            {
+                Power.DrainScale = 1f;
+                return;
+            }
+
+            float scale = 1f - ClampReduction(Belial.TotalOf(SupportEffect.DrainRateDown));
+
+            if (LeftDoorClosed || RightDoorClosed || LeftLightOn || RightLightOn)
+            {
+                scale *= 1f - ClampReduction(Belial.TotalOf(SupportEffect.DoorLightDrainDown));
+            }
+
+            if (FlashlightOn)
+            {
+                scale *= 1f - ClampReduction(Belial.TotalOf(SupportEffect.FlashlightDrainDown));
+            }
+
+            Power.DrainScale = scale < 0f ? 0f : scale;
+
+            // 「多巴胺」：敌人移动效率下降 → 推进间隔变长
+            float slowdown = ClampReduction(Belial.TotalOf(SupportEffect.EnemySpeedDown));
+            EnemySpeedScale = 1f - slowdown;
+        }
+
+        /// <summary>
+        /// 贝利亚本人：第 6 小时起会站到某一边门外。
+        /// 挡他的方式跟其他敌人刚好相反 —— **把门打开、用手电筒照**，
+        /// 照一下他就白一下（白贝），照够五下他走；站着不理他九秒就动手。
+        /// </summary>
+        private void TickBelialEncounter(float dt)
+        {
+            if (_enemyFreezeLeft > 0f)
+            {
+                _enemyFreezeLeft -= dt;
+
+                if (_enemyFreezeLeft < 0f)
+                {
+                    _enemyFreezeLeft = 0f;
+                }
+            }
+
+            if (!BelialMode || BelialEncounter == null || Stats == null)
+            {
+                return;
+            }
+
+            bool active = Belial != null && Belial.BelialActive;
+            BelialEncounter.Tick(dt, active);
+
+            if (BelialEncounter.Visits > _belialVisitsSeen)
+            {
+                _belialVisitsSeen = BelialEncounter.Visits;
+                Stats.NoteBelialMeeting();
+            }
+
+            if (BelialEncounter.ConsumeKill())
+            {
+                Stats.NoteBelialDeath();
+                MarkBreached(BelialEncounter.Side == BelialSide.Left ? Side.Left : Side.Right);
+                MarkCaught();
+                return;
+            }
+
+            if (!BelialEncounter.AtDoor)
+            {
+                return;
+            }
+
+            bool left = BelialEncounter.Side == BelialSide.Left;
+            bool doorOpen = left ? !LeftDoorClosed : !RightDoorClosed;
+            bool facing = CurrentView == (left ? ViewSide.Left : ViewSide.Right);
+            bool shining = FlashlightOn && facing && doorOpen;
+
+            if (BelialEncounter.TryFlash(doorOpen, shining))
+            {
+                Stats.NoteBelialFlash();
+            }
+        }
+
+        /// <summary>折扣最多打到九成 —— 别让几条支援叠出「完全不掉电」。</summary>
+        private static float ClampReduction(float reduction)
+        {
+            if (reduction < 0f)
+            {
+                return 0f;
+            }
+
+            return reduction > 0.9f ? 0.9f : reduction;
+        }
+
+        /// <summary>
+        /// 把时钟走到的小时数同步给支援账本：每满两小时结算一次电量返还，并摆出新的三张卡。
+        /// 选卡由表现层负责（<see cref="BelialNight.AwaitingChoice"/> 为真时弹面板）。
+        /// </summary>
+        private void TickBelial()
+        {
+            if (!BelialMode || Belial == null || Clock == null)
+            {
+                return;
+            }
+
+            int hours = Clock.HoursSurvived;
+
+            if (hours <= _belialHours)
+            {
+                return;
+            }
+
+            Belial.AdvanceHours(hours - _belialHours);
+            _belialHours = hours;
+
+            // 「褪黑素」：每个整点过后敌人停一会儿，正好用来换一口气
+            float freeze = Belial.TotalOf(SupportEffect.HourlyFreeze);
+
+            if (freeze > 0f && freeze > _enemyFreezeLeft)
+            {
+                _enemyFreezeLeft = freeze;
+            }
+
+            // 「氟西汀」：每过一个整点回一点电
+            float regen = Belial.TotalOf(SupportEffect.HourlyRegen);
+
+            if (regen > 0f)
+            {
+                Power.Grant(regen);
+            }
+
+            float refund = Belial.TryOffer();
+
+            if (refund > 0f)
+            {
+                Power.Grant(refund);
+                LastGain = refund;
+                LastGainAge = 0f;
+            }
         }
 
         /// <summary>
@@ -513,7 +1025,7 @@ namespace NailongFNAF.Core
         /// </summary>
         public void SetPaused(bool paused)
         {
-            if (paused && !EndlessMode)
+            if (paused && !EndlessMode && !BelialMode)
             {
                 return;
             }
@@ -696,7 +1208,7 @@ namespace NailongFNAF.Core
         public void SetFlashlight(bool on)
         {
             bool wasOn = FlashlightOn;
-            FlashlightOn = on && CanOperate();
+            FlashlightOn = on && (CanOperate() || FreeFlashlightActive);
 
             if (!wasOn && FlashlightOn)
             {
@@ -722,7 +1234,13 @@ namespace NailongFNAF.Core
         /// <summary>断电、天亮或被抓到之后，玩家不能再操作设备。</summary>
         private bool CanOperate()
         {
-            return !HasPowerOut && !HasSurvived && !HasBeenCaught;
+            return Operable;
+        }
+
+        /// <summary>玩家这一刻还能不能动设备（给表现层用：断电 / 天亮 / 被抓之后就不行了）。</summary>
+        public bool Operable
+        {
+            get { return !HasPowerOut && !HasSurvived && !HasBeenCaught; }
         }
 
         /// <summary>
@@ -759,7 +1277,7 @@ namespace NailongFNAF.Core
                 usage++;
             }
 
-            if (FlashlightOn)
+            if (FlashlightOn && !FreeFlashlightActive)
             {
                 usage++;
             }
@@ -775,6 +1293,12 @@ namespace NailongFNAF.Core
             if (NaibaoTalking)
             {
                 usage++;
+            }
+
+            // 「省着点」：整局所有消耗降一级（不低于系统的下限）
+            if (Belial != null)
+            {
+                usage = Belial.EffectiveUsageLevel(usage);
             }
 
             return usage;

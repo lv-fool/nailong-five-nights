@@ -46,6 +46,15 @@
         /// <summary>这一夜是否已经结束（判定彩蛋时要它已经结束）。</summary>
         public bool HasEnded { get; private set; }
 
+        /// <summary>这一夜遇见贝利亚几次（贝利亚之夜用得上）。</summary>
+        public int BelialMeetings { get; private set; }
+
+        /// <summary>这一夜一共把贝利亚照成「白贝」几下。</summary>
+        public int BelialFlashes { get; private set; }
+
+        /// <summary>这一夜是不是死在贝利亚手上。</summary>
+        public bool KilledByBelial { get; private set; }
+
         private int _visitedMask;
 
         /// <summary>门 + 灯的切换总数（「手指的节奏」用）。</summary>
@@ -102,6 +111,24 @@
         public void NoteNailongLook()
         {
             NailongLooks++;
+        }
+
+        /// <summary>遇见贝利亚一次（他出现在门外的那一刻记一次）。</summary>
+        public void NoteBelialMeeting()
+        {
+            BelialMeetings++;
+        }
+
+        /// <summary>把贝利亚照成「白贝」一下。</summary>
+        public void NoteBelialFlash()
+        {
+            BelialFlashes++;
+        }
+
+        /// <summary>这一夜是贝利亚收的场。</summary>
+        public void NoteBelialDeath()
+        {
+            KilledByBelial = true;
         }
 
         /// <summary>某一机位是否看过。</summary>

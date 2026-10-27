@@ -119,6 +119,12 @@ namespace NailongFNAF.Gameplay
         public int AdvanceCount { get; private set; }
 
         private float _stealTimer;
+
+        /// <summary>偷到一次电之后要静止多少秒（「一二三木头人」支援）。</summary>
+        public float StealFreezeSeconds { get; set; }
+
+        /// <summary>当前还剩多少秒静止。</summary>
+        private float _stealFreezeLeft;
         private float _pendingDrain;
 
         /// <summary>
@@ -272,6 +278,12 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
+            if (_stealFreezeLeft > 0f)
+            {
+                _stealFreezeLeft -= dt;
+                return;
+            }
+
             float interval = StealIntervalSeconds;
             _stealTimer += dt;
 
@@ -279,6 +291,12 @@ namespace NailongFNAF.Gameplay
             {
                 _stealTimer -= interval;
                 _pendingDrain += StealPercentPerTick;
+
+                // 「一二三木头人」：偷完这一下先静止一段时间，下一次偷电要等它过去
+                if (StealFreezeSeconds > 0f)
+                {
+                    _stealFreezeLeft = StealFreezeSeconds;
+                }
 
                 // 偷到电 → 转化。一次就够，不用再掷骰（掷骰交给进攻态的通用推进）
                 BeginApproach();

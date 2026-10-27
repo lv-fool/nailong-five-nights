@@ -103,10 +103,23 @@ namespace NailongFNAF.Gameplay
         [Tooltip("音乐停下之后、动手之前的漆黑（秒）—— 只剩一个勉强能辨认的轮廓。")]
         [SerializeField] private float _blackoutDarkSeconds = BlackoutSequence.DefaultDarkSeconds;
 
+        /// <summary>本局被「今天出门了」空出来的机位（没有就是 null）。</summary>
+        public int[] SafeCameras
+        {
+            get { return _game != null ? _game.SafeCameras : null; }
+        }
+
         /// <summary>某个敌人动手了。参数是敌人代号，用来挑对应的跳杀视频 / 惊吓图。</summary>
         public event Action<EnemyId> Attacked;
 
         private readonly Dictionary<EnemyId, EnemyBrain> _brains = new Dictionary<EnemyId, EnemyBrain>();
+
+        /// <summary>袋鼠留在门口的那份外卖（捡起来补 2% 电）。</summary>
+        private readonly DeliveryDrop _delivery = new DeliveryDrop();
+
+        /// <summary>袋鼠敲过门、但还没走人 —— 走的时候才把外卖放下。</summary>
+        private bool _daishuWillDrop;
+
 
         private NightDifficulty _difficulty;
         private IRandomSource _rng;
@@ -214,6 +227,9 @@ namespace NailongFNAF.Gameplay
             _difficulty = NightDifficulty.CreateDefault();
             _attackFired = false;
             LuluRetreatCount = 0;
+            KnockCount = 0;
+            _daishuWillDrop = false;
+            _delivery.Clear();
             _brains.Clear();
 
             float musicSeconds = _blackoutMusicSecondsOverride > 0f
@@ -254,6 +270,107 @@ namespace NailongFNAF.Gameplay
             _brains[EnemyId.Nailong] = _nailong;
 
             ApplyDifficulty();
+            AvoidSafeCameras();
+        }
+
+        /// <summary>
+        /// 「今天出门了」：把被标成安全的机位从每只敌人的路线里换掉 ——
+        /// 换成一个没人占、也不在安全名单里的房间。
+        ///
+        /// 只换**路径里**的格子，路径长度不变，所以「走到第几格 = 走到哪间」
+        /// 的语义和门口判定都不受影响。
+        /// </summary>
+        /// <summary>中途拿到「今天出门了」之后，让各条路线立刻避开新挑出来的空房间。</summary>
+        public void RefreshSafeCameras()
+        {
+            AvoidSafeCameras();
+        }
+
+        private void AvoidSafeCameras()
+        {
+            int[] safe = _game != null ? _game.SafeCameras : null;
+
+            if (safe == null || safe.Length == 0)
+            {
+                return;
+            }
+
+            var daishu = GetBrain(EnemyId.Daishu) as DoorEnemyBrain;
+            if (daishu != null)
+            {
+                daishu.SetCameraPath(ReplaceSafe(daishu.CameraPath, safe));
+            }
+
+            var niulai = GetBrain(EnemyId.Niulai) as DoorEnemyBrain;
+            if (niulai != null)
+            {
+                niulai.SetCameraPath(ReplaceSafe(niulai.CameraPath, safe));
+            }
+
+            var lulu = GetBrain(EnemyId.Lulu) as LuluBrain;
+            if (lulu != null)
+            {
+                lulu.SetCameraPath(ReplaceSafe(lulu.CameraPath, safe));
+            }
+
+            if (_nailong != null)
+            {
+                _nailong.SetCameraPath(ReplaceSafe(_nailong.CameraPath, safe));
+            }
+        }
+
+        private int[] ReplaceSafe(int[] path, int[] safe)
+        {
+            if (path == null || path.Length == 0)
+            {
+                return path;
+            }
+
+            var copy = (int[])path.Clone();
+            bool changed = false;
+
+            for (int i = 0; i < copy.Length; i++)
+            {
+                if (System.Array.IndexOf(safe, copy[i]) < 0)
+                {
+                    continue;
+                }
+
+                copy[i] = FreeCamera(copy, safe);
+                changed = true;
+            }
+
+            return changed ? copy : path;
+        }
+
+        /// <summary>找一个不重复、不在安全名单、也不是厨房的房间号。</summary>
+        private int FreeCamera(int[] path, int[] safe)
+        {
+            int slots = _cameraCount > 0 ? _cameraCount : 11;
+
+            for (int step = 0; step < slots; step++)
+            {
+                int candidate = step % slots;
+
+                if (candidate == 9)
+                {
+                    continue;   // 厨房只有声音
+                }
+
+                if (System.Array.IndexOf(safe, candidate) >= 0)
+                {
+                    continue;
+                }
+
+                if (System.Array.IndexOf(path, candidate) >= 0)
+                {
+                    continue;
+                }
+
+                return candidate;
+            }
+
+            return 0;
         }
 
         /// <summary>
@@ -354,6 +471,37 @@ namespace NailongFNAF.Gameplay
 
             _customActive = false;
             ApplyDifficulty();
+        }
+
+        /// <summary>门口那份外卖。表现层每帧读 <see cref="DeliveryDrop.Available"/> 决定要不要显示。</summary>
+        public DeliveryDrop Delivery
+        {
+            get { return _delivery; }
+        }
+
+        /// <summary>袋鼠敲门的总次数（表现层比上一次的值变大就放一声敲门）。</summary>
+        public int KnockCount { get; private set; }
+
+        /// <summary>
+        /// 捡起门口的外卖。没货、或者这一局已经结束都返回 false。
+        /// 捡到就按这一份的实际档位（1 / 2 / 5）补电。
+        /// </summary>
+        public bool TryCollectDelivery()
+        {
+            var game = GameManager.Instance;
+            if (game == null || game.Power == null || !_delivery.Available)
+            {
+                return false;
+            }
+
+            float gain = _delivery.Gain;
+            if (!_delivery.TryPickup())
+            {
+                return false;
+            }
+
+            game.Power.Grant(gain);
+            return true;
         }
 
         public EnemyBrain GetBrain(EnemyId id)
@@ -480,14 +628,60 @@ namespace NailongFNAF.Gameplay
                     game.MonitorUp, game.CurrentView, game.CurrentCameraIndex,
                     FindRightDoorHolder(), game.FlashlightOn);
 
-                pair.Value.Tick(dt, ctx);
+                // 贝利亚之夜：黑化怪必须「开灯 + 关门」才拦得住；「数到三」把读条拉长
+                if (pair.Value is DoorEnemyBrain door)
+                {
+                    door.RequireLightToBlock = game.BelialMode && game.Belial != null
+                        && !game.Belial.Has(SupportEffect.BlackenedRuleRelaxed);
+                    door.TelegraphMultiplier = game.Belial != null
+                        ? game.Belial.TelegraphMultiplier
+                        : 1f;
+                    door.GraceBonusSeconds = game.DoorGraceBonus;
+                }
+
+                if (pair.Value is NailongBrain nailong)
+                {
+                    nailong.StealFreezeSeconds = game.NailongStealFreeze;
+                }
+
+                // 「褪黑素」整点冻结 / 「多巴胺」减速：这一帧给敌人的时间可以更少
+                float brainDt = game.EnemyFreezeLeft > 0f ? 0f : dt * game.EnemySpeedScale;
+
+                pair.Value.Tick(brainDt, ctx);
+
+                // 挡住一次就报一次（永夜计分）。取增量，避免每帧重复记。
+                int blockedNow = pair.Value.ConsumeBlocks();
+
+                if (blockedNow > 0)
+                {
+                    game.NoteBlocked(blockedNow);
+                }
 
                 // 噜噜被手电筒逼退 —— 计进本夜次数（成就「闪光灯大师」用）
                 if (pair.Key == EnemyId.Lulu && pair.Value.RetreatedThisTick)
                 {
                     LuluRetreatCount++;
                 }
+
+                // 袋鼠被关着的门挡住：敲门 → 走人时在门口留一份外卖。
+                if (pair.Key == EnemyId.Daishu && pair.Value is DoorEnemyBrain daishu)
+                {
+                    if (daishu.ConsumeKnock())
+                    {
+                        KnockCount++;
+                        _daishuWillDrop = true;
+                    }
+
+                    // 它已经回走廊了（Stage 退回到门口之前）→ 这才算「走之后」
+                    if (_daishuWillDrop && daishu.Stage < daishu.MaxStage)
+                    {
+                        _daishuWillDrop = false;
+                        _delivery.Drop(_rng);
+                    }
+                }
             }
+
+            _delivery.Tick(dt);
 
             // 奶龙偷电
             float drain = _nailong.ConsumePendingDrain();

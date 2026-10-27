@@ -189,7 +189,7 @@ namespace NailongFNAF.Tests
 
             // 隐藏夜暂时移除后，「让影子先走」那条跟着撤了 → 19 变 18。
             // 恢复隐藏夜时改回 19。
-            Assert.AreEqual(18, AchievementCatalog.All.Length);
+            Assert.AreEqual(23, AchievementCatalog.All.Length);
         }
 
         [Test]
