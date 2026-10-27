@@ -623,8 +623,9 @@ namespace NailongFNAF.UI
 
 
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
-        private SpriteRenderer _doorLightLeft;
-        private SpriteRenderer _doorLightRight;
+        /// <summary>门洞外的走廊画面（预渲贴图，开灯才显示）。</summary>
+        private SpriteRenderer _corridorLeft;
+        private SpriteRenderer _corridorRight;
 
         /// <summary>
         /// 断电时盖全屏的黑幕。平时整层透明，露出后面的 3D 房间（见 OfficeRoom）。
@@ -1602,31 +1603,26 @@ namespace NailongFNAF.UI
             ApplyFrontCharacter3D(gm);
             ApplyBelial(gm);
 
-            // 门洞外的灯：灯亮 → 门口亮起一团光（呼吸），灯灭 → 熄灭
-            float breathe = 0.85f + Mathf.Sin(Time.time * 2.4f) * 0.15f;
-            ApplyDoorLight(_doorLightLeft, gm.LeftLightOn, breathe);
-            ApplyDoorLight(_doorLightRight, gm.RightLightOn, breathe);
+            // 门洞外的走廊：灯亮才看得见（照 FNAF 1 —— 开灯是唯一知道门外有什么的办法）
+            ApplyCorridor(_corridorLeft, gm.LeftLightOn);
+            ApplyCorridor(_corridorRight, gm.RightLightOn);
 
             // 开灯照到人的上升沿 → 音效 + 边缘红脉冲（门开或关都算）
             UpdateLightReveal(gm);
         }
 
-        private static void ApplyDoorLight(SpriteRenderer light, bool on, float breathe)
+        /// <summary>
+        /// 门洞外的走廊：开灯整层显示、关灯整层隐藏。
+        /// 没有淡入淡出 —— 灯是开关，不是调光器。
+        /// </summary>
+        private static void ApplyCorridor(SpriteRenderer corridor, bool on)
         {
-            if (light == null)
+            if (corridor == null || corridor.sprite == null)
             {
                 return;
             }
 
-            light.gameObject.SetActive(on);
-
-            Color color = light.color;
-            color.a = on ? 0.55f * breathe : 0f;
-            light.color = color;
-
-            // ⚠️ **不要跟着 breathe 改 scale** —— 光斑要始终正好铺满门框，
-            // 缩放会让它缩进门洞（露出暗边）或溢到门框外的墙上。
-            // 呼吸只作用在亮度上。
+            corridor.gameObject.SetActive(on);
         }
 
         /// <summary>
@@ -1782,14 +1778,14 @@ namespace NailongFNAF.UI
                 _enemyFront.gameObject.SetActive(false);
             }
 
-            if (_doorLightLeft != null)
+            if (_corridorLeft != null)
             {
-                _doorLightLeft.gameObject.SetActive(false);
+                _corridorLeft.gameObject.SetActive(false);
             }
 
-            if (_doorLightRight != null)
+            if (_corridorRight != null)
             {
-                _doorLightRight.gameObject.SetActive(false);
+                _corridorRight.gameObject.SetActive(false);
             }
         }
 
@@ -6031,10 +6027,9 @@ namespace NailongFNAF.UI
         private static readonly Vector3 DoorWorldCenterRight = new Vector3(2.6f, 1.025f, -1.2f);
 
         /// <summary>
-        /// 门灯光斑的尺寸（米）—— **正好是门洞大小**。
-        /// 光只落在门框里，不会在门框外的墙上留一块亮斑。
-        /// 光斑贴图本身是「上亮下暗」的渐变（见 <see cref="MakeDoorLightSprite"/>），
-        /// 所以虽然光心在门框正中，亮部是偏上的，像门外的灯从上面照进来。
+        /// 门洞尺寸（米）—— 走廊画面**正好铺满门洞**，不多露一点。
+        /// 名字留着 DoorLight 是历史原因（原来是那块光斑的尺寸），
+        /// 现在这块位置放的是走廊贴图。
         /// </summary>
         private const float DoorLightWidth = 1.2f;
         private const float DoorLightHeight = 2.05f;
@@ -6053,9 +6048,12 @@ namespace NailongFNAF.UI
             _belialRight = MakeWorldSprite("BelialRight", DoorWorldCenterRight, SpriteSortEnemy + 2);
 
 
-            // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
-            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
-            _doorLightRight = MakeDoorLight("DoorLightRight", DoorWorldCenterRight, SpriteSortDoor - 1);
+            // 门洞外的走廊：一张预渲的贴图，开灯时透出来（关灯门洞里就是黑的）。
+            // 排序在门板**之下** —— 门一关，门板自然把它挡住。
+            _corridorLeft = MakeCorridor("CorridorLeft", DoorWorldCenterLeft,
+                SpriteSortDoor - 1, "Corridor/corridor_left");
+            _corridorRight = MakeCorridor("CorridorRight", DoorWorldCenterRight,
+                SpriteSortDoor - 1, "Corridor/corridor_right");
 
             // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
             // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
@@ -6131,32 +6129,27 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 门口那盏灯：**上亮下暗**的渐变光斑，Additive 叠加（只加亮不遮黑），
-        /// 灯亮时门框里像真的被门外的灯照亮了。默认隐藏，
-        /// 由 <see cref="ApplyWorldObjects"/> 按灯状态点亮。
-        /// 和门板一样在侧墙平面（绕 Y 转 ±90° 朝房间中心）。
+        /// 门洞外的走廊：一张预渲的贴图（见 tools/render_corridor.py），
+        /// **正好和门洞一样大**，不多露一点到门框外的墙上。
         ///
-        /// 光斑**正好和门洞一样大**（见 <see cref="DoorLightWidth"/>）——
-        /// 光只落在门框里，不会在门框外的墙上留一块亮斑。
+        /// 只做「开灯」这一版 —— 关灯时整层隐藏，门洞里就是黑的，
+        /// 不需要另一张暗版贴图。
         /// </summary>
-        private static SpriteRenderer MakeDoorLight(string name, Vector3 pivotPoint,
-            int sortingOrder)
+        private static SpriteRenderer MakeCorridor(string name, Vector3 pivotPoint,
+            int sortingOrder, string resourcePath)
         {
             var sr = MakeWorldSprite(name, pivotPoint, sortingOrder);
 
-            sr.sprite = MakeDoorLightSprite();
-            sr.color = new Color(0.35f, 0.55f, 0.30f, 0f);   // 绿光，alpha 0 = 关
-
-            // Additive：纯加亮，不产生「遮黑」的边
-            var mat = new Material(Shader.Find("Sprites/Default"));
-            if (mat != null)
+            Sprite art = Resources.Load<Sprite>(resourcePath);
+            if (art == null)
             {
-                // Sprites/Default 没有加法混合，用内置的加亮混合参数
-                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
-                mat.SetInt("_ZWrite", 0);
-                sr.sharedMaterial = mat;
+                // 图没进 Resources 就先空着 —— 别让门洞里出现一块白板
+                sr.gameObject.SetActive(false);
+                return sr;
             }
+
+            sr.sprite = art;
+            sr.color = Color.white;
 
             // 和门板/门敌一样：侧墙平面朝房间中心
             sr.transform.rotation = pivotPoint.x > 0f
@@ -6164,11 +6157,10 @@ namespace NailongFNAF.UI
                 : Quaternion.Euler(0f, 90f, 0f);
 
             // ⚠️ localScale 是乘在 sprite **自然尺寸**（像素 ÷ PPU）上的，不是米。
-            // 直接写 1.2 / 2.05 会得到 1.54 × 5.25 米的光斑，溢出到门框外 ——
             // 按「目标米数 ÷ 自然尺寸」折算才正好铺满门洞。
             sr.transform.localScale = new Vector3(
-                DoorLightWidth / sr.sprite.bounds.size.x,
-                DoorLightHeight / sr.sprite.bounds.size.y, 1f);
+                DoorLightWidth / art.bounds.size.x,
+                DoorLightHeight / art.bounds.size.y, 1f);
 
             sr.gameObject.SetActive(false);
             return sr;
@@ -8165,59 +8157,6 @@ namespace NailongFNAF.UI
             texture.Apply();
 
             return Sprite.Create(texture, new Rect(0f, 0f, size, size),
-                new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
-        }
-
-        /// <summary>
-        /// 门灯的光斑：**上亮下暗的垂直渐变**（不是径向）。
-        /// 贴上去正好和门洞一样大，光只落在门框里。
-        ///
-        /// 为什么不用径向：径向的光心在正中，看着像门洞里悬了个发光球；
-        /// 垂直渐变让亮部偏上，像门外的灯从上方照进来。
-        /// 顶部和两侧都做了柔化，免得出现硬边。
-        /// </summary>
-        private static Sprite MakeDoorLightSprite()
-        {
-            const int w = 128, h = 256;
-
-            var texture = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            texture.name = "prototype_door_light";
-            texture.wrapMode = TextureWrapMode.Clamp;
-            texture.filterMode = FilterMode.Bilinear;
-
-            var pixels = new Color32[w * h];
-
-            for (int y = 0; y < h; y++)
-            {
-                // 纹理 y 向上：v = 0 是底、1 是顶
-                float v = y / (float)(h - 1);
-
-                float vert;
-                if (v <= 0.82f)
-                {
-                    vert = v / 0.82f;
-                    vert *= vert;                       // 往上加速变亮，亮部更靠上
-                }
-                else
-                {
-                    vert = 1f - (v - 0.82f) / 0.18f;    // 顶部 18% 收掉，别顶出一条硬边
-                }
-
-                for (int x = 0; x < w; x++)
-                {
-                    float u = x / (float)(w - 1) * 2f - 1f;
-                    float side = Mathf.Clamp01(1f - Mathf.Abs(u));
-                    side *= side;                       // 两侧收得快一点
-
-                    float alpha = Mathf.Clamp01(vert) * side;
-                    pixels[y * w + x] = new Color32(255, 247, 219, (byte)(alpha * 255f));
-                }
-            }
-
-            texture.SetPixels32(pixels);
-            texture.Apply();
-
-            return Sprite.Create(texture, new Rect(0f, 0f, w, h),
                 new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
         }
 
