@@ -254,6 +254,18 @@ namespace NailongFNAF.Core
         /// <summary>这一夜接过几次电话（决定她给不给新词）。</summary>
         public int NaibaoCallCount { get; private set; }
 
+        /// <summary>
+        /// 奶龙偷电成功的次数。UI 拿它做「电量条上蹦一下」的动画 ——
+        /// 只给流水号，不在这里碰任何表现层的东西。
+        /// </summary>
+        public int NailongStealSerial { get; private set; }
+
+        /// <summary>奶龙偷到电了（<see cref="EnemyDirector"/> 扣电时调一次）。</summary>
+        public void NoteNailongSteal()
+        {
+            NailongStealSerial++;
+        }
+
         /// <summary>是否已经撑到天亮。</summary>
         public bool HasSurvived
         {

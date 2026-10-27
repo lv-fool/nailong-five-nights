@@ -768,6 +768,23 @@ namespace NailongFNAF.UI
         private Text _powerText;
         private Image[] _usageBars;
 
+        // ── 偷电小动画：奶龙从电量条上方蹦两下 ──────────────────────────
+
+        /// <summary>蹦跶的小奶龙（用 Steal 那张立绘缩到 62 像素）。</summary>
+        private Image _stealPop;
+
+        /// <summary>这次蹦跶还剩多少秒。</summary>
+        private float _stealPopTimer;
+
+        /// <summary>已经画到第几次偷电（跟 <see cref="GameManager.NailongStealSerial"/> 比）。</summary>
+        private int _stealPopSerial = -1;
+
+        /// <summary>蹦跶总时长 / 弹起高度 / 图标边长 / 静止时贴哪。</summary>
+        private const float StealPopSeconds = 1.0f;
+        private const float StealPopRise = 46f;
+        private const float StealPopSize = 62f;
+        private static readonly Vector2 StealPopAnchor = new Vector2(46f, 150f);
+
         /// <summary>永夜模式专属的那一行 HUD（已撑多久 / 还差多少攒一次补给）。</summary>
         private Text _endlessText;
 
@@ -5156,6 +5173,7 @@ namespace NailongFNAF.UI
             _clockText.text = FormatHour(gm.EndlessMode ? gm.Clock.HourOfNight : gm.Clock.CurrentHour);
             _powerText.text = "Power left: " + Mathf.CeilToInt(gm.Power.Level) + "%";
             UpdateUsageBars(gm.Power.UsageLevel);
+            UpdateStealPop(gm);
             UpdateEndlessHud(gm);
             UpdateNaibao(gm);
             UpdateNaibaoCall(gm);
@@ -5176,6 +5194,54 @@ namespace NailongFNAF.UI
 
             // 边缘红脉冲的动画推进（跟帧走，不受 timeScale 影响）
             UpdateRevealPulse();
+        }
+
+        /// <summary>
+        /// 奶龙偷电成功时，电量条上方蹦一个小奶龙。
+        ///
+        /// 只认 <see cref="GameManager.NailongStealSerial"/> 的变化 —— 偷一次蹦一次，
+        /// 平时整层关掉不占渲染。弹两下、淡出，一共 1 秒。
+        /// </summary>
+        private void UpdateStealPop(GameManager gm)
+        {
+            if (_stealPop == null)
+            {
+                return;
+            }
+
+            if (gm.NailongStealSerial != _stealPopSerial)
+            {
+                _stealPopSerial = gm.NailongStealSerial;
+                _stealPopTimer = StealPopSeconds;
+            }
+
+            if (_stealPopTimer <= 0f)
+            {
+                if (_stealPop.enabled)
+                {
+                    _stealPop.enabled = false;
+                }
+
+                return;
+            }
+
+            _stealPopTimer -= Time.deltaTime;
+            float k = Mathf.Clamp01(1f - _stealPopTimer / StealPopSeconds);
+
+            // |sin| 让落回原位那一下是「贴地」，而不是穿到电量字底下去；
+            // 乘 (1-k) 让第二下比第一下矮，像真的越弹越没劲
+            float bounce = Mathf.Abs(Mathf.Sin(k * Mathf.PI * 2.2f))
+                * (1f - k) * StealPopRise;
+
+            _stealPop.rectTransform.anchoredPosition =
+                StealPopAnchor + new Vector2(0f, bounce);
+
+            // 最后四分之一淡出
+            Color c = _stealPop.color;
+            c.a = k < 0.75f ? 1f : Mathf.Clamp01(1f - (k - 0.75f) / 0.25f);
+            _stealPop.color = c;
+
+            _stealPop.enabled = true;
         }
 
         /// <summary>
@@ -6751,6 +6817,23 @@ namespace NailongFNAF.UI
                 TextAnchor.LowerLeft, 30, new Color(0.92f, 0.92f, 0.92f));
             PlaceRect(_powerText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(40f, 104f), new Vector2(420f, 40f));
+
+            // 偷电小动画：奶龙从电量条上方蹦两下（见 UpdateStealPop）。
+            // 贴在电量字左边、往上弹 —— 手电筒在屏幕正中，不会撞上。
+            var popGo = new GameObject("StealPop", typeof(RectTransform), typeof(Image));
+            popGo.transform.SetParent(powerGroup.transform, false);
+
+            _stealPop = popGo.GetComponent<Image>();
+
+            CharacterArt nailongArt = FindCharacter(EnemyId.Nailong);
+            _stealPop.sprite = nailongArt != null
+                ? nailongArt.Get(CharacterPose.Steal)
+                : null;
+            _stealPop.preserveAspect = true;
+            _stealPop.raycastTarget = false;
+            _stealPop.enabled = false;
+            PlaceRect(_stealPop.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                StealPopAnchor, new Vector2(StealPopSize, StealPopSize));
 
             var usageLabel = MakeText(powerGroup.transform, "UsageLabel", "Usage:",
                 TextAnchor.LowerLeft, 24, new Color(0.80f, 0.80f, 0.80f));
