@@ -1360,6 +1360,13 @@ namespace NailongFNAF.UI
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
         private void HandleMonitorHotspot(GameManager gm)
         {
+            // M 键快捷开关监控 —— 和鼠标碰屏幕底边等价（同一个 ToggleMonitor，
+            // 所以音效、奶包抢监控那套逻辑都跟着走）
+            if (Input.GetKeyDown(KeyCode.M) && CanOperate(gm))
+            {
+                ToggleMonitor(gm);
+            }
+
             float height = Screen.height;
             bool inZone = height > 0f && Input.mousePosition.y / height <= MonitorZone;
 
