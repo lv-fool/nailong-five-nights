@@ -805,6 +805,25 @@ namespace NailongFNAF.UI
         private Text _naibaoCallText;
         private Text _naibaoCallHint;
 
+        /// <summary>字幕条本体 —— 高度要跟着台词行数长（见 <see cref="FitNaibaoCallBar"/>）。</summary>
+        private RectTransform _naibaoCallBarRect;
+
+        /// <summary>字幕条底边（离屏幕下沿），要避开电量读数 / 手电筒 / MONITOR 把手。</summary>
+        private const float NaibaoBarBottom = 206f;
+
+        /// <summary>字幕条最矮多高（一行台词）。</summary>
+        private const float NaibaoBarMinHeight = 96f;
+
+        /// <summary>
+        /// 字幕条最高多高。台词再长也就到这 —— 再高会盖住半个屏幕，
+        /// 而且真正超长的台词本来就该拆句，不是让字幕条无限长。
+        /// </summary>
+        private const float NaibaoBarMaxHeight = 300f;
+
+        /// <summary>字幕条里上下留给「奶包 / 提示」那一行和底部内边距的厚度。</summary>
+        private const float NaibaoBarPadTop = 40f;
+        private const float NaibaoBarPadBottom = 10f;
+
         /// <summary>已经画到第几次通话变化（跟 <see cref="GameManager.NaibaoCallSerial"/> 比）。</summary>
         private int _naibaoCallSerial = -1;
 
@@ -5330,12 +5349,38 @@ namespace NailongFNAF.UI
             }
 
             _naibaoCallText.text = line.Text;
+            FitNaibaoCallBar();
             // 提示里直接把键位写出来 —— 玩家不知道有快捷键就等于没有。
             _naibaoCallHint.text = "空格 继续 · F 跳过　"
                 + (call.Index + 1) + " / " + call.Count;
 
             // 每翻一页念一次；没有配音时 PlayVoice 自己会安静地返回 0
             PlayVoice(line.Id);
+        }
+
+        /// <summary>
+        /// 让字幕条长到刚好放下这句台词 —— 行数多了条子变高，少了缩回一行。
+        ///
+        /// 只调**顶边**（offsetMax.y），底边钉在 <see cref="NaibaoBarBottom"/>：
+        /// 往上长才不会压到左下角的电量读数、手电筒和 MONITOR 把手。
+        /// </summary>
+        private void FitNaibaoCallBar()
+        {
+            if (_naibaoCallBarRect == null || _naibaoCallText == null)
+            {
+                return;
+            }
+
+            // preferredHeight 是按当前 rect 宽度排完版需要多高 —— Wrap 已经开着，
+            // 这里拿到的就是折好行之后的高度，不是单行高度
+            float need = _naibaoCallText.preferredHeight
+                + NaibaoBarPadTop + NaibaoBarPadBottom;
+
+            float height = Mathf.Clamp(need, NaibaoBarMinHeight, NaibaoBarMaxHeight);
+
+            Vector2 max = _naibaoCallBarRect.offsetMax;
+            max.y = NaibaoBarBottom + height;
+            _naibaoCallBarRect.offsetMax = max;
         }
 
         /// <summary>
@@ -6790,6 +6835,8 @@ namespace NailongFNAF.UI
             _naibaoLine = MakeText(box.transform, "NaibaoText", string.Empty,
                 TextAnchor.UpperLeft, 26, new Color(0.94f, 0.94f, 0.94f));
             _naibaoLine.horizontalOverflow = HorizontalWrapMode.Wrap;
+            // 桌面这张卡是定高的，长台词宁可溢出也别裁 —— 裁掉等于台词丢了
+            _naibaoLine.verticalOverflow = VerticalWrapMode.Overflow;
             PlaceRect(_naibaoLine.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(20f, -48f), new Vector2(660f, 144f));
 
@@ -6853,11 +6900,13 @@ namespace NailongFNAF.UI
                 typeof(RectTransform), typeof(Image));
             bar.transform.SetParent(root.transform, false);
             var barRect = bar.GetComponent<RectTransform>();
-            barRect.anchorMin = new Vector2(0.19f, 0f);
-            barRect.anchorMax = new Vector2(0.81f, 0f);
+            // 宽度从 62% 提到 72% —— 长台词能少折一行，而且左右两边本来就空着
+            barRect.anchorMin = new Vector2(0.14f, 0f);
+            barRect.anchorMax = new Vector2(0.86f, 0f);
             barRect.pivot = new Vector2(0.5f, 0f);
-            barRect.offsetMin = new Vector2(0f, 206f);
-            barRect.offsetMax = new Vector2(0f, 302f);
+            barRect.offsetMin = new Vector2(0f, NaibaoBarBottom);
+            barRect.offsetMax = new Vector2(0f, NaibaoBarBottom + NaibaoBarMinHeight);
+            _naibaoCallBarRect = barRect;
 
             var barImage = bar.GetComponent<Image>();
             barImage.sprite = _buttonSprite;
@@ -6888,17 +6937,19 @@ namespace NailongFNAF.UI
                 new Vector2(168f, -14f), new Vector2(460f, 24f));
 
             _naibaoCallText = MakeText(bar.transform, "Line", string.Empty,
-                TextAnchor.MiddleLeft, 25, new Color(0.96f, 0.96f, 0.96f));
+                TextAnchor.MiddleLeft, 23, new Color(0.96f, 0.96f, 0.96f));
+            // ⚠️ 两个都不能省：Wrap 负责折行，Overflow 负责「折完还放不下时别裁掉」。
+            // 以前是 Truncate —— 长台词直接被切，绿子报「豆包台词太长会丢失」。
             _naibaoCallText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            _naibaoCallText.verticalOverflow = VerticalWrapMode.Truncate;
+            _naibaoCallText.verticalOverflow = VerticalWrapMode.Overflow;
             // 台词占满条子的剩余宽度：**铺开**（anchorMin/Max 拉伸），不是定尺寸 ——
             // 条子宽度本身跟着窗口走，写死宽度在别的分辨率下会漏字
             var lineRect = _naibaoCallText.rectTransform;
             lineRect.anchorMin = new Vector2(0f, 0f);
             lineRect.anchorMax = new Vector2(1f, 1f);
             lineRect.pivot = new Vector2(0.5f, 0.5f);
-            lineRect.offsetMin = new Vector2(108f, 10f);
-            lineRect.offsetMax = new Vector2(-186f, -40f);
+            lineRect.offsetMin = new Vector2(108f, NaibaoBarPadBottom);
+            lineRect.offsetMax = new Vector2(-186f, -NaibaoBarPadTop);
 
             var next = MakeButton(bar.transform, "Next", "继续",
                 new Vector2(1f, 0.5f), new Vector2(-22f, 22f), new Vector2(132f, 36f),
