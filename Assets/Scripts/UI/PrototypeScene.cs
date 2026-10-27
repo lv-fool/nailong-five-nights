@@ -818,6 +818,17 @@ namespace NailongFNAF.UI
         private Image _jumpscareOverlay;
         private Image _jumpscareImage;
 
+        // ── 通关天亮 ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// 通关时的全屏白幕：从透明渐到近白，停一会儿再弹结算面板。
+        /// 层在最上面（见 <see cref="BuildUI"/>），结算一出来就关掉。
+        /// </summary>
+        private Image _dawnOverlay;
+
+        /// <summary>天亮演出已经走了多少秒（0 = 刚开始）。</summary>
+        private float _dawnTimer;
+
         // ── 跳杀结束后的红屏蔓延 ──────────────────────────────────────
 
         /// <summary>
@@ -7530,6 +7541,14 @@ namespace NailongFNAF.UI
         {
             _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", Color.black);
             _jumpscareOverlay.transform.SetAsLastSibling();
+
+            // 天亮白幕：通关那一刻盖在最上面（见 PlayDawnThenWin）。
+            // 放在跳杀层之后建，SetAsLastSibling 才轮得到它 —— 但要排在
+            // 结算面板（MenuRoot）之下，否则白幕会盖住结算。所以 ShowWinEnd
+            // 里会把它关掉，而不是靠层级。
+            _dawnOverlay = MakeFullScreenImage("DawnOverlay", Color.white);
+            _dawnOverlay.transform.SetAsLastSibling();
+            _dawnOverlay.gameObject.SetActive(false);
 
             // 红屏蔓延材质：把遮罩改成「红从边缘向中心推」的渐变。
             //
