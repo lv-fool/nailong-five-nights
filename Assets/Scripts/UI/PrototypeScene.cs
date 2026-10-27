@@ -651,6 +651,13 @@ namespace NailongFNAF.UI
         private CanvasGroup _flashlightGroup;
         private Image _flashlightButton;
         private HoldButton _flashlightHold;
+
+        /// <summary>
+        /// 手电筒「按住」的合并状态（底部按钮 **或** Ctrl 键）。
+        /// 只在状态**变化**时下发 —— 每帧硬调 SetFlashlight 会在
+        /// 「不能操作但键还按着」时反复触发耗电统计。
+        /// </summary>
+        private bool _flashlightHeld;
         private Image _flashlightGlow;
         private float _flashlightGlowAlpha;
         private Image _monitorOverlay;
@@ -1946,6 +1953,18 @@ namespace NailongFNAF.UI
                 _flashlightHold.Release();
             }
 
+            // 按住左/右 Ctrl 等同于按住底部那个按钮 —— 键盘玩家不用去够屏幕底部。
+            // 两个来源取「或」：按钮按着算按着，Ctrl 按着也算按着，都松开才灭。
+            bool mouseHeld = _flashlightHold != null && _flashlightHold.IsHeld;
+            bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool held = usable && (mouseHeld || ctrlHeld);
+
+            if (held != _flashlightHeld)
+            {
+                _flashlightHeld = held;
+                OnFlashlightHold(held);
+            }
+
             bool shiningFront = gm.FlashlightOn && usable && gm.CurrentView == ViewSide.Front;
             float target = shiningFront ? FlashlightGlowAlpha : 0f;
 
@@ -1967,6 +1986,9 @@ namespace NailongFNAF.UI
             {
                 return;
             }
+
+            // 按钮直接回调进来时也记上，免得 ApplyFlashlight 下一帧又下发一遍（音效会响两次）
+            _flashlightHeld = held;
 
             gm.SetFlashlight(held);
 
