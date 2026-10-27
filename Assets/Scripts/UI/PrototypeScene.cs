@@ -272,6 +272,9 @@ namespace NailongFNAF.UI
         /// </summary>
         private const string JumpscareSfxPath = "Audio/sfx_jumpscare";
 
+        /// <summary>袋鼠被关着的门挡住时敲门的音效。</summary>
+        private const string KnockSfxPath = "Audio/sfx_knock";
+
         /// <summary>门口立绘的目标高度（米）。门洞 2.05m，留一点头顶余量。</summary>
         private const float TargetHeightMeters = 1.8f;
 
@@ -555,6 +558,12 @@ namespace NailongFNAF.UI
         private static readonly Color DoorOn = new Color(0.78f, 0.16f, 0.16f);
         private static readonly Color DoorOff = new Color(0.40f, 0.11f, 0.11f);
         private static readonly Color LightOn = new Color(0.32f, 0.72f, 0.30f);
+
+        /// <summary>小地图：这一间今天没人来（「今天出门了」）。</summary>
+        private static readonly Color CameraSafeMark = new Color(0.30f, 0.52f, 0.78f);
+
+        /// <summary>小地图：这一间现在有人在（「查房」）。</summary>
+        private static readonly Color CameraEnemyMark = new Color(0.86f, 0.36f, 0.30f);
         private static readonly Color LightOff = new Color(0.13f, 0.32f, 0.14f);
 
         /// <summary>被敌人突破后，该侧门灯按钮的颜色（几乎全黑，看得出按不动）。</summary>
@@ -614,6 +623,15 @@ namespace NailongFNAF.UI
         private SpriteRenderer _enemySideLeft;
         private SpriteRenderer _enemySideRight;
         private SpriteRenderer _enemyFront;
+        private SpriteRenderer _belialLeft;
+        private SpriteRenderer _belialRight;
+        private Sprite _belialDarkSprite;
+        private Sprite _belialWhiteSprite;
+        private Text _belialHint;
+        private Text _supportTip;
+        private float _supportTipLeft;
+        private int _announcedStage;
+        private object _announcedFor;
 
 
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
@@ -694,6 +712,9 @@ namespace NailongFNAF.UI
 
         /// <summary>永夜模式专属的那一行 HUD（已撑多久 / 还差多少攒一次补给）。</summary>
         private Text _endlessText;
+
+        /// <summary>贝利亚之夜的支援选择面板（等玩家挑卡时存在，选完就销毁）。</summary>
+        private GameObject _supportPanel;
 
         /// <summary>奶包那一整组（左上角立绘 + 说话框）。</summary>
         private CanvasGroup _naibaoGroup;
@@ -815,6 +836,18 @@ namespace NailongFNAF.UI
         private float _jumpscareVideoTimer;
         private Image _jumpscareWatermarkMask;
         private AudioSource _jumpscareAudio;
+
+        /// <summary>奶包配音的独立音轨（<see cref="VoiceBank"/> 里的 clip 往这上面放）。</summary>
+        private AudioSource _voiceSource;
+
+        /// <summary>袋鼠敲门声的独立音轨。</summary>
+        private AudioSource _knockSource;
+        private AudioClip _knockSfx;
+        private int _lastKnockCount;
+
+        /// <summary>门口那份外卖的拾取按钮（袋鼠走了才亮）。</summary>
+        private Button _deliveryButton;
+        private Text _deliveryLabel;
         private AudioClip _jumpscareSfx;
         private Image _blackoutCharacter;
         private Font _font;
@@ -950,6 +983,12 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // 贝利亚之夜：轮到她递东西过来的时候，整局冻住，先挑卡
+            if (UpdateSupportPanel(gm))
+            {
+                return;
+            }
+
             // 永夜模式的暂停：Esc 开/关面板。暂停期间这一帧就到此为止 ——
             // 时间已经靠 timeScale = 0 冻住了，别的更新再跑也没意义。
             if (HandlePause(gm))
@@ -971,12 +1010,16 @@ namespace NailongFNAF.UI
             HandleNightKeys(gm);
             HandleCameraKeys(gm);
 
+            UpdateDelivery(gm);
+
             UpdateView(gm);
             HandleMonitorHotspot(gm);
             TryNaibaoPhoneClick(gm);
             HandleNaibaoCallKeys(gm);
             UpdateVisuals(gm);
+            UpdateSupportTip(gm, Time.deltaTime);
             UpdateHud(gm);
+            UpdateBelialAchievements(gm);
             UpdateJumpscareShake();
             UpdateAudio(gm);
             UpdateJumpscareVideo();
@@ -1514,6 +1557,7 @@ namespace NailongFNAF.UI
                 rightPresent && !gm.RightDoorClosed, rightId, CharacterPose.Idle, Side.Right);
 
             ApplyFrontCharacter3D(gm);
+            ApplyBelial(gm);
 
             // 门洞外的灯：灯亮 → 门口亮起一团光（呼吸），灯灭 → 熄灭
             float breathe = 0.85f + Mathf.Sin(Time.time * 2.4f) * 0.15f;
@@ -1592,6 +1636,90 @@ namespace NailongFNAF.UI
             sr.transform.localScale = new Vector3(side == Side.Left ? -s : s, s, 1f);
         }
 
+        /// <summary>
+        /// 贝利亚本人：第二阶段起会站到某一边门外。
+        /// 被手电筒照到的那一下换成「白贝」贴图 —— 玩家看这一眼就知道照中了。
+        /// </summary>
+        private void ApplyBelial(GameManager gm)
+        {
+            var enc = gm.BelialEncounter;
+            bool show = enc != null && (enc.AtDoor || enc.IsRetreating) && !gm.HasBeenCaught && !gm.HasSurvived;
+
+            if (!show)
+            {
+                if (_belialLeft != null)
+                {
+                    _belialLeft.gameObject.SetActive(false);
+                }
+
+                if (_belialRight != null)
+                {
+                    _belialRight.gameObject.SetActive(false);
+                }
+
+                return;
+            }
+
+            Sprite sprite = BelialSprite(enc.IsWhite);
+            bool left = enc.Side == BelialSide.Left;
+
+            ShowBelialSprite(_belialLeft, left, sprite);
+            ShowBelialSprite(_belialRight, !left, sprite);
+        }
+
+        private void ShowBelialSprite(SpriteRenderer sr, bool present, Sprite sprite)
+        {
+            if (sr == null)
+            {
+                return;
+            }
+
+            if (!present || sprite == null)
+            {
+                sr.gameObject.SetActive(false);
+                return;
+            }
+
+            sr.gameObject.SetActive(true);
+            sr.sprite = sprite;
+
+            float worldH = sprite.rect.height / sprite.pixelsPerUnit;
+            float worldW = sprite.rect.width / sprite.pixelsPerUnit;
+
+            if (worldH <= 0.001f || worldW <= 0.001f)
+            {
+                sr.gameObject.SetActive(false);
+                return;
+            }
+
+            const float BelialHeightMeters = 1.9f;
+            const float BelialWidthMeters = 1.5f;
+            float scale = Mathf.Min(BelialHeightMeters / worldH, BelialWidthMeters / worldW);
+
+            sr.drawMode = SpriteDrawMode.Simple;
+            sr.transform.localScale = new Vector3(scale, scale, 1f);
+        }
+
+        private Sprite BelialSprite(bool white)
+        {
+            if (white)
+            {
+                if (_belialWhiteSprite == null)
+                {
+                    _belialWhiteSprite = Resources.Load<Sprite>("Belial/char_belial_white");
+                }
+
+                return _belialWhiteSprite;
+            }
+
+            if (_belialDarkSprite == null)
+            {
+                _belialDarkSprite = Resources.Load<Sprite>("Belial/char_belial_dark");
+            }
+
+            return _belialDarkSprite;
+        }
+
         private void HideWorldObjects()
         {
             HideDoors();
@@ -1640,7 +1768,11 @@ namespace NailongFNAF.UI
             // 门关不关**不影响能不能看见** —— 灯照亮的是门外走廊，
             // 门板挡的是人不是光。所以关门后玩家也能开灯确认「它走了没有」，
             // 不用冒险开门（开门可能正好撞上它的移动机会）。
-            if (!lightOn)
+            // 谷维素：黑里也能认出门口有没有人；熬夜的光柱够远，侧门也照得到
+            bool doorSight = gm.DoorSightActive;
+            bool longBeam = gm.FlashlightOn && gm.FlashlightRangeScale > 1f;
+
+            if (!lightOn && !doorSight && !longBeam)
             {
                 return false;
             }
@@ -2102,7 +2234,7 @@ namespace NailongFNAF.UI
 
             SetMonitorFrame(frame != null ? frame : _solidSprite,
                 frame != null ? Color.white : MonitorFallback);
-            _monitorLabel.text = CameraName(index);
+            _monitorLabel.text = CameraName(index) + MonitorSupportSuffix(gm, index);
 
             // 底图的平移 / 缩放（编辑器里拖过才有）
             ApplyMonitorBackground(index);
@@ -2127,12 +2259,135 @@ namespace NailongFNAF.UI
             }
         }
 
+        /// <summary>
+        /// 监控标题后面挂一截支援信息：「查房」报谁在这间，「复诊」报这家怎么打。
+        /// </summary>
+        private string MonitorSupportSuffix(GameManager gm, int cameraIndex)
+        {
+            var boss = new StringBuilder();
+            int reveal = gm.RevealLevel;
+            bool weak = gm.WeakPointActive;
+
+            if (reveal <= 0 && !weak)
+            {
+                return string.Empty;
+            }
+
+            foreach (var pair in EnemiesOnCamera(cameraIndex, reveal))
+            {
+                string name = EnemyNameOf(pair.Key);
+                boss.Append("　·　").Append(name);
+
+                if (weak)
+                {
+                    boss.Append("（").Append(WeaknessOf(pair.Key)).Append("）");
+                }
+            }
+
+            return boss.ToString();
+        }
+
+        /// <summary>这一机位上能拍到的敌人（查房层级决定报几个）。</summary>
+        private List<KeyValuePair<EnemyId, int>> EnemiesOnCamera(int cameraIndex, int revealLevel)
+        {
+            var found = new List<KeyValuePair<EnemyId, int>>();
+
+            if (_enemyDirector == null || revealLevel <= 0)
+            {
+                return found;
+            }
+
+            if (_enemyDirector.GetBrain(EnemyId.Lulu) is LuluBrain lulu
+                && !lulu.IsAttacking && lulu.Stage < lulu.MaxStage
+                && lulu.PathCameraIndex == cameraIndex)
+            {
+                found.Add(new KeyValuePair<EnemyId, int>(EnemyId.Lulu, cameraIndex));
+            }
+
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                if (!(brain is DoorEnemyBrain door) || door is NailongBrain || door.IsAttacking)
+                {
+                    continue;
+                }
+
+                if (door.Id == EnemyId.Niulai && revealLevel < 1)
+                {
+                    continue;
+                }
+
+                if ((door.Id == EnemyId.Daishu || door.Id == EnemyId.Nailong) && revealLevel < 2)
+                {
+                    continue;
+                }
+
+                if (door.PathCameraIndex == cameraIndex)
+                {
+                    found.Add(new KeyValuePair<EnemyId, int>(door.Id, cameraIndex));
+                }
+            }
+
+            if (revealLevel >= 2 && _enemyDirector.GetBrain(EnemyId.Nailong) is NailongBrain nailong
+                && !nailong.IsAttacking && nailong.Stage < nailong.MaxStage
+                && NailongCameraOf(nailong) == cameraIndex
+                && found.TrueForAll(pair => pair.Key != EnemyId.Nailong))
+            {
+                found.Add(new KeyValuePair<EnemyId, int>(EnemyId.Nailong, cameraIndex));
+            }
+
+            return found;
+        }
+
+        private static string EnemyNameOf(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai: return "牛来";
+                case EnemyId.Daishu: return "袋鼠";
+                case EnemyId.Lulu: return "噜噜";
+                default: return "奶龙";
+            }
+        }
+
+        /// <summary>复诊：这一家的弱点在哪儿。</summary>
+        private static string WeaknessOf(EnemyId id)
+        {
+            switch (id)
+            {
+                case EnemyId.Niulai: return "关门";
+                case EnemyId.Daishu: return "关门";
+                case EnemyId.Lulu: return "手电筒";
+                default: return "看着它";
+            }
+        }
+
         /// <summary>小地图上把当前机位那一格点亮。</summary>
         private void UpdateCameraBoxes(int index)
         {
+            int[] safe = _enemyDirector != null && _enemyDirector.SafeCameras != null
+                ? _enemyDirector.SafeCameras
+                : null;
+            int reveal = 0;
+
+            if (GameManager.Instance != null)
+            {
+                reveal = GameManager.Instance.RevealLevel;
+            }
+
             for (int i = 0; i < _camBoxes.Length; i++)
             {
-                _camBoxes[i].color = i == index ? CamBoxOn : CamBoxOff;
+                Color color = i == index ? CamBoxOn : CamBoxOff;
+
+                if (safe != null && System.Array.IndexOf(safe, i) >= 0)
+                {
+                    color = CameraSafeMark;
+                }
+                else if (reveal > 0 && EnemiesOnCamera(i, reveal).Count > 0)
+                {
+                    color = CameraEnemyMark;
+                }
+
+                _camBoxes[i].color = color;
             }
         }
 
@@ -3443,6 +3698,16 @@ namespace NailongFNAF.UI
             audio.volume = 0.9f;
             _jumpscareAudio = audio;
 
+            // 奶包配音：再单独一条，别和跳杀抢同一路（跳杀要打断一切，配音只在旁边说话）
+            var voiceGo = new GameObject("NaibaoVoice");
+            voiceGo.transform.SetParent(transform, false);
+            var voice = voiceGo.AddComponent<AudioSource>();
+            voice.playOnAwake = false;
+            voice.loop = false;
+            voice.spatialBlend = 0f;
+            voice.volume = 1f;
+            _voiceSource = voice;
+
             var player = gameObject.AddComponent<VideoPlayer>();
             player.playOnAwake = false;
             player.source = VideoSource.Url;
@@ -3753,6 +4018,408 @@ namespace NailongFNAF.UI
         // HUD：时钟在右上角，电量与使用等级在左下角（对齐官方）
         // ---------------------------------------------------------------
 
+        // ---------------------------------------------------------------
+        // 贝利亚之夜 · 「来自奶包的支援」选择面板
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// 轮到她递东西的时候（<see cref="BelialNight.AwaitingChoice"/>），把整局冻住弹面板。
+        /// 返回 true 表示这一帧交给面板处理，别的更新都不用跑。
+        /// </summary>
+        private bool UpdateSupportPanel(GameManager gm)
+        {
+            bool awaiting = gm.BelialMode && gm.Belial != null && gm.Belial.AwaitingChoice;
+
+            if (!awaiting)
+            {
+                if (_supportPanel != null)
+                {
+                    Destroy(_supportPanel);
+                    _supportPanel = null;
+                    gm.SetPaused(false);
+                }
+
+                return false;
+            }
+
+            if (_supportPanel == null)
+            {
+                BuildSupportPanel(gm);
+                gm.SetPaused(true);
+            }
+
+            return true;
+        }
+
+        private void BuildSupportPanel(GameManager gm)
+        {
+            var night = gm.Belial;
+            var offer = night.Offer;
+
+            if (offer == null || offer.Length == 0)
+            {
+                return;
+            }
+
+            _supportPanel = new GameObject("SupportPanel", typeof(RectTransform), typeof(Image));
+            _supportPanel.transform.SetParent(_canvas.transform, false);
+
+            var rect = _supportPanel.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            _supportPanel.GetComponent<Image>().color = new Color(0.02f, 0.02f, 0.03f, 0.88f);
+            _supportPanel.transform.SetAsLastSibling();
+
+            var title = MakeText(_supportPanel.transform, "Title", "来自奶包的支援",
+                TextAnchor.MiddleCenter, 46, new Color(1f, 0.93f, 0.74f));
+            PlaceRect(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -110f), new Vector2(1200f, 64f));
+
+            string subtitleText = night.IsForcedOffer
+                ? "第一件不用挑 —— 三张是一样的。她说：拉钩。"
+                : "第 " + (night.Picks + 1) + " 件 · 已经撑过 " + night.Hours + " 小时";
+
+            var subtitle = MakeText(_supportPanel.transform, "Subtitle", subtitleText,
+                TextAnchor.MiddleCenter, 28, new Color(0.88f, 0.86f, 0.78f));
+            PlaceRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -178f), new Vector2(1400f, 40f));
+
+            const float cardWidth = 300f;
+            const float gap = 30f;
+            float total = offer.Length * cardWidth + (offer.Length - 1) * gap;
+            float startX = -total * 0.5f + cardWidth * 0.5f;
+
+            for (int i = 0; i < offer.Length; i++)
+            {
+                var def = offer[i];
+                int index = i;
+
+                var card = MakeButton(_supportPanel.transform, "SupportCard" + i, string.Empty,
+                    new Vector2(0.5f, 0.5f),
+                    new Vector2(startX + i * (cardWidth + gap), -30f),
+                    new Vector2(cardWidth, 400f),
+                    delegate { ChooseSupport(index); });
+
+                var face = card.GetComponent<Image>();
+
+                if (face != null)
+                {
+                    face.color = RarityColor(def.Rarity);
+                }
+
+                // 默认那颗单行标签用不上，拆掉换成「名字 + 说明 + 稀有度」
+                var label = card.GetComponentInChildren<Text>();
+
+                if (label != null)
+                {
+                    Destroy(label.gameObject);
+                }
+
+                var name = MakeText(card.transform, "Name", def.Title,
+                    TextAnchor.UpperCenter, 40, new Color(1f, 0.97f, 0.9f));
+                PlaceRect(name.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                    new Vector2(0f, -34f), new Vector2(cardWidth - 30f, 66f));
+
+                var desc = MakeText(card.transform, "Desc", def.Description,
+                    TextAnchor.UpperCenter, 24, new Color(0.94f, 0.92f, 0.86f));
+                desc.horizontalOverflow = HorizontalWrapMode.Wrap;
+                desc.verticalOverflow = VerticalWrapMode.Truncate;
+                PlaceRect(desc.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                    new Vector2(0f, -110f), new Vector2(cardWidth - 40f, 250f));
+
+                var tag = MakeText(card.transform, "Tag", RarityName(def.Rarity),
+                    TextAnchor.LowerCenter, 22, new Color(1f, 0.97f, 0.9f));
+                PlaceRect(tag.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                    new Vector2(0f, 18f), new Vector2(cardWidth - 30f, 30f));
+            }
+
+            if (night.RerollsLeft > 0)
+            {
+                MakeButton(_supportPanel.transform, "RerollButton",
+                    "复诊单 · 重抽（剩 " + night.RerollsLeft + "）",
+                    new Vector2(0.5f, 0f), new Vector2(0f, 96f), new Vector2(360f, 64f),
+                    RerollSupport);
+            }
+        }
+
+        private void ChooseSupport(int index)
+        {
+            var gm = GameManager.Instance;
+
+            if (gm == null || gm.Belial == null)
+            {
+                return;
+            }
+
+            var chosen = gm.Belial.Choose(index);
+            gm.ApplySupport(chosen);
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.RefreshSafeCameras();
+            }
+
+            RebuildSupportPanel(gm);
+        }
+
+        private void RerollSupport()
+        {
+            var gm = GameManager.Instance;
+
+            if (gm == null || gm.Belial == null)
+            {
+                return;
+            }
+
+            gm.Belial.Reroll();
+            RebuildSupportPanel(gm);
+        }
+
+        private void RebuildSupportPanel(GameManager gm)
+        {
+            if (_supportPanel != null)
+            {
+                Destroy(_supportPanel);
+                _supportPanel = null;
+            }
+
+            if (gm.Belial != null && gm.Belial.AwaitingChoice)
+            {
+                // 白送那件选完会立刻再摆一组正常三选一 —— 面板不关，直接换内容
+                BuildSupportPanel(gm);
+            }
+            else
+            {
+                gm.SetPaused(false);
+            }
+        }
+
+        private static Color RarityColor(SupportRarity rarity)
+        {
+            switch (rarity)
+            {
+                case SupportRarity.Rare:
+                    return new Color(0.30f, 0.46f, 0.82f, 0.95f);
+                case SupportRarity.Legendary:
+                    return new Color(0.86f, 0.60f, 0.16f, 0.95f);
+                case SupportRarity.Dual:
+                    return new Color(0.50f, 0.30f, 0.74f, 0.95f);
+                case SupportRarity.Egg:
+                    return new Color(0.82f, 0.36f, 0.58f, 0.95f);
+                default:
+                    return new Color(0.26f, 0.28f, 0.32f, 0.95f);
+            }
+        }
+
+        private static string RarityName(SupportRarity rarity)
+        {
+            switch (rarity)
+            {
+                case SupportRarity.Rare:
+                    return "稀有";
+                case SupportRarity.Legendary:
+                    return "传奇";
+                case SupportRarity.Dual:
+                    return "双刃";
+                case SupportRarity.Egg:
+                    return "彩蛋";
+                default:
+                    return "普通";
+            }
+        }
+
+        /// <summary>
+        /// 袋鼠的敲门声与门口外卖：敲门时放一声；它走了之后按钮才亮，
+        /// 鼠标点一下就把外卖收进来（+2% 电）。
+        /// </summary>
+        private void UpdateDelivery(GameManager gm)
+        {
+            if (_enemyDirector == null)
+            {
+                return;
+            }
+
+            if (_enemyDirector.KnockCount > _lastKnockCount)
+            {
+                _lastKnockCount = _enemyDirector.KnockCount;
+                PlayKnockSfx();
+            }
+
+            bool show = _enemyDirector.Delivery.Available && gm.Operable;
+
+            if (_deliveryButton != null && _deliveryButton.gameObject.activeSelf != show)
+            {
+                _deliveryButton.gameObject.SetActive(show);
+            }
+
+            if (show && _deliveryLabel != null)
+            {
+                int seconds = Mathf.Max(0, Mathf.CeilToInt(_enemyDirector.Delivery.RemainingSeconds));
+                _deliveryLabel.text = "门口有份外卖 · " + seconds + " 秒内收下 (+" + Mathf.RoundToInt(_enemyDirector.Delivery.Gain) + " 电)";
+            }
+        }
+
+        private void OnDeliveryClicked()
+        {
+            if (_enemyDirector == null)
+            {
+                return;
+            }
+
+            _enemyDirector.TryCollectDelivery();
+
+            if (_deliveryButton != null)
+            {
+                _deliveryButton.gameObject.SetActive(false);
+            }
+        }
+
+        private void PlayKnockSfx()
+        {
+            if (_knockSource == null)
+            {
+                return;
+            }
+
+            if (_knockSfx == null)
+            {
+                _knockSfx = Resources.Load<AudioClip>(KnockSfxPath);
+            }
+
+            if (_knockSfx == null)
+            {
+                return;
+            }
+
+            _knockSource.Stop();
+            _knockSource.clip = _knockSfx;
+            _knockSource.Play();
+        }
+
+        /// <summary>
+        /// 「一通电话」：每个阶段开头她报一次准确机位，说完 6 秒收起来。
+        /// 阶段 = 1（前 6 小时）/ 2（贝利亚上场后）。
+        /// </summary>
+        private void UpdateSupportTip(GameManager gm, float dt)
+        {
+            if (_supportTip != null && _supportTipLeft > 0f)
+            {
+                _supportTipLeft -= dt;
+
+                if (_supportTipLeft <= 0f)
+                {
+                    _supportTip.gameObject.SetActive(false);
+                }
+            }
+
+            if (_supportTip == null || _enemyDirector == null
+                || !gm.StageSpotActive || gm.Belial == null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(_announcedFor, gm.Belial))
+            {
+                _announcedFor = gm.Belial;
+                _announcedStage = 0;
+            }
+
+            int stage = gm.Belial.BelialActive ? 2 : 1;
+
+            if (_announcedStage >= stage)
+            {
+                return;
+            }
+
+            for (int i = 0; i < CameraNames.Length; i++)
+            {
+                var here = EnemiesOnCamera(i, 2);
+
+                if (here.Count == 0)
+                {
+                    continue;
+                }
+
+                _announcedStage = stage;
+                _supportTip.text = "她：那边有人 —— " + CameraName(i) + "（" +
+                    EnemyNameOf(here[0].Key) + "）";
+                _supportTip.gameObject.SetActive(true);
+                _supportTipLeft = 6f;
+                return;
+            }
+        }
+
+        /// <summary>
+        /// 贝利亚站到门外时给一句提示：**别关门**，要开着门用手电筒照他。
+        /// 这个反直觉，不写出来玩家一定先去关门。
+        /// </summary>
+        private void UpdateBelialHint(GameManager gm)
+        {
+            if (_belialHint == null)
+            {
+                return;
+            }
+
+            var enc = gm.BelialEncounter;
+            bool show = enc != null && enc.AtDoor && !gm.HasBeenCaught && !gm.HasSurvived && !_menuOpen;
+
+            _belialHint.gameObject.SetActive(show);
+
+            if (!show)
+            {
+                return;
+            }
+
+            _belialHint.text = (enc.Side == BelialSide.Left ? "左边" : "右边") +
+                "那扇门 —— 开着，用手电筒照它　" + enc.Flashes + " / " + BelialEncounter.FlashCount;
+        }
+
+        /// <summary>贝利亚相关的隐藏成就（一解锁就该弹，不用等结算）。</summary>
+        private void UpdateBelialAchievements(GameManager gm)
+        {
+            if (gm == null || gm.Stats == null || !gm.BelialMode)
+            {
+                return;
+            }
+
+            var stats = gm.Stats;
+
+            if (stats.BelialMeetings <= 0 && stats.BelialFlashes <= 0 && !stats.KilledByBelial && !gm.HasSurvived)
+            {
+                return;
+            }
+
+            var newly = new System.Collections.Generic.List<AchievementCatalog.Def>();
+
+            if (stats.BelialMeetings > 0)
+            {
+                TryUnlock(AchievementCatalog.BelialFirst, newly);
+            }
+
+            if (stats.BelialFlashes > 0)
+            {
+                TryUnlock(AchievementCatalog.BelialWhite, newly);
+            }
+
+            if (stats.BelialFlashes >= 12)
+            {
+                TryUnlock(AchievementCatalog.BelialFlashTwelve, newly);
+            }
+
+            if (gm.HasSurvived)
+            {
+                TryUnlock(AchievementCatalog.BelialClear, newly);
+            }
+
+            if (stats.KilledByBelial)
+            {
+                TryUnlock(AchievementCatalog.BelialDeath, newly);
+            }
+        }
+
         private void UpdateHud(GameManager gm)
         {
             // 普通模式显示「几点」；永夜模式小时数不封顶，只显示这一夜的第几点（夜数另有提示）
@@ -3762,6 +4429,7 @@ namespace NailongFNAF.UI
             UpdateEndlessHud(gm);
             UpdateNaibao(gm);
             UpdateNaibaoCall(gm);
+            UpdateBelialHint(gm);
 
             // 断电了就没有「还剩多少电、用了几格」这回事了
             _powerGroup.alpha = gm.HasPowerOut ? 0f : 1f;
@@ -3800,6 +4468,7 @@ namespace NailongFNAF.UI
                     _naibaoApologyShown = gm.NaibaoApologyLine;
                     ShowNaibaoLine(gm.NaibaoApologyLine, NaibaoPose.Huffy, 0f);
                     _naibaoHideAt = float.PositiveInfinity;
+                    PlayVoice(gm.NaibaoApologyLineId);
                 }
 
                 _naibaoGroup.alpha = Mathf.MoveTowards(_naibaoGroup.alpha, 1f,
@@ -3842,7 +4511,49 @@ namespace NailongFNAF.UI
 
             // 有持续时间的动作（抢监控、偷加耗电）多留一会儿，纯说话就留 6 秒
             float hold = cue.Seconds > 0f ? cue.Seconds + 3.5f : 6f;
+
+            // 有配音就按录音长度留（念完再留一口气），别让她的话被截断
+            float spoken = PlayVoice(cue.LineId);
+            if (spoken > 0f)
+            {
+                hold = Mathf.Max(hold, spoken + 1.2f);
+            }
+
             ShowNaibaoLine(cue.Line, cue.Pose, hold);
+        }
+
+        /// <summary>
+        /// 放一句配音。返回 clip 时长（秒）；这句没有配音就返回 0，调用方按「只显示字幕」处理。
+        /// </summary>
+        private float PlayVoice(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return 0f;
+            }
+
+            AudioClip clip = VoiceBank.Get(id);
+            if (clip == null)
+            {
+                return 0f;
+            }
+
+            // 第一次要说话时才建音轨：跳杀那一路是懒建的，配音不能跟着它的时机走
+            if (_voiceSource == null)
+            {
+                var voiceGo = new GameObject("NaibaoVoice");
+                voiceGo.transform.SetParent(transform, false);
+                _voiceSource = voiceGo.AddComponent<AudioSource>();
+                _voiceSource.playOnAwake = false;
+                _voiceSource.loop = false;
+                _voiceSource.spatialBlend = 0f;
+                _voiceSource.volume = 1f;
+            }
+
+            _voiceSource.Stop();
+            _voiceSource.clip = clip;
+            _voiceSource.Play();
+            return clip.length;
         }
 
         /// <summary>
@@ -3943,6 +4654,9 @@ namespace NailongFNAF.UI
                     ? "点「继续 / 挂断」　"
                     : "空格 继续 · F 跳过　")
                 + (call.Index + 1) + " / " + call.Count;
+
+            // 每翻一页念一次；没有配音时 PlayVoice 自己会安静地返回 0
+            PlayVoice(line.Id);
         }
 
         /// <summary>
@@ -4128,6 +4842,44 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // 贝利亚之夜：替代永夜那一行，显示撑了多久、她在不在场
+            if (gm.BelialMode)
+            {
+                var belial = gm.Belial;
+
+                if (belial == null || gm.Clock == null)
+                {
+                    if (_endlessText.gameObject.activeSelf)
+                    {
+                        _endlessText.gameObject.SetActive(false);
+                    }
+
+                    return;
+                }
+
+                if (!_endlessText.gameObject.activeSelf)
+                {
+                    _endlessText.gameObject.SetActive(true);
+                }
+
+                var line = new StringBuilder();
+                line.Append("贝利亚之夜 · 已撑 ").Append(belial.Hours).Append(" / ")
+                    .Append(BelialNight.TotalHours).Append(" 小时");
+
+                if (belial.BelialActive)
+                {
+                    line.Append(" · 她在场");
+                }
+                else
+                {
+                    line.Append(" · 前面还有 ").Append(BelialNight.PhaseTwoHour - belial.Hours).Append(" 小时");
+                }
+
+                line.Append(" · 支援 ").Append(belial.Picks).Append("/").Append(BelialNight.MaxPicks);
+                _endlessText.text = line.ToString();
+                return;
+            }
+
             var recharge = gm.Recharge;
             if (!gm.EndlessMode || recharge == null || gm.Clock == null)
             {
@@ -4153,6 +4905,7 @@ namespace NailongFNAF.UI
             sb.Append(" · ").Append(Mathf.CeilToInt(recharge.SecondsToNext)).Append(" 秒后补 ");
             sb.Append(Mathf.RoundToInt(recharge.NextGain)).Append("%");
             sb.Append(" · 危险 ").Append(danger).Append("/").Append(NightCount);
+            sb.Append(" · 得分 ").Append(gm.Score != null ? gm.Score.Score : 0);
             if (overload)
             {
                 sb.Append("（过载）");
@@ -4635,6 +5388,10 @@ namespace NailongFNAF.UI
             _enemySideRight = MakeWorldSprite("EnemySideRight", DoorWorldCenterRight, SpriteSortEnemy);
             _enemyFront = MakeWorldSprite("EnemyFront", FrontDoorCenter, SpriteSortEnemy);
 
+            // 贝利亚本人：站在左右门外的同一处，但只在第二阶段露面（画在最上层）
+            _belialLeft = MakeWorldSprite("BelialLeft", DoorWorldCenterLeft, SpriteSortEnemy + 2);
+            _belialRight = MakeWorldSprite("BelialRight", DoorWorldCenterRight, SpriteSortEnemy + 2);
+
 
             // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
             _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
@@ -4651,6 +5408,8 @@ namespace NailongFNAF.UI
             _enemySideRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
             // 正门口噜噜（z=+3.0）面朝房间中心（-z）：sprite 默认朝 +z，转 180°。
             _enemyFront.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+            _belialLeft.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            _belialRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
 
             if (_doorFaceLeft != null)
             {
@@ -5106,11 +5865,39 @@ namespace NailongFNAF.UI
                 new Vector2(40f, 62f), new Vector2(110f, 30f));
 
             // 永夜模式那一行（普通模式直接隐藏）：摆在电量条正上方
+            _supportTip = MakeText(hud.transform, "SupportTip", string.Empty,
+                TextAnchor.LowerCenter, 24, new Color(0.62f, 0.86f, 0.72f));
+            PlaceRect((RectTransform)_supportTip.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 424f), new Vector2(1200f, 40f));
+            _supportTip.gameObject.SetActive(false);
+
+            _belialHint = MakeText(hud.transform, "BelialHint", string.Empty,
+                TextAnchor.MiddleCenter, 30, new Color(0.95f, 0.72f, 0.42f));
+            PlaceRect((RectTransform)_belialHint.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 332f), new Vector2(1100f, 46f));
+            _belialHint.gameObject.SetActive(false);
+
             _endlessText = MakeText(hud.transform, "EndlessText", string.Empty,
                 TextAnchor.LowerLeft, 24, new Color(0.75f, 0.88f, 0.75f));
             PlaceRect(_endlessText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(40f, 150f), new Vector2(760f, 34f));
             _endlessText.gameObject.SetActive(false);
+
+            // 袋鼠留下的外卖（袋鼠走人才出现）：点一下补 2% 电
+            _deliveryButton = MakeButton(hud.transform, "DeliveryButton",
+                "门口有份外卖", new Vector2(0f, 0f), new Vector2(250f, 198f),
+                new Vector2(400f, 68f), OnDeliveryClicked);
+            _deliveryLabel = _deliveryButton.GetComponentInChildren<Text>();
+            _deliveryButton.gameObject.SetActive(false);
+
+            // 敲门声：单独一条轨
+            var knockGo = new GameObject("KnockAudio");
+            knockGo.transform.SetParent(transform, false);
+            _knockSource = knockGo.AddComponent<AudioSource>();
+            _knockSource.playOnAwake = false;
+            _knockSource.loop = false;
+            _knockSource.spatialBlend = 0f;
+            _knockSource.volume = 0.75f;
 
             _usageBars = new Image[PowerSystem.MaxUsageLevel];
             for (int i = 0; i < _usageBars.Length; i++)
@@ -5568,6 +6355,27 @@ namespace NailongFNAF.UI
             posLabel.alignment = TextAnchor.MiddleLeft;
 
             BuildDebugEnemyPositionRows(panel.transform, -104f);
+
+            // ── 模式入口（开发用）──
+            // 正式入口在标题页，按解锁条件才露；调试时不该被那个条件卡住。
+            Text modeLabel = MakeLabel(panel.transform, "模式：", 17,
+                new Color(0.9f, 0.75f, 0.95f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(620f, -104f), new Vector2(52f, 34f));
+            modeLabel.alignment = TextAnchor.MiddleLeft;
+
+            MakeDebugButton(panel.transform, "贝利亚之夜", 680f, -104f, 150f, 34f,
+                DebugEnterBelial);
+            MakeDebugButton(panel.transform, "回故事模式", 840f, -104f, 150f, 34f,
+                DebugLeaveBelial);
+
+            // ── 时间推进（调试）──
+            // 永夜要撑十几分钟才看得出分数曲线，贝利亚要两小时才换阶段，
+            // 真等不现实，所以按一下往前跳一段。
+            MakeDebugButton(panel.transform, "+2 分钟", 680f, -146f, 150f, 34f,
+                DebugAdvanceTwoMinutes);
+            MakeDebugButton(panel.transform, "+2 小时", 840f, -146f, 150f, 34f,
+                DebugAdvanceTwoHours);
         }
 
         /// <summary>
@@ -5893,6 +6701,107 @@ namespace NailongFNAF.UI
             ClearJumpscare();
             gm.MarkCaught();
             OnEnemyAttacked(id);
+        }
+
+        /// <summary>
+        /// 调试用：直接进「贝利亚之夜」。
+        ///
+        /// 正式入口在标题页，要等解锁条件满足才露（`BelialUnlock`）；
+        /// 但调试的时候不该被那个条件卡住 —— 而且这个模式现在还没做完整，
+        /// 每次都要先打五夜才能看一眼也不现实。
+        ///
+        /// 难度先按第 3 夜起手（中段），模式内部自己按小时往上爬。
+        /// </summary>
+        private void DebugEnterBelial()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            gm.SetEndless(false);
+            gm.SetBelial(true);
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.SetNight(3);
+            }
+
+            gm.Restart();
+            ClearJumpscare();
+            CloseOverlaysForModeSwitch();
+        }
+
+        /// <summary>调试用：时间往前跳 2 分钟。</summary>
+        private void DebugAdvanceTwoMinutes()
+        {
+            var gm = GameManager.Instance;
+
+            if (gm != null)
+            {
+                gm.DebugAdvanceGameSeconds(120f);
+            }
+        }
+
+        /// <summary>调试用：时间往前跳 2 个游戏小时（按当前时钟的每小时秒数换算）。</summary>
+        private void DebugAdvanceTwoHours()
+        {
+            var gm = GameManager.Instance;
+
+            if (gm == null || gm.Clock == null)
+            {
+                return;
+            }
+
+            gm.DebugAdvanceGameSeconds(gm.Clock.SecondsPerHour * 2f);
+        }
+
+        /// <summary>调试用：从贝利亚之夜退回普通故事模式（下一步重新开局）。</summary>
+        private void DebugLeaveBelial()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null)
+            {
+                return;
+            }
+
+            gm.SetBelial(false);
+            gm.SetEndless(false);
+
+            if (_enemyDirector != null)
+            {
+                _enemyDirector.SetNight(0);
+            }
+
+            gm.Restart();
+            ClearJumpscare();
+            CloseOverlaysForModeSwitch();
+        }
+
+        /// <summary>切模式时把上一层留下的面板/暂停全部收掉，否则会卡在黑屏或 0 倍速。</summary>
+        private void CloseOverlaysForModeSwitch()
+        {
+            if (_menuRoot != null)
+            {
+                _menuRoot.SetActive(false);
+            }
+
+            if (_endView != null)
+            {
+                _endView.SetActive(false);
+            }
+
+            if (_pauseView != null)
+            {
+                _pauseView.SetActive(false);
+            }
+
+            _menuOpen = false;
+            _paused = false;
+            _endShown = false;
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
         }
 
         private void DebugSetPower(int percent)

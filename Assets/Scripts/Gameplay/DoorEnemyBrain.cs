@@ -31,6 +31,37 @@ namespace NailongFNAF.Gameplay
         /// <summary>没按角色指定时的兜底窗口 —— 取原版邦尼/奇卡那一档（≈5 秒）。</summary>
         public const float DefaultDoorGraceSeconds = BonnieDoorWindowSeconds;
 
+        /// <summary>
+        /// 黑化之后必须「开灯 + 关门」才拦得住 —— 光关门它照样会进来。
+        /// 贝利亚之夜第一阶段起为 true（除非拿到「谷维素」把它放宽）。
+        /// </summary>
+        public bool RequireLightToBlock { get; set; }
+
+        /// <summary>
+        /// 「读条」时长倍率（贝利亚之夜的「数到三」给 1.35）—— 大于 1 表示给玩家更多反应时间。
+        /// 只作用于门口那一格，不改变它在走廊里走的节奏。
+        /// </summary>
+        public float TelegraphMultiplier { get; set; } = 1f;
+
+        /// <summary>门口的额外宽限秒数（贝利亚之夜的「去甲肾上腺素」/「喹硫平」）。</summary>
+        public float GraceBonusSeconds { get; set; }
+
+        /// <summary>把倍率套进 <see cref="DoorGraceSeconds"/> 之后真正用的窗口长度。</summary>
+        public float DoorWindow
+        {
+            get
+            {
+                float window = DoorGraceSeconds + GraceBonusSeconds;
+
+                if (window < 0f)
+                {
+                    window = 0f;
+                }
+
+                return TelegraphMultiplier > 0f ? window * TelegraphMultiplier : window;
+            }
+        }
+
         /// <summary>没配置机位路径时的默认阶梯终点（远处 → 走廊 → 门口）。</summary>
         public const int DefaultMaxStage = 2;
 
@@ -52,6 +83,27 @@ namespace NailongFNAF.Gameplay
 
         /// <summary>已经站在门口多久（秒）。派生类（奶龙换机位时）要能清零，所以是 protected set。</summary>
         public float DoorTimer { get; protected set; }
+
+        /// <summary>
+        /// 这次站在门口一共敲过几次门（被关着的门挡住时敲）。
+        ///
+        /// 只有袋鼠会敲 —— 表现层读到这个计数就去放敲门声，
+        /// 并在它走人之后往门口放一份外卖（见 <see cref="DeliveryDrop"/>）。
+        /// 纯逻辑类不认识音频和道具，这里只记账。
+        /// </summary>
+        public int KnocksIssued { get; private set; }
+
+        /// <summary>取走一次「敲门」记录。表现层每帧问一次，没记录就返回 false。</summary>
+        public bool ConsumeKnock()
+        {
+            if (KnocksIssued <= 0)
+            {
+                return false;
+            }
+
+            KnocksIssued--;
+            return true;
+        }
 
         /// <summary>
         /// 「最后一搏」窗口的**基准时长**（秒）—— 活动度 0 时的值。
@@ -105,7 +157,7 @@ namespace NailongFNAF.Gameplay
         /// <summary>是否已经进入「最后一搏」阶段（移动机会攒满了）。</summary>
         public bool InLastChance
         {
-            get { return Stage >= MaxStage && DoorTimer >= DoorGraceSeconds; }
+            get { return Stage >= MaxStage && DoorTimer >= DoorWindow; }
         }
 
         /// <summary>
@@ -199,6 +251,12 @@ namespace NailongFNAF.Gameplay
                 }
             }
         }
+        /// <summary>当前机位路径的副本（「今天出门了」要按它换格子，别直接改内部数组）。</summary>
+        public int[] CameraPath
+        {
+            get { return _cameraPath != null ? (int[])_cameraPath.Clone() : null; }
+        }
+
         /// <summary>
         /// 当前停在哪个监控机位（下标）。**站在门口**（<see cref="Stage"/> 到顶）、
         /// 或没配路径时返回 -1 —— 两者都不属于任何机位。
@@ -343,11 +401,11 @@ namespace NailongFNAF.Gameplay
             // 必须在攒移动机会之前更新，否则「攒满那一帧门刚好打开」会漏判。
             bool doorClosedNow = ctx.IsDoorClosed(Side);
 
-            if (doorClosedNow && !_doorWasClosed && DoorTimer >= DoorGraceSeconds)
+            if (doorClosedNow && !_doorWasClosed && DoorTimer >= DoorWindow)
             {
                 // 已经在最后一搏里、门又关上 → 不重置，继续走（下面正常累计）
             }
-            else if (!doorClosedNow && _doorWasClosed && DoorTimer >= DoorGraceSeconds)
+            else if (!doorClosedNow && _doorWasClosed && DoorTimer >= DoorWindow)
             {
                 // 门刚被打开 → 标记「下一帧清零重计」
                 _doorWasOpenedWhileLastChance = true;
@@ -359,24 +417,26 @@ namespace NailongFNAF.Gameplay
             //
             // ⚠️ 不能写成「攒满后只要门开着就动手」：那样玩家在最后一搏中途开门，
             // 下一帧就会被判定动手，和「开门重置 2 秒」的设计自相矛盾。
-            bool justFilled = DoorTimer < DoorGraceSeconds;
+            bool justFilled = DoorTimer < DoorWindow;
 
             if (justFilled)
             {
-                float need = DoorGraceSeconds - DoorTimer;
+                float need = DoorWindow - DoorTimer;
                 float spend = remaining < need ? remaining : need;
 
                 DoorTimer += spend;
                 remaining -= spend;
 
                 // 还在攒 —— 门开还是门关都先站着，不做决定
-                if (DoorTimer < DoorGraceSeconds)
+                if (DoorTimer < DoorWindow)
                 {
                     return;
                 }
             }
 
-            bool closed = ctx.IsDoorClosed(Side);
+            // 黑化怪：关着的门不算数，必须同时照着灯
+            bool closed = ctx.IsDoorClosed(Side)
+                && (!RequireLightToBlock || ctx.IsLightOn(Side));
 
             // ── 攒满的那一刻：门开着就**立刻动手** ──
             //
@@ -386,6 +446,13 @@ namespace NailongFNAF.Gameplay
             {
                 IsAttacking = true;
                 return;
+            }
+
+            // ── 攒满的那一刻：门关着 → 它被挡在外面，敲两下门 ──
+            // 只有真的走到门口（Stage 到顶）才会进到这段，走廊里不算。
+            if (justFilled && closed)
+            {
+                KnocksIssued++;
             }
 
             // ── 门关着：进入「最后一搏」2 秒 ──
@@ -418,6 +485,7 @@ namespace NailongFNAF.Gameplay
             // Stage 归零（看着像走了）、IsAttacking 却是 true（下一帧立刻判突破），
             // 玩家会看到它明明退了、却照样跳杀。
             LastChanceTimer = 0f;
+            NoteBlocked();
             Retreat();
         }
 

@@ -101,6 +101,31 @@ namespace NailongFNAF.Gameplay
             return Culpable ? LineFor(Fault) : null;
         }
 
+        /// <summary>道歉那句的配音 id（Assets/Resources/Voice/apology_*.mp3）；不该背锅时空串。</summary>
+        public string CulpableLineId()
+        {
+            return Culpable ? IdFor(Fault) : string.Empty;
+        }
+
+        /// <summary>故障 → 配音 id。三条台词按「抢监控 / 关灯 / 偷加耗电」固定顺序编号。</summary>
+        public static string IdFor(NaibaoFault fault)
+        {
+            switch (fault)
+            {
+                case NaibaoFault.MonitorGrab:
+                    return "apology_1";
+
+                case NaibaoFault.LightOff:
+                    return "apology_2";
+
+                case NaibaoFault.UsageSpike:
+                    return "apology_3";
+
+                default:
+                    return string.Empty;
+            }
+        }
+
         /// <summary>这个故障的判定窗口有多长。</summary>
         public static float WindowOf(NaibaoFault fault)
         {

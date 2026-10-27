@@ -35,6 +35,12 @@ namespace NailongFNAF.Gameplay
         private int[] _cameraPath;
 
         /// <summary>配它的推进路径（海盗湾 → 餐厅 → 正门）。</summary>
+        /// <summary>当前机位路径的副本（「今天出门了」换格子用）。</summary>
+        public int[] CameraPath
+        {
+            get { return _cameraPath != null ? (int[])_cameraPath.Clone() : null; }
+        }
+
         public void SetCameraPath(int[] path)
         {
             _cameraPath = (path != null && path.Length > 0) ? (int[])path.Clone() : null;
@@ -221,6 +227,7 @@ namespace NailongFNAF.Gameplay
 
                 if (FlashCount >= FlashesToRetreat)
                 {
+                    NoteBlocked();
                     Retreat();
                     return;
                 }

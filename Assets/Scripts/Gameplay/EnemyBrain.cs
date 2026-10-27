@@ -122,6 +122,29 @@ namespace NailongFNAF.Gameplay
             get { return 2; }
         }
 
+        private int _blocksPending;
+
+        /// <summary>这一夜挡住过多少次（永夜模式计分用）。</summary>
+        public int Blocks { get; private set; }
+
+        /// <summary>
+        /// 刚从门口被挡回去一次 —— 子类只在「确实挡住」的分支里调，
+        /// 别在 Retreat() 里调：退走的原因不止「被挡」一种。
+        /// </summary>
+        protected void NoteBlocked()
+        {
+            Blocks++;
+            _blocksPending++;
+        }
+
+        /// <summary>调度层每帧取走增量（取完清零）。</summary>
+        public int ConsumeBlocks()
+        {
+            int count = _blocksPending;
+            _blocksPending = 0;
+            return count;
+        }
+
         /// <summary>退回起点。子类在门口 / 门外被赶走时调用。</summary>
         public virtual void Retreat()
         {

@@ -3,6 +3,7 @@ using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Video;
 
 namespace NailongFNAF.UI
 {
@@ -34,6 +35,9 @@ namespace NailongFNAF.UI
 
         /// <summary>永夜模式的纪录存档键：存「撑过的真实秒数」，越大越好。</summary>
         public const string EndlessBestKey = "nailong.endlessBest";
+
+        /// <summary>永夜模式历史最高分。</summary>
+        public const string EndlessBestScoreKey = "nailong.endlessBestScore";
 
         /// <summary>永夜模式的进度存档键：一行文本，格式见 <see cref="EternalNightSave"/>。</summary>
         public const string EternalSaveKey = "nailong.eternalSave";
@@ -73,6 +77,8 @@ namespace NailongFNAF.UI
         private CustomNightConfig _customConfig;
 
         // 成就界面：计数 + 每行的名称 / 描述（顺序照 AchievementCatalog.All）
+        private readonly Text[] _nightFragmentTexts = new Text[NightCount];
+        private Text _achvFragmentText;
         private Text _achvCountText;
         private readonly Text[] _achvLineTexts = new Text[AchievementCatalog.All.Length];
 
@@ -85,6 +91,13 @@ namespace NailongFNAF.UI
 
         /// <summary>念那句台词的语音轨（素材可选，没有就只显示字幕）。</summary>
         private AudioSource _endQuoteAudio;
+
+        /// <summary>
+        /// 放 mp4 语音用的（只取音轨，不渲染画面）。
+        /// 见 <see cref="BuildEndView"/> 里那段注释：微信/QQ 导出的「.mp3」
+        /// 常常其实是 mp4 容器，Unity 只会把它导成 VideoClip。
+        /// </summary>
+        private VideoPlayer _endQuoteVideo;
         private Button _endPrimaryButton;
         private Text _endPrimaryLabel;
 
@@ -265,11 +278,11 @@ namespace NailongFNAF.UI
             _levelView = MakeFullScreenPanel("LevelView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
 
             MakeLabel(_levelView.transform, "选择夜晚", 52, new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 90f));
+                new Vector2(0.5f, 0.88f), new Vector2(0.5f, 0.88f), new Vector2(0f, 0f), new Vector2(900f, 90f));
 
-            MakeLabel(_levelView.transform, "灰色的夜还没解锁 —— 通关前一晚会点亮下一夜。", 20,
-                new Color(0.55f, 0.55f, 0.6f),
-                new Vector2(0.5f, 0.71f), new Vector2(0.5f, 0.71f), new Vector2(0f, 0f), new Vector2(1100f, 40f));
+            MakeLabel(_levelView.transform, "通关前一晚，点亮下一夜。", 26,
+                new Color(0.84f, 0.85f, 0.89f),
+                new Vector2(0.5f, 0.79f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1100f, 44f));
 
             // 6 个夜晚按钮排两行。⚠️ 按钮 320px 宽 ≈ 画布 0.20，列距必须 ≥ 0.21 才不互相压边；
             // 锁着的按钮**不加「未解锁」后缀** —— 字一长就撑破按钮、和隔壁撞在一起，
@@ -279,8 +292,10 @@ namespace NailongFNAF.UI
                 int night = i;
                 int col = i % 3;
                 int row = i / 3;
-                float x = (col - 1) * 0.21f;
-                float y = 0.56f - row * 0.14f;
+                float x = (col - 1) * 0.27f;
+                float y = 0.65f - row * 0.29f;
+                MakeMenuCard(_levelView.transform, "NightCard" + i,
+                    new Vector2(0.5f + x, y - 0.065f), new Vector2(470f, 270f));
 
                 bool unlocked = i <= UnlockedNight;
                 string label = NightName(i);
@@ -289,10 +304,22 @@ namespace NailongFNAF.UI
                     new Vector2(0.5f + x, y),
                     unlocked ? (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)) : null);
                 btn.interactable = unlocked;
+
+                // 独立于开局按钮：已解锁的夜晚可在局外慢慢读，不打断防守。
+                Text fragment = MakeLabel(_levelView.transform, unlocked ? StoryFragments.Night(i) : "……", 28,
+                    new Color(0.91f, 0.90f, 0.85f), new Vector2(0.5f + x, y - 0.115f),
+                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(414f, 132f));
+                fragment.horizontalOverflow = HorizontalWrapMode.Wrap;
+                fragment.verticalOverflow = VerticalWrapMode.Truncate;
+                fragment.lineSpacing = 1.15f;
+                fragment.alignment = TextAnchor.UpperLeft;
+                _nightFragmentTexts[i] = fragment;
+                fragment.name = "NightFragment" + i;
+                fragment.raycastTarget = false;
             }
 
             MakeMenuButton(_levelView.transform, "返回", Vector2.zero,
-                new Vector2(0.5f, 0.16f), OpenTitle);
+                new Vector2(0.5f, 0.09f), OpenTitle);
         }
 
         /// <summary>
@@ -517,34 +544,119 @@ namespace NailongFNAF.UI
 
             MakeLabel(_achvView.transform, "成就", 52, new Color(0.95f, 0.85f, 0.3f),
                 new Vector2(0.5f, 0.86f), new Vector2(0.5f, 0.86f), new Vector2(0f, 0f), new Vector2(900f, 80f));
-            _achvCountText = MakeLabel(_achvView.transform, "", 22, new Color(0.7f, 0.7f, 0.75f),
+            _achvCountText = MakeLabel(_achvView.transform, "", 28, new Color(0.85f, 0.87f, 0.92f),
                 new Vector2(0.5f, 0.80f), new Vector2(0.5f, 0.80f), new Vector2(0f, 0f), new Vector2(900f, 40f));
 
-            int rowsPerColumn = (AchievementCatalog.All.Length + 1) / 2;
+            // 固定阅读窗口，条目在内部滚动；底部旁白与返回不受滚动影响。
+            var scrollGo = new GameObject("AchievementScroll", typeof(RectTransform), typeof(ScrollRect));
+            scrollGo.transform.SetParent(_achvView.transform, false);
+            var scrollRect = (RectTransform)scrollGo.transform;
+            scrollRect.anchorMin = new Vector2(0.10f, 0.23f);
+            scrollRect.anchorMax = new Vector2(0.90f, 0.76f);
+            scrollRect.offsetMin = scrollRect.offsetMax = Vector2.zero;
+
+            var viewportGo = new GameObject("Viewport", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image), typeof(RectMask2D));
+            viewportGo.transform.SetParent(scrollGo.transform, false);
+            var viewport = (RectTransform)viewportGo.transform;
+            viewport.anchorMin = Vector2.zero;
+            viewport.anchorMax = Vector2.one;
+            viewport.offsetMin = viewport.offsetMax = Vector2.zero;
+            viewportGo.GetComponent<Image>().color = new Color(0.025f, 0.035f, 0.055f, 1f);
+
+            var contentGo = new GameObject("Content", typeof(RectTransform));
+            contentGo.transform.SetParent(viewport, false);
+            var content = (RectTransform)contentGo.transform;
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = Vector2.one;
+            content.pivot = new Vector2(0.5f, 1f);
+            const float rowHeight = 142f;
+            content.sizeDelta = new Vector2(0f, AchievementCatalog.All.Length * rowHeight + 12f);
+            content.anchoredPosition = Vector2.zero;
+
+            var scroll = scrollGo.GetComponent<ScrollRect>();
+            scroll.viewport = viewport;
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 55f;
+            scroll.inertia = true;
+
+            viewport.offsetMax = new Vector2(-28f, 0f);
+            Image track = MakeMenuCard(scrollGo.transform, "Scrollbar", new Vector2(1f, 0.5f), Vector2.zero);
+            var trackRect = (RectTransform)track.transform;
+            trackRect.anchorMin = new Vector2(1f, 0f);
+            trackRect.anchorMax = Vector2.one;
+            trackRect.pivot = new Vector2(1f, 0.5f);
+            trackRect.sizeDelta = new Vector2(18f, 0f);
+            trackRect.anchoredPosition = Vector2.zero;
+            Image handle = MakeMenuCard(track.transform, "Handle", new Vector2(0.5f, 0.5f), Vector2.zero);
+            var handleRect = (RectTransform)handle.transform;
+            handleRect.anchorMin = Vector2.zero;
+            handleRect.anchorMax = Vector2.one;
+            handleRect.offsetMin = handleRect.offsetMax = Vector2.zero;
+            handle.color = new Color(0.85f, 0.71f, 0.37f, 1f);
+            var scrollbar = track.gameObject.AddComponent<Scrollbar>();
+            scrollbar.handleRect = handleRect;
+            scrollbar.targetGraphic = handle;
+            scrollbar.direction = Scrollbar.Direction.BottomToTop;
+            scroll.verticalScrollbar = scrollbar;
 
             for (int i = 0; i < AchievementCatalog.All.Length; i++)
             {
-                int column = i < rowsPerColumn ? 0 : 1;
-                int row = i % rowsPerColumn;
-
-                float x = column == 0 ? 0.26f : 0.74f;
-                float y = 0.66f - row * 0.050f;
-
-                Text line = MakeLabel(_achvView.transform, "", 16, Color.white,
-                    new Vector2(x, y), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(720f, 34f));
+                Image card = MakeMenuCard(content, "AchievementCard" + i,
+                    new Vector2(0.5f, 1f), new Vector2(0f, 130f));
+                var cardRect = (RectTransform)card.transform;
+                cardRect.anchorMin = new Vector2(0f, 1f);
+                cardRect.anchorMax = Vector2.one;
+                cardRect.sizeDelta = new Vector2(-24f, 130f);
+                cardRect.anchoredPosition = new Vector2(0f, -12f - i * rowHeight - 65f);
+                Text line = MakeLabel(card.transform, "", 38, Color.white,
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
+                line.rectTransform.anchorMin = Vector2.zero;
+                line.rectTransform.anchorMax = Vector2.one;
+                line.rectTransform.offsetMin = new Vector2(32f, 12f);
+                line.rectTransform.offsetMax = new Vector2(-32f, -12f);
+                line.horizontalOverflow = HorizontalWrapMode.Wrap;
+                line.verticalOverflow = VerticalWrapMode.Truncate;
+                line.alignment = TextAnchor.MiddleLeft;
+                line.supportRichText = true;
                 line.raycastTarget = false;
+                int achievementIndex = i;
+                var target = card.gameObject.AddComponent<Button>();
+                target.targetGraphic = card;
+                SetMenuButtonColors(target);
+                target.onClick.AddListener(() => ShowAchievementFragment(achievementIndex));
                 _achvLineTexts[i] = line;
             }
 
             MakeMenuButton(_achvView.transform, "返回", Vector2.zero,
-                new Vector2(0.5f, 0.10f), OpenTitle);
+                new Vector2(0.5f, 0.045f), OpenTitle);
 
+            Image fragmentCard = MakeMenuCard(_achvView.transform, "AchievementMemory",
+                new Vector2(0.5f, 0.12f), new Vector2(1450f, 92f));
+            _achvFragmentText = MakeLabel(fragmentCard.transform, "点一下已解锁的成就。", 28,
+                new Color(1f, 0.90f, 0.66f), new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1380f, 88f));
+            _achvFragmentText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _achvFragmentText.raycastTarget = false;
             _achvView.SetActive(false);
+        }
+
+        private void ShowAchievementFragment(int index)
+        {
+            if (index < 0 || index >= AchievementCatalog.All.Length) return;
+            AchievementCatalog.Def def = AchievementCatalog.All[index];
+            _achvFragmentText.text = !AchievementStore.IsUnlocked(def.Id)
+                ? "这一页还没有留下字。"
+                : (string.IsNullOrEmpty(def.Flavor) ? "这一页暂时没有别的字。" : def.Flavor);
         }
 
         /// <summary>成就界面每次打开都刷新一遍（可能在别的局里刚解锁过）。</summary>
         private void RefreshAchievementsView()
         {
+            _achvFragmentText.text = "点一下已解锁的成就。";
             _achvCountText.text = "已解锁 " + AchievementStore.UnlockedCount()
                 + " / " + AchievementCatalog.All.Length;
 
@@ -557,10 +669,11 @@ namespace NailongFNAF.UI
                 string title = masked ? "???" : def.Title;
                 string desc = masked ? "???" : def.Description;
 
-                _achvLineTexts[i].text = (unlocked ? "★ " : "☆ ") + title + "   ·   " + desc;
+                _achvLineTexts[i].text = (unlocked ? "★ " : "☆ ") + "<b>" + title + "</b>"
+                    + "\n<size=30>" + desc + "</size>";
                 _achvLineTexts[i].color = unlocked
-                    ? new Color(0.95f, 0.85f, 0.3f)
-                    : (masked ? new Color(0.38f, 0.38f, 0.42f) : new Color(0.5f, 0.5f, 0.56f));
+                    ? new Color(1f, 0.88f, 0.53f)
+                    : (masked ? new Color(0.67f, 0.71f, 0.79f) : new Color(0.88f, 0.91f, 0.96f));
             }
         }
 
@@ -591,14 +704,33 @@ namespace NailongFNAF.UI
             MakeMenuButton(_endView.transform, "返回标题", Vector2.zero,
                 new Vector2(0.5f, 0.30f), OpenTitle);
 
-            // 台词语音轨：素材缺失时静默，不影响任何流程
+            // 台词语音轨：素材缺失时静默，不影响任何流程。
+            //
+            // ⚠️ **挂在 canvas 上，别挂在 _endView 下** ——
+            // _endView 平时是未激活的，而未激活的 GameObject 上
+            // AudioSource 和 VideoPlayer 都不会播放。挂 canvas 上则随调随响，
+            // 「离开结算页就停」由 StopEndQuoteVoice() 负责。
             var voiceGo = new GameObject("EndQuoteVoice");
-            voiceGo.transform.SetParent(_endView.transform, false);
+            voiceGo.transform.SetParent(_canvas.transform, false);
             _endQuoteAudio = voiceGo.AddComponent<AudioSource>();
             _endQuoteAudio.playOnAwake = false;
             _endQuoteAudio.loop = false;
             _endQuoteAudio.spatialBlend = 0f;
             _endQuoteAudio.volume = 0.95f;
+
+            // 有些语音是 **mp4 容器装的 AAC**（微信 / QQ 录音导出来常常是这种，
+            // 扩展名却写着 .mp3）—— Unity 的音频导入器不认 mp4，只会把它当
+            // VideoClip 导入。所以这里再挂一个 VideoPlayer，**只用它的音轨**：
+            // 不渲染画面（APIOnly），声音输出到上面那个 AudioSource，
+            // 这样两种素材（真音频 / mp4）都能放。
+            _endQuoteVideo = voiceGo.AddComponent<VideoPlayer>();
+            _endQuoteVideo.playOnAwake = false;
+            _endQuoteVideo.isLooping = false;
+            _endQuoteVideo.source = VideoSource.VideoClip;
+            _endQuoteVideo.renderMode = VideoRenderMode.APIOnly;
+            _endQuoteVideo.audioOutputMode = VideoAudioOutputMode.AudioSource;
+            _endQuoteVideo.controlledAudioTrackCount = 1;
+            _endQuoteVideo.SetTargetAudioSource(0, _endQuoteAudio);
 
             BuildEndNaibaoApology();
         }
@@ -1088,6 +1220,12 @@ namespace NailongFNAF.UI
 
         private void RefreshLevelButtons()
         {
+            for (int i = 0; i < NightCount; i++)
+            {
+                if (_nightFragmentTexts[i] != null)
+                    _nightFragmentTexts[i].text = i <= UnlockedNight ? StoryFragments.Night(i) : "……";
+            }
+
             var buttons = _levelView.GetComponentsInChildren<Button>(true);
             int index = 0;
             for (int i = 0; i < NightCount; i++)
@@ -1263,6 +1401,12 @@ namespace NailongFNAF.UI
             {
                 PlayerPrefs.SetInt(CustomUnlockedKey, 1);
                 PlayerPrefs.Save();
+            }
+
+            // 通关第 5 夜也是「贝利亚之夜」的第一个解锁条件（另一个是听完一通电话）。
+            if (wasLast)
+            {
+                BelialUnlock.MarkNight5Cleared();
             }
 
             string achievementLine = CheckWinAchievements(gm, current, custom, wasLast);
@@ -1444,6 +1588,12 @@ namespace NailongFNAF.UI
             bool custom = _enemyDirector != null && _enemyDirector.CustomActive;
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
 
+            // 被咬死的次数是「贝利亚之夜」的第一个解锁条件（只算前五夜，自定义夜不算）。
+            if (!custom)
+            {
+                BelialUnlock.NoteDeath();
+            }
+
             _endTitleText.text = "你被抓住了";
             _endBodyText.text = (custom
                 ? "自定义夜 失败 —— 再来一次。"
@@ -1451,9 +1601,11 @@ namespace NailongFNAF.UI
             _endPrimaryLabel.text = custom ? "重试" : "重试本夜";
             _endPrimaryButton.interactable = true;
 
-            // 跳杀完，那只敌人说一句话
-            _endQuoteText.text = QuoteFor(_jumpscareEnemy);
-            PlayEndQuoteVoice(_jumpscareEnemy);
+            // 跳杀完，那只敌人说一句话。
+            // 文本和语音用**同一次抽签**的结果 —— 分两次抽就会各说各的。
+            int quoteIndex;
+            _endQuoteText.text = QuoteFor(_jumpscareEnemy, out quoteIndex);
+            PlayEndQuoteVoice(_jumpscareEnemy, quoteIndex);
 
             // 这局要算她的锅，她在左下角道个歉
             ShowEndNaibaoApology(gm);
@@ -1472,12 +1624,22 @@ namespace NailongFNAF.UI
             int best = EndlessBestSeconds;
 
             bool isRecord = survived > best;
+            int score = gm.Score != null ? gm.Score.Score : EndlessScore.ScoreFor(survived, 0, secondsPerHour);
+            int bestScore = EndlessBestScore;
+
+            if (score > bestScore)
+            {
+                PlayerPrefs.SetInt(EndlessBestScoreKey, score);
+                bestScore = score;
+            }
+
             if (isRecord)
             {
                 PlayerPrefs.SetInt(EndlessBestKey, survived);
-                PlayerPrefs.Save();
                 best = survived;
             }
+
+            PlayerPrefs.Save();
 
             // 永夜成就：一局撑过 12 小时
             var newly = new System.Collections.Generic.List<AchievementCatalog.Def>();
@@ -1491,13 +1653,17 @@ namespace NailongFNAF.UI
             _endTitleText.text = isRecord ? "新纪录！" : "永夜模式结束";
             _endBodyText.text = "撑过 " + FormatSpan(survived, secondsPerHour)
                 + (isRecord ? " · 这是你的最好成绩" : " · 最佳 " + FormatSpan(best, secondsPerHour))
+                + " · 得分 " + score + " · 挡了 " + (gm.Score != null ? gm.Score.Blocks : 0)
+                + " 次 · 历史最高 " + bestScore
                 + achievementLine;
+
             _endPrimaryLabel.text = "再来一局";
             _endPrimaryButton.interactable = true;
 
             // 永夜模式死法多半是被抓，台词照旧；没抓到就没台词
-            _endQuoteText.text = QuoteFor(_jumpscareEnemy);
-            PlayEndQuoteVoice(_jumpscareEnemy);
+            int quoteIndex;
+            _endQuoteText.text = QuoteFor(_jumpscareEnemy, out quoteIndex);
+            PlayEndQuoteVoice(_jumpscareEnemy, quoteIndex);
 
             // 永夜模式她不全程在场，一律收起来
             ShowEndNaibaoApology(null);
@@ -1529,6 +1695,16 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>永夜模式最好成绩（真实秒数），没打过就是 0。</summary>
+        /// <summary>永夜模式历史最高分（没有存档就是 0）。</summary>
+        private static int EndlessBestScore
+        {
+            get
+            {
+                int value = PlayerPrefs.GetInt(EndlessBestScoreKey, 0);
+                return value < 0 ? 0 : value;
+            }
+        }
+
         private static int EndlessBestSeconds
         {
             get
@@ -1539,30 +1715,92 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 播「被谁抓到就放谁的语音」。
-        /// 素材放 <c>Assets/Resources/Audio/voice_&lt;代号&gt;</c>
-        /// （如 <c>voice_nailong.mp3</c>），没有就**只显示字幕**，不报错、不影响流程。
-        /// 所以做语音可以一条一条慢慢补，缺哪条就用哪条的文字版。
+        /// 播「被谁抓到、说了哪一句」的语音。
+        ///
+        /// 素材放 <c>Assets/Resources/Audio/</c>，**从精确到笼统两级回退**：
+        /// <list type="number">
+        /// <item><c>voice_&lt;代号&gt;_&lt;句号&gt;</c> —— 如 <c>voice_nailong_1.mp3</c>，
+        ///   对应台词池里第 2 句（下标 0 起，和「11. 编辑跳杀台词」窗口里显示的序号一致）。</item>
+        /// <item><c>voice_&lt;代号&gt;</c> —— 如 <c>voice_nailong.mp3</c>，
+        ///   这一只的通用录音（池子里每句都用它）。</item>
+        /// </list>
+        ///
+        /// 每一级**先试音频、再试 mp4**：微信 / QQ 导出的录音常常是
+        /// 「mp4 容器装的 AAC，扩展名却写着 .mp3」，Unity 的音频导入器不认，
+        /// 只会导成 <see cref="VideoClip"/>。这种就走 VideoPlayer 只放音轨。
+        ///
+        /// 都没有就**只显示字幕**，不报错、不影响流程 ——
+        /// 所以语音可以一条一条慢慢补，缺哪句就用哪句的文字版。
         /// </summary>
-        private void PlayEndQuoteVoice(EnemyId id)
+        private void PlayEndQuoteVoice(EnemyId id, int quoteIndex)
         {
             if (_endQuoteAudio == null)
             {
                 return;
             }
 
-            _endQuoteAudio.Stop();
+            StopEndQuoteVoice();
 
-            string path = "Audio/voice_" + id.Code();
-            AudioClip clip = Resources.Load<AudioClip>(path);
-            if (clip == null)
+            string code = id.Code();
+
+            // ① 按句 —— 字幕和录音严格对应
+            if (quoteIndex >= 0
+                && PlayVoiceAt("Audio/voice_" + code + "_" + quoteIndex))
             {
-                // 还没做语音 —— 静默跳过，字幕照常显示
                 return;
             }
 
-            _endQuoteAudio.clip = clip;
-            _endQuoteAudio.Play();
+            // ② 按敌人 —— 没做逐句录音时的通用版
+            if (PlayVoiceAt("Audio/voice_" + code))
+            {
+                return;
+            }
+
+            // 都没有 —— 静默跳过，字幕照常显示
+        }
+
+        /// <summary>
+        /// 尝试播放某条路径的语音。**先当音频、再当 mp4**。
+        /// 放到了返回 true；两样都不是返回 false（调用方继续回退）。
+        /// </summary>
+        private bool PlayVoiceAt(string path)
+        {
+            // ⓐ 真音频（mp3 / wav / ogg…）
+            AudioClip clip = Resources.Load<AudioClip>(path);
+            if (clip != null)
+            {
+                _endQuoteAudio.clip = clip;
+                _endQuoteAudio.Play();
+                return true;
+            }
+
+            // ⓑ mp4 容器（只取音轨，不渲染画面）
+            if (_endQuoteVideo != null)
+            {
+                VideoClip video = Resources.Load<VideoClip>(path);
+                if (video != null)
+                {
+                    _endQuoteVideo.clip = video;
+                    _endQuoteVideo.Play();
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>停掉台词语音（音频和 mp4 两条路都要停，不然会串音）。</summary>
+        private void StopEndQuoteVoice()
+        {
+            if (_endQuoteAudio != null)
+            {
+                _endQuoteAudio.Stop();
+            }
+
+            if (_endQuoteVideo != null && _endQuoteVideo.isPlaying)
+            {
+                _endQuoteVideo.Stop();
+            }
         }
 
         /// <summary>上一条说出去的台词（按敌人分），用来避免连续两次说同一句。</summary>
@@ -1581,6 +1819,18 @@ namespace NailongFNAF.UI
         /// </summary>
         private static string QuoteFor(EnemyId id)
         {
+            int ignored;
+            return QuoteFor(id, out ignored);
+        }
+
+        /// <summary>
+        /// 同 <see cref="QuoteFor(EnemyId)"/>，但**把抽中的是池子里第几句一起带出来**。
+        ///
+        /// 结算画面拿这个下标去载对应的语音 —— 台词是随机抽的，
+        /// 只有一条通用录音必然会出现「说的和写的不是同一句」。
+        /// </summary>
+        private static string QuoteFor(EnemyId id, out int quoteIndex)
+        {
             DeathQuotes quotes = LoadDeathQuotes();
 
             if (quotes == null)
@@ -1591,7 +1841,8 @@ namespace NailongFNAF.UI
             string previous;
             _lastQuote.TryGetValue(id, out previous);
 
-            string line = quotes.RandomLineFor(id, previous);
+            string line;
+            quoteIndex = quotes.RandomLineIndexFor(id, previous, out line);
 
             if (!string.IsNullOrEmpty(line))
             {
@@ -1636,10 +1887,8 @@ namespace NailongFNAF.UI
             int current = _enemyDirector != null ? _enemyDirector.NightIndex : 0;
             bool wasLast = !custom && current >= NightCount - 1;
 
-            if (_endQuoteAudio != null)
-            {
-                _endQuoteAudio.Stop();
-            }
+            // 音频和 mp4 两条路都要停，不然离开结算页还在说
+            StopEndQuoteVoice();
 
             // 永夜模式只有「死」这一种结局，主按钮就是再来一局
             var gm = GameManager.Instance;
@@ -1731,6 +1980,34 @@ namespace NailongFNAF.UI
         // 小工具（菜单专用，和主文件里的辅助并存）
         // ---------------------------------------------------------------
 
+        private Image MakeMenuCard(Transform parent, string name, Vector2 anchor, Vector2 size)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+            PlaceRect((RectTransform)go.transform, anchor, new Vector2(0.5f, 0.5f), Vector2.zero, size);
+            Image image = go.GetComponent<Image>();
+            image.sprite = MakeRoundedSprite();
+            image.type = Image.Type.Sliced;
+            image.color = new Color(0.085f, 0.11f, 0.16f, 1f);
+            var outline = go.AddComponent<Outline>();
+            outline.effectColor = new Color(0.42f, 0.49f, 0.61f, 0.55f);
+            outline.effectDistance = new Vector2(1f, -1f);
+            return image;
+        }
+
+        private static void SetMenuButtonColors(Button button)
+        {
+            button.transition = Selectable.Transition.ColorTint;
+            ColorBlock colors = button.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1.45f, 1.45f, 1.45f);
+            colors.selectedColor = new Color(1.3f, 1.3f, 1.3f);
+            colors.pressedColor = new Color(0.7f, 0.7f, 0.7f);
+            colors.disabledColor = new Color(0.65f, 0.65f, 0.65f, 1f);
+            colors.fadeDuration = 0.12f;
+            button.colors = colors;
+        }
+
         private GameObject MakeFullScreenPanel(string name, Color color, Transform parent)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
@@ -1781,17 +2058,10 @@ namespace NailongFNAF.UI
                 button.onClick.AddListener(onClick);
             }
 
-            // 悬停 / 按下反馈：缩放 + 变亮。用 colorMultiplier 让 ColorTint 生效。
-            image.type = Image.Type.Simple;
-            button.transition = Selectable.Transition.ColorTint;
-            var colors = button.colors;
-            colors.normalColor = Color.white;
-            colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f);
-            colors.pressedColor = new Color(0.9f, 0.9f, 0.9f);
-            colors.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.55f);
-            button.colors = colors;
+            image.type = Image.Type.Sliced;
+            SetMenuButtonColors(button);
 
-            var labelText = MakeLabel(go.transform, label, 28, Color.white,
+            var labelText = MakeLabel(go.transform, label, 32, new Color(1f, 0.96f, 0.85f),
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(320f, 84f));
             labelText.raycastTarget = false;
 

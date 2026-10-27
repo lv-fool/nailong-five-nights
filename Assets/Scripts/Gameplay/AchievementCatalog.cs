@@ -113,13 +113,33 @@ namespace NailongFNAF.Gameplay
         /// <summary>自定义夜全 20，通关时电量还剩 1% 以上。</summary>
         public const string FullHouse = "full_house";
 
-        /// <summary>全部成就，按展示顺序（普通 9 条 → 彩蛋 10 条）。</summary>
+        // ---- 贝利亚之夜（2026-10-26 加，全部隐藏）----
+
+        /// <summary>第一次在贝利亚之夜见到他。</summary>
+        public const string BelialFirst = "belial_first";
+
+        /// <summary>第一次把他照成白贝。</summary>
+        public const string BelialWhite = "belial_white";
+
+        /// <summary>一局里把他照成白贝 12 下。</summary>
+        public const string BelialFlashTwelve = "belial_flash12";
+
+        /// <summary>撑满贝利亚之夜的 12 小时。</summary>
+        public const string BelialClear = "belial_clear";
+
+        /// <summary>被他抓住过一次。</summary>
+        public const string BelialDeath = "belial_death";
+
+        /// <summary>全部成就，按展示顺序（普通 9 条 → 彩蛋 10 条 → 贝利亚 5 条）。</summary>
         public static readonly Def[] All =
         {
             // 普通成就：名字是意象，描述照旧写清条件
-            new Def(FirstNight, "多出来的呼吸", "通关第 1 夜"),
-            new Def(HalfWay, "手臂比门先累", "通关第 3 夜"),
-            new Def(FiveNights, "把过去锁在门后", "通关第 5 夜"),
+            new Def(FirstNight, "多出来的呼吸", "通关第 1 夜",
+                false, "他后来总说，小时候一个人也能等。书包上的带子却被攥得很皱。"),
+            new Def(HalfWay, "手臂比门先累", "通关第 3 夜",
+                false, "他把那顿饭说成多余的关心，第二天却还是带走了饭盒。"),
+            new Def(FiveNights, "把过去锁在门后", "通关第 5 夜",
+                false, "电话里他说一切都好。挂断以后，那句没说完的话还在屋里。"),
             // 隐藏夜暂时移除，这条跟着一起撤 —— 恢复时取消注释。
             // new Def(HiddenNight, "让影子先走", "通关隐藏夜（第 6 夜）"),
             new Def(PowerSaver, "还剩一口气", "通关任意一夜时剩余电量不低于 30%"),
@@ -138,17 +158,29 @@ namespace NailongFNAF.Gameplay
             new Def(EveryCorner, "十一个角落", "单夜把 11 个机位全看一遍，撑到天亮",
                 true, "十一个角落都记得你站在这儿。"),
             new Def(KitchenSilence, "厨房里没有人", "在厨房（CAM 6）待满 20 秒，撑到天亮",
-                true, "但锅还在响。"),
+                true, "他说不用留饭。锅里的那份，晚上还是热了一遍。"),
             new Def(ItBlinksFirst, "它先眨眼", "单夜和奶龙对上眼 3 次，撑到天亮",
                 true, "它知道你在看。它也知道你就是它。"),
             new Def(FiveFiftyNine, "五点五十九", "在 5:50 之后才被抓住",
-                true, "差一分钟，就还是回不去。"),
+                true, "他查了回去的车次，又把页面关掉。再等等，等混出个样子。"),
             new Def(ZeroTwenty, "零点二十", "在 0:30 之前就被抓住",
                 true, "第一夜，你以为是风扇。"),
             new Def(FingerRhythm, "手指的节奏", "单夜开关门与灯合计 40 次以上",
                 true, "手比脑子先记住这屋里的规矩。"),
             new Def(FullHouse, "满格", "自定义夜四只全 20，通关时电量还剩 1% 以上",
                 true, "满格的恶意，一格的电。"),
+
+            // 贝利亚之夜：本来就不该被提前看到
+            new Def(BelialFirst, "它先到的", "在贝利亚之夜第一次遇见贝利亚",
+                true, "你还没走到门口，它已经在那儿了。"),
+            new Def(BelialWhite, "白了一下", "第一次把贝利亚照成白贝",
+                true, "有那么半秒，它看起来像个人。"),
+            new Def(BelialFlashTwelve, "一直照", "一局里把贝利亚照成白贝 12 下",
+                true, "灯关掉以后，暗处还留着一点白。"),
+            new Def(BelialClear, "值班的人没换", "撑满贝利亚之夜的 12 小时",
+                true, "外面的天一直没亮，可你还在。"),
+            new Def(BelialDeath, "开门的人", "被贝利亚抓住",
+                true, "它记得你每一次开门。"),
         };
 
         /// <summary>按 id 找定义；找不到返回 null。</summary>
