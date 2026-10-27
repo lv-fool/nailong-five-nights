@@ -831,6 +831,19 @@ namespace NailongFNAF.UI
         private bool _musicPlaying;
         private bool _debugVisible;
 
+        /// <summary>连点标题版本号 5 次解锁（PlayerPrefs 持久化）—— 手机没有 F1，得有个触屏入口。</summary>
+        private bool _debugUnlocked;
+
+        /// <summary>版本号连点计数 / 上次点击时间（2 秒内点满 5 次算解锁）。</summary>
+        private int _versionTapCount;
+        private float _versionTapTime;
+
+        /// <summary>解锁后挂在右上角的 DBG 开关（进夜显示、菜单里隐藏），点它开关调试面板。</summary>
+        private GameObject _debugToggleGo;
+
+        /// <summary>标题界面右下角的版本号，就是那个彩蛋入口本体。</summary>
+        private Text _versionLabel;
+
         /// <summary>转头进度：-1 全左、0 正前方、+1 全右。</summary>
         private float _pan;
         private float _panTarget;
@@ -863,6 +876,9 @@ namespace NailongFNAF.UI
             // 安卓返回键 = Escape 键事件（永夜模式里「Esc 开暂停」直接可用）。
             // 默认就是 false，写出来是防止别处顺手打开——开了它按返回会直接退应用。
             Input.backButtonLeavesApp = false;
+
+            // 调试彩蛋解锁状态跨启动保留，测机时不用每次重新连点
+            _debugUnlocked = PlayerPrefs.GetInt("nl_debug_unlocked", 0) == 1;
 
             EnsureGameManager();
             EnsureEventSystem();
@@ -928,6 +944,7 @@ namespace NailongFNAF.UI
 
             // 菜单开着 / 出现结算面板时，冻住这一夜，等玩家选择
             HandleMenu(gm);
+            SyncDebugToggle();
             if (_menuOpen)
             {
                 return;
@@ -1301,12 +1318,45 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            ToggleDebugPanel();
+        }
+
+        /// <summary>开 / 关调试面板。桌面 F1 和右上角 DBG 按钮共用这一个入口。</summary>
+        private void ToggleDebugPanel()
+        {
             _debugVisible = !_debugVisible;
             _debugGroup.alpha = _debugVisible ? 1f : 0f;
 
             // 面板上有按钮，打开时才接收点击
             _debugGroup.blocksRaycasts = _debugVisible;
             _debugGroup.interactable = _debugVisible;
+        }
+
+        /// <summary>
+        /// DBG 悬浮开关的显隐：解锁了且不在菜单里才显示。
+        /// 放在 Update 最前面、菜单早退**之前**，菜单开着的那几帧也能正确收掉它。
+        /// 按钮挂在调试层之后（兄弟序靠后），面板打开时它还在上层，永远点得到、能关回去。
+        /// </summary>
+        private void SyncDebugToggle()
+        {
+            if (_debugToggleGo != null)
+            {
+                _debugToggleGo.SetActive(_debugUnlocked && !_menuOpen);
+            }
+        }
+
+        /// <summary>触屏版换夜（对应桌面 [ / ]）：设夜数后整局重开。</summary>
+        private void DebugChangeNight(int delta)
+        {
+            GameManager gm = GameManager.Instance;
+            if (_enemyDirector == null || gm == null)
+            {
+                return;
+            }
+
+            _enemyDirector.SetNight(_enemyDirector.NightIndex + delta);
+            gm.Restart();
+            ClearJumpscare();
         }
 
         // ---------------------------------------------------------------
@@ -5318,6 +5368,65 @@ namespace NailongFNAF.UI
 
             BuildDebugControls(go.transform);
             BuildDebugMapPins();
+            BuildDebugToggle();
+        }
+
+        /// <summary>
+        /// 右上角的 DBG 悬浮开关：连点标题版本号 5 次解锁后才出现（见 PrototypeScene.Menu
+        /// 的 <c>OnVersionTapped</c>）。手机没有 F1，这是调试面板的触屏总开关。
+        /// 挂在 _canvas 最上层，调试面板开着时也点得到。
+        /// </summary>
+        private void BuildDebugToggle()
+        {
+            var toggleGo = new GameObject("DebugToggle",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            toggleGo.transform.SetParent(_canvas.transform, false);
+
+            var rect = (RectTransform)toggleGo.transform;
+            PlaceRect(rect, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-64f, -28f), new Vector2(104f, 40f));
+
+            var image = toggleGo.GetComponent<Image>();
+            image.sprite = _buttonSprite;
+            image.color = new Color(0.14f, 0.18f, 0.15f, 0.85f);
+
+            var btn = toggleGo.GetComponent<Button>();
+            btn.targetGraphic = image;
+            btn.onClick.AddListener(ToggleDebugPanel);
+
+            Text label = MakeLabel(toggleGo.transform, "DBG", 16, new Color(0.70f, 0.88f, 0.72f),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(104f, 40f));
+            label.raycastTarget = false;
+
+            _debugToggleGo = toggleGo;
+            toggleGo.SetActive(false);   // SyncDebugToggle 按解锁状态决定显隐
+        }
+
+        /// <summary>调试面板里的「控制」行按钮：统一外观，给 <see cref="BuildDebugControls"/> 用。</summary>
+        private void AddDebugControlButton(Transform parent, string label, float x, float y,
+            UnityEngine.Events.UnityAction onClick)
+        {
+            var btnGo = new GameObject("DebugCtrl_" + x,
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            btnGo.transform.SetParent(parent, false);
+
+            var rect = (RectTransform)btnGo.transform;
+            PlaceRect(rect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(x, y), new Vector2(104f, 36f));
+
+            var img = btnGo.GetComponent<Image>();
+            img.sprite = _buttonSprite;
+            img.color = new Color(0.25f, 0.30f, 0.26f, 0.95f);
+
+            var btn = btnGo.GetComponent<Button>();
+            btn.targetGraphic = img;
+            btn.onClick.AddListener(onClick);
+
+            Text text = MakeLabel(btnGo.transform, label, 16, Color.white,
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(104f, 36f));
+            text.raycastTarget = false;
         }
 
         /// <summary>
@@ -5427,6 +5536,27 @@ namespace NailongFNAF.UI
                 new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                 new Vector2(560f, -38f), new Vector2(260f, 36f));
             _debugPowerText.alignment = TextAnchor.MiddleLeft;
+
+            // ── 局控制：对应桌面的 R / [ / ]，手机没键盘 ──
+            Text ctrlLabel = MakeLabel(panel.transform, "控制：", 17,
+                new Color(0.85f, 0.85f, 0.85f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(4f, 84f), new Vector2(52f, 36f));
+            ctrlLabel.alignment = TextAnchor.MiddleLeft;
+
+            AddDebugControlButton(panel.transform, "重开", 80f, 84f, delegate
+            {
+                GameManager gm = GameManager.Instance;
+                if (gm != null)
+                {
+                    gm.Restart();
+                    ClearJumpscare();
+                }
+            });
+            AddDebugControlButton(panel.transform, "上一夜", 190f, 84f,
+                delegate { DebugChangeNight(-1); });
+            AddDebugControlButton(panel.transform, "下一夜", 300f, 84f,
+                delegate { DebugChangeNight(1); });
 
             // ── 敌人位置 ──
             // 标签只用两个字 —— 原先写「敌人位置：」宽 90，

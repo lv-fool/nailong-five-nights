@@ -176,6 +176,66 @@ namespace NailongFNAF.UI
             MakeLabel(_titleView.transform, "撑过 12 点到 6 点。鼠标看左右、升起监控、关门开灯、按手电筒。",
                 20, new Color(0.55f, 0.55f, 0.6f),
                 new Vector2(0.5f, 0.05f), new Vector2(0.5f, 0.05f), new Vector2(0f, 0f), new Vector2(1200f, 40f));
+
+            // 右下角版本号 = 调试彩蛋入口：2 秒内连点 5 次解锁右上角 DBG 开关
+            //（手机没有 F1）。已解锁的机器显示金色 DEBUG，玩家看不出来这是个按钮。
+            _versionLabel = MakeLabel(_titleView.transform, "v1.0.0", 16,
+                new Color(0.42f, 0.42f, 0.46f),
+                new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-14f, 10f), new Vector2(260f, 30f));
+            _versionLabel.alignment = TextAnchor.LowerRight;
+            _versionLabel.raycastTarget = true;
+
+            var versionButton = _versionLabel.gameObject.AddComponent<Button>();
+            versionButton.targetGraphic = _versionLabel;
+            versionButton.transition = Selectable.Transition.None;
+            versionButton.onClick.AddListener(OnVersionTapped);
+
+            if (_debugUnlocked)
+            {
+                MarkVersionLabelUnlocked();
+            }
+        }
+
+        /// <summary>版本号点满 5 次（或已经解锁过）：变金色 DEBUG，解锁状态进 PlayerPrefs。</summary>
+        private void OnVersionTapped()
+        {
+            if (_debugUnlocked)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now - _versionTapTime > 2f)
+            {
+                _versionTapCount = 0;
+            }
+            _versionTapTime = now;
+            _versionTapCount++;
+
+            if (_versionLabel != null)
+            {
+                _versionLabel.text = "再点 " + (5 - _versionTapCount) + " 次";
+            }
+
+            if (_versionTapCount < 5)
+            {
+                return;
+            }
+
+            _debugUnlocked = true;
+            PlayerPrefs.SetInt("nl_debug_unlocked", 1);
+            PlayerPrefs.Save();
+            MarkVersionLabelUnlocked();
+            SyncDebugToggle();
+        }
+
+        private void MarkVersionLabelUnlocked()
+        {
+            if (_versionLabel != null)
+            {
+                _versionLabel.text = "DEBUG";
+                _versionLabel.color = new Color(0.95f, 0.85f, 0.3f);
+            }
         }
 
         /// <summary>
