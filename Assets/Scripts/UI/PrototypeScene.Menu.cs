@@ -1449,8 +1449,12 @@ namespace NailongFNAF.UI
                     ? "你撑过了所有夜晚 —— 奶龙也拿你没办法。" + achievementLine
                     : (unlockedNext ? "已解锁 " + NightName(current + 1) : "天亮了，你活下来了。") + achievementLine);
 
-            _endPrimaryLabel.text = custom ? "再来一局" : (wasLast ? "返回标题" : "下一夜");
-            _endPrimaryButton.interactable = custom || !wasLast;
+            // 第 5 夜通关：主按钮的功能（回标题）和面板底部固定的「返回标题」
+            // 完全重复，会同时出现两个「返回标题」（2026-10-27）。
+            // 整夜通关的主按钮只剩「下一夜」，最后一夜直接把按钮收起来。
+            bool showPrimary = custom || !wasLast;
+            _endPrimaryLabel.text = custom ? "再来一局" : "下一夜";
+            _endPrimaryButton.gameObject.SetActive(showPrimary);
 
             // 通关没有「谁说了句话」，清掉上一局残留的台词
             if (_endQuoteText != null)
@@ -1630,6 +1634,8 @@ namespace NailongFNAF.UI
                 ? "自定义夜 失败 —— 再来一次。"
                 : NightName(current) + " 失败 —— 再来一次。") + CheckLoseAchievements(gm);
             _endPrimaryLabel.text = custom ? "重试" : "重试本夜";
+            // 上一局可能是第 5 夜通关（主按钮被隐藏），这里必须重新显示
+            _endPrimaryButton.gameObject.SetActive(true);
             _endPrimaryButton.interactable = true;
 
             // 跳杀完，那只敌人说一句话。
@@ -1689,6 +1695,7 @@ namespace NailongFNAF.UI
                 + achievementLine;
 
             _endPrimaryLabel.text = "再来一局";
+            _endPrimaryButton.gameObject.SetActive(true);
             _endPrimaryButton.interactable = true;
 
             // 永夜模式死法多半是被抓，台词照旧；没抓到就没台词
@@ -1939,12 +1946,6 @@ namespace NailongFNAF.UI
             if (_endTitleText.text == "你被抓住了")
             {
                 OnNightClicked(current);
-                return;
-            }
-
-            if (wasLast)
-            {
-                OpenTitle();
                 return;
             }
 
