@@ -1,7 +1,7 @@
 # AGENTS.md · 项目约定
 
 > 给 AI 助手和协作者看的开工须知。每次动这个项目之前先读一遍。
-> 最后更新：2026-10-18
+> 最后更新：2026-10-27（补安卓分支）
 >
 > ⚠️ **本文档在 2026-10-11 之后长期没跟上代码，2026-10-18 已按实际代码纠偏。**
 > 最大的偏差：画面方案早就不是「2D 静态图 + 热点」，而是**程序渲的 3D 圆柱全景 + 相机真转**。
@@ -36,6 +36,7 @@
 | 画面方案 | **程序渲 3D 圆柱全景 + 相机真转** | 不是静态图切换，见第五节 |
 | 交互方案 | 2D 热点（按钮 / 小地图 / 手电筒） | 门与敌人是 3D 世界物体 |
 | 美术来源 | 用户自行提供 | 规格见 `docs/03-素材规格.md` |
+| 平台 | Windows 桌面 + **Android 触屏版** | 安卓在分支 `android-port`，IL2CPP + ARM64，见 `docs/10-安卓移植.md` |
 | 版本控制 | Git，主分支 `main` | 已初始化 |
 
 **为什么用 Built-in 而不是 URP**：FNAF 的恐怖感来自预渲染的静态画面、音效、
@@ -179,17 +180,21 @@ Unity 2022.3.62f3c1 已装在本机 `F:\Unity\2022.3.62f3c1\Editor\Unity.exe`。
 
 ## 八、其他
 
-- ✅ **项目路径已于 2026-10-11 从中文迁到 `D:\GitHub\nailong-five-nights`**（英文），
-  中文路径的坑不再适用；迁移记录见 `docs/01-环境搭建.md`。
+- ✅ 工程位置（2026-10-27 现状）：桌面原项目在 `F:\nailong f`，安卓移植分支 `android-port`
+  克隆在 `F:\nailong-f-android`（即当前工作目录）。都是全英文路径；迁移记录见 `docs/01-环境搭建.md`。
+  两个目录的 Unity 别同时开着同一个项目 —— 锁文件会互相挡。
 - **不要删除 `.workbuddy-ai/` 目录** —— 项目长期记忆与工作日志在 `memory/`，
   排障与踩坑记录都在里面（`.gitignore` 排除，但绝不能删）
 - 已在 `.gitignore` 排除、**不入库**的本地目录：`Library/`、`Temp/`、`Logs/`、`Builds/`、
   `UserSettings/`、`.workbuddy-ai/`、`Packages/MCPForUnity/`（本地嵌入的 MCP 包）、
   `__pycache__/`。换机器要按 `docs/02-开发工具.md` 重建 MCP 包。
-- ⚠️ **构建产物在 `Builds/`**（Windows 版，约 320 MB），别误当源码删了；
+- ⚠️ **构建产物在 `Builds/`**（Windows 版约 320 MB、安卓 APK 约 121 MB），别误当源码删了；
   它是可再生的，但重新构建要几分钟。
-- ⚠️ **本机只装了 Windows Mono 变体**（`PlaybackEngines\WindowsStandaloneSupport\Variations\` 下无 IL2CPP）。
+- ⚠️ **Windows 版只装了 Mono 变体**（`PlaybackEngines\WindowsStandaloneSupport\Variations\` 下无 IL2CPP）。
   打包走 `Assets/Editor/BuildWindows.cs`（菜单「奶龙 / 10. 打包 Windows 版」或
   `-executeMethod NailongFNAF.EditorTools.BuildWindows.Build`），产物在 `Builds/Windows/`，
   约 263 MB，压 zip 约 116 MB。流程与注意事项见 `docs/09-打包.md`；
   要 IL2CPP 得先用 Hub 补装 **Windows Build Support (IL2CPP)** 模块
+- **安卓版**：`Assets/Editor/BuildAndroid.cs`（菜单「奶龙 / 11. 打包安卓版」或
+  `-executeMethod NailongFNAF.EditorTools.BuildAndroid.Build`），IL2CPP + ARM64，
+  产物 `Builds/Android/NailongFiveNights.apk`（约 121 MB）。环境、坑、真机清单见 `docs/10-安卓移植.md`
