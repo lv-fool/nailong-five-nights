@@ -623,9 +623,15 @@ namespace NailongFNAF.UI
 
 
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
-        /// <summary>门洞外的走廊画面（预渲贴图，开灯才显示）。</summary>
+        /// <summary>门洞外的走廊画面（预渲贴图，开灯亮版 / 关灯暗版同一张构图）。</summary>
         private SpriteRenderer _corridorLeft;
         private SpriteRenderer _corridorRight;
+
+        /// <summary>走廊的暗版 / 亮版贴图 —— 切灯时换 sprite，不换物体。</summary>
+        private Sprite _corridorLeftDark;
+        private Sprite _corridorLeftLit;
+        private Sprite _corridorRightDark;
+        private Sprite _corridorRightLit;
 
         /// <summary>
         /// 断电时盖全屏的黑幕。平时整层透明，露出后面的 3D 房间（见 OfficeRoom）。
@@ -1603,26 +1609,36 @@ namespace NailongFNAF.UI
             ApplyFrontCharacter3D(gm);
             ApplyBelial(gm);
 
-            // 门洞外的走廊：灯亮才看得见（照 FNAF 1 —— 开灯是唯一知道门外有什么的办法）
-            ApplyCorridor(_corridorLeft, gm.LeftLightOn);
-            ApplyCorridor(_corridorRight, gm.RightLightOn);
+            // 门洞外的走廊：开灯换亮版、关灯换暗版（同一构图，只换亮度）。
+            // 照 FNAF 1 —— 开灯是唯一知道门外有什么的办法。
+            ApplyCorridor(_corridorLeft, gm.LeftLightOn, _corridorLeftDark, _corridorLeftLit);
+            ApplyCorridor(_corridorRight, gm.RightLightOn, _corridorRightDark, _corridorRightLit);
 
             // 开灯照到人的上升沿 → 音效 + 边缘红脉冲（门开或关都算）
             UpdateLightReveal(gm);
         }
 
         /// <summary>
-        /// 门洞外的走廊：开灯整层显示、关灯整层隐藏。
-        /// 没有淡入淡出 —— 灯是开关，不是调光器。
+        /// 门洞外的走廊：按灯的状态换 sprite —— 亮版 / 暗版是同一套几何渲的，
+        /// 换的时候只有亮度变，构图不跳。没有淡入淡出，灯是开关不是调光器。
         /// </summary>
-        private static void ApplyCorridor(SpriteRenderer corridor, bool on)
+        private static void ApplyCorridor(SpriteRenderer corridor, bool on,
+            Sprite dark, Sprite lit)
         {
-            if (corridor == null || corridor.sprite == null)
+            if (corridor == null)
             {
                 return;
             }
 
-            corridor.gameObject.SetActive(on);
+            Sprite want = on ? lit : dark;
+            if (want == null)
+            {
+                corridor.gameObject.SetActive(false);
+                return;
+            }
+
+            corridor.sprite = want;
+            corridor.gameObject.SetActive(true);
         }
 
         /// <summary>
@@ -6048,12 +6064,14 @@ namespace NailongFNAF.UI
             _belialRight = MakeWorldSprite("BelialRight", DoorWorldCenterRight, SpriteSortEnemy + 2);
 
 
-            // 门洞外的走廊：一张预渲的贴图，开灯时透出来（关灯门洞里就是黑的）。
-            // 排序在门板**之下** —— 门一关，门板自然把它挡住。
+            // 门洞外的走廊：一张预渲的贴图，开灯亮、关灯暗 —— 同一张构图两种亮度，
+            // 切灯时不会「换了一张画」。排序在门板**之下**，门一关自然被挡住。
             _corridorLeft = MakeCorridor("CorridorLeft", DoorWorldCenterLeft,
-                SpriteSortDoor - 1, "Corridor/corridor_left");
+                SpriteSortDoor - 1, "Corridor/corridor_left",
+                out _corridorLeftDark, out _corridorLeftLit);
             _corridorRight = MakeCorridor("CorridorRight", DoorWorldCenterRight,
-                SpriteSortDoor - 1, "Corridor/corridor_right");
+                SpriteSortDoor - 1, "Corridor/corridor_right",
+                out _corridorRightDark, out _corridorRightLit);
 
             // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
             // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
@@ -6129,21 +6147,26 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 门洞外的走廊：一张预渲的贴图（见 tools/render_corridor.py），
-        /// **正好和门洞一样大**，不多露一点到门框外的墙上。
+        /// 门洞外的走廊：两张预渲贴图（见 tools/render_corridor.py），
+        /// **同一套几何、同一个机位**，只有灯开没开 —— 切灯时换 sprite，
+        /// 画面不会「换一张」。
         ///
-        /// 只做「开灯」这一版 —— 关灯时整层隐藏，门洞里就是黑的，
-        /// 不需要另一张暗版贴图。
+        /// 为什么关灯也要有一版：只做亮版的话，关灯时门洞里露出来的是
+        /// 全景图上画的那条走廊（另一个机位、另一种透视），一开灯就跳成贴图 ——
+        /// 绿子报过「开灯前后贴图不一致」，就是这里。
         /// </summary>
         private static SpriteRenderer MakeCorridor(string name, Vector3 pivotPoint,
-            int sortingOrder, string resourcePath)
+            int sortingOrder, string resourcePath, out Sprite dark, out Sprite lit)
         {
             var sr = MakeWorldSprite(name, pivotPoint, sortingOrder);
 
-            Sprite art = Resources.Load<Sprite>(resourcePath);
+            lit = Resources.Load<Sprite>(resourcePath);
+            dark = Resources.Load<Sprite>(resourcePath + "_dark");
+
+            // 两张都缺就直接不显示 —— 别让门洞里出现一块白板
+            Sprite art = lit != null ? lit : dark;
             if (art == null)
             {
-                // 图没进 Resources 就先空着 —— 别让门洞里出现一块白板
                 sr.gameObject.SetActive(false);
                 return sr;
             }

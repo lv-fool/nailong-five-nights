@@ -52,8 +52,11 @@ H = 800
 LIGHT_COLOR = np.array([1.00, 0.88, 0.72], np.float32)
 LIGHT_RADIUS = 4.6
 
-# 走廊比房间亮一档 —— 开灯就是为了「看清外面」，暗了等于白开
-DARK = 0.95
+# 开灯 / 关灯两版的整体亮度。
+# ⚠️ 关灯那版**不能压到全黑** —— 全黑和「整层隐藏」没区别，切灯时会啪一下跳，
+# 那就白做这一版了。留个轮廓，只是看不清细节。
+DARK_LIT = 0.95
+DARK_DARK = 0.45
 
 
 # 装饰配色（和监控里那套转角一致）
@@ -123,7 +126,7 @@ def corridor_boxes(sign):
     ]
 
 
-def render_corridor(sign):
+def render_corridor(sign, lit):
     # ⚠️ 相机必须落在走廊盒子**内部**（盒子 x 边界是 ±2.60），
     # 摆在 2.598 等于贴在盒子外壁上，射线只打到那面墙 —— 渲出来一片平灰。
     # 往里挪 1 厘米，看到的就是走廊内壁。
@@ -139,8 +142,17 @@ def render_corridor(sign):
 
     # 灯摆在转角通道里 —— 门口到转角这段是暗的，转角那头亮，纵深才出来
     gpa.LIGHT_POS = np.array([sign * 5.2, 1.95, -1.2], np.float32)
-    gpa.LIGHT_RADIUS = LIGHT_RADIUS
-    gpa.LIGHT_COLOR = LIGHT_COLOR
+
+    if lit:
+        gpa.LIGHT_RADIUS = LIGHT_RADIUS
+        gpa.LIGHT_COLOR = LIGHT_COLOR
+        dark = DARK_LIT
+    else:
+        # 关灯：留一点点远处的余光，不然是纯黑 —— 纯黑和「整层隐藏」没区别，
+        # 切灯时会「啪」一下跳出来，这正是要避免的
+        gpa.LIGHT_RADIUS = LIGHT_RADIUS * 0.45
+        gpa.LIGHT_COLOR = LIGHT_COLOR * 0.30
+        dark = DARK_DARK
 
     # 走廊墙上不挂画（那是监控里的走廊，门口这条不需要）
     gpa.DECALS = []
@@ -151,7 +163,7 @@ def render_corridor(sign):
     proj = lambda pt: gpa.project(pt, cam, yaw)
 
     return gpa.render_dirs(dirs, tex, seed=0x51A5 if sign < 0 else 0x51A6,
-                           dark=DARK, exposure=1.0, w=W, h=H, proj=proj,
+                           dark=dark, exposure=1.0, w=W, h=H, proj=proj,
                            vig=True, props=False)
 
 
@@ -159,10 +171,11 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
     for sign, name in ((-1, "corridor_left"), (1, "corridor_right")):
-        img = render_corridor(sign)
-        path = os.path.join(OUT_DIR, name + ".png")
-        img.convert("RGB").save(path)
-        print("rendered %s -> %s  (%dx%d, FOV_H=%.1f)" % (name, path, W, H, FOV_H))
+        for lit, suffix in ((True, ""), (False, "_dark")):
+            img = render_corridor(sign, lit)
+            path = os.path.join(OUT_DIR, name + suffix + ".png")
+            img.convert("RGB").save(path)
+            print("rendered %s%s -> %s" % (name, suffix, path))
 
 
 if __name__ == "__main__":
