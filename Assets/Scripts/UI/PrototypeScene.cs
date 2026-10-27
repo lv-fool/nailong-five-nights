@@ -5209,10 +5209,23 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // ⚠️ 第一次进来只同步、不播。
+            // `_stealPopSerial` 初值是 -1，直接比的话第一帧就是「0 != -1」——
+            // 一开局白蹦一下，看着像刚被偷了电。同理 serial 变小（重开后归零）
+            // 也只同步，不播。
+            if (_stealPopSerial < 0 || gm.NailongStealSerial < _stealPopSerial)
+            {
+                _stealPopSerial = gm.NailongStealSerial;
+                _stealPopTimer = 0f;
+                _stealPop.enabled = false;
+                return;
+            }
+
             if (gm.NailongStealSerial != _stealPopSerial)
             {
                 _stealPopSerial = gm.NailongStealSerial;
                 _stealPopTimer = StealPopSeconds;
+                _stealPop.enabled = true;
             }
 
             if (_stealPopTimer <= 0f)
