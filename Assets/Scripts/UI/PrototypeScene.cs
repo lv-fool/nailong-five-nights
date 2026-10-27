@@ -674,6 +674,13 @@ namespace NailongFNAF.UI
         /// </summary>
         private RectTransform _monitorArea;
 
+        /// <summary>
+        /// 监控小地图的容器 —— **挂在监控层外面**（canvas 直属），
+        /// 摆在画面框右侧的空白里。不开监控也常显，玩家随时能看平面图规划。
+        /// 以前挂在 MonitorArea 里跟着监控一起显隐（2026-10-27 挪出）。
+        /// </summary>
+        private RectTransform _mapOutside;
+
         /// <summary>监控画面的设计分辨率（= mon_*.png 的原尺寸）。</summary>
         public const float MonitorDesignWidth = 1920f;
         public const float MonitorDesignHeight = 1080f;
@@ -3332,6 +3339,86 @@ namespace NailongFNAF.UI
             {
                 _monitorArea.anchoredPosition = Vector2.zero;
             }
+
+            UpdateMapOutside();
+        }
+
+        /// <summary>
+        /// 把小地图摆到**画面框右侧之外**（黑壳右侧的空白里）。
+        ///
+        /// 每帧跟着黑壳走：黑壳右沿 + 边距 = 地图左沿；垂直方向与画面框居中对齐。
+        /// 放不下（窗口太窄，右侧空白 < 地图宽 + 边距）时**退回叠在画面框内**
+        /// 右下角的老位置 —— 宁可重叠也不能出屏幕。
+        ///
+        /// 显示与否（_monitorMapGroup.alpha）仍由监控开关管，这里只管摆位。
+        /// </summary>
+        private void UpdateMapOutside()
+        {
+            if (_mapOutside == null || _monitorBezel == null)
+            {
+                return;
+            }
+
+            var cs = new Vector3[4];
+            _monitorBezel.GetWorldCorners(cs);
+
+            // 世界坐标 → canvas 本地（Overlay canvas 的世界坐标 ≈ 屏幕像素，
+            // 但要转进 canvas 的本地系才能直接当 anchoredPosition 用）
+            RectTransform canvasRt = _canvas.transform as RectTransform;
+            Vector2 mapSize = new Vector2(MapPanelWidth, MapPanelHeight);
+
+            // 想要的位置：黑壳右沿 + 边距，垂直居中于黑壳
+            float wantX = cs[2].x + MapPanelMargin;
+
+            // 右侧能用的宽度：屏幕右沿 - 想要的起点
+            float availW = Screen.width - 8f - wantX;
+
+            // 地图原始尺寸是设计像素；挂外不继承 Area 缩放，
+            // 这里按可用宽度**自适应缩放**（等比，最小 0.35 保底可读）
+            float outsideScale = Mathf.Clamp(availW / mapSize.x, 0.35f, MapPanelScale);
+
+            // 放不下（窗口窄到右侧空白不够 35% 地图宽）→ 退回老位置
+            if (outsideScale <= 0.35f + 0.001f && availW < mapSize.x * 0.35f)
+            {
+                _mapOutside.SetParent(_monitorArea, false);
+                _mapOutside.anchorMin = new Vector2(1f, 0f);
+                _mapOutside.anchorMax = new Vector2(1f, 0f);
+                _mapOutside.pivot = new Vector2(1f, 0f);
+                _mapOutside.anchoredPosition = new Vector2(
+                    -MapPanelMargin, MapPanelBottomOffset);
+                _mapOutside.localScale = Vector3.one;
+                return;
+            }
+
+            // 挂外时保持 canvas 直属（可能上一帧退回过 Area 里）
+            if (_mapOutside.parent != _canvas.transform)
+            {
+                _mapOutside.SetParent(_canvas.transform, false);
+            }
+
+            _mapOutside.localScale = new Vector3(outsideScale, outsideScale, 1f);
+
+            // 缩放后的实际占宽
+            float scaledW = mapSize.x * outsideScale;
+            float scaledH = mapSize.y * outsideScale;
+
+            // 垂直：与黑壳居中对齐（黑壳范围可能比屏幕矮）
+            float bezelH = cs[1].y - cs[0].y;
+            float yCenter = cs[0].y + bezelH * 0.5f;
+            float worldYMin = yCenter - scaledH * 0.5f;
+
+            // 世界 → canvas 本地
+            Vector2 localMin;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRt,
+                new Vector2(wantX, worldYMin),
+                null,
+                out localMin);
+
+            _mapOutside.anchorMin = new Vector2(0.5f, 0.5f);
+            _mapOutside.anchorMax = new Vector2(0.5f, 0.5f);
+            _mapOutside.pivot = new Vector2(0f, 0.5f);
+            _mapOutside.anchoredPosition = localMin + new Vector2(0f, scaledH * 0.5f);
         }
 
         /// <summary>
@@ -6678,9 +6765,16 @@ namespace NailongFNAF.UI
                 maskGo.SetActive(false);
             }
 
-            // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点
+            // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点。
+            //
+            // ⚠️ **挂在 canvas 直属**（不挂 MonitorArea）：位置挪到画面框
+            // **外面**的右侧空白 —— 不再叠在监控画面上。仍要开监控才显示
+            // （显隐由 _monitorMapGroup.alpha 管，和以前一致）。
+            // 每帧按黑壳位置重新定位，见 UpdateMapOutside()。
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
-            map.transform.SetParent(_monitorArea, false);
+            map.transform.SetParent(_canvas.transform, false);
+
+            _mapOutside = map.GetComponent<RectTransform>();
 
             var mapRect = map.GetComponent<RectTransform>();
             PlaceRect(mapRect, new Vector2(1f, 0f), new Vector2(1f, 0f),
