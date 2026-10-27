@@ -337,6 +337,19 @@ namespace NailongFNAF.UI
         private const float MonitorZone = 0.10f;
 
         /// <summary>
+        /// 触屏拖动转向的增益：panTarget 增量 =（横向拖动量 / 屏宽）× 这个值。
+        /// 5 ≈ 桌面手感：桌面上鼠标横移 20% 屏宽满转（PanSaturationK = 0.20），
+        /// 触屏拖 20% 屏宽也满转。真机上嫌快嫌慢只改这里。
+        /// </summary>
+        private const float TouchDragGain = 5f;
+
+        /// <summary>
+        /// 拖动超过屏宽的这个比例才算「拖」，否则是点按：点按不动视角、
+        /// 可以触发底部监控热区。0.008 ≈ 2400 宽的屏上 19px，跟系统触控容差差不多。
+        /// </summary>
+        private const float TouchTapSlopFrac = 0.008f;
+
+        /// <summary>
         /// 监控机位表 —— 编号、房间名、前后顺序全照 FNAF 1 官方那张平面图。
         /// **数组下标就是机位号**；加机位只往这里加一行，别处不用动。
         /// </summary>
@@ -824,8 +837,33 @@ namespace NailongFNAF.UI
         private float _panVelocity;
         private bool _wasInMonitorZone;
 
+        // ---- 触屏输入状态（只在移动端用；见 UpdateViewTouch / HandleMonitorHotspotTouch）----
+
+        /// <summary>正在拖动转向的那根手指（fingerId；-1 = 当前没有导航手指）。</summary>
+        private int _panTouchId = -1;
+
+        /// <summary>导航手指按下的位置，用来判「点按还是拖动」。</summary>
+        private Vector2 _panTouchStartPos;
+
+        /// <summary>导航手指这会儿是不是已经超出点按容差、成了拖动。</summary>
+        private bool _panTouchDragging;
+
+        /// <summary>导航手指**上一次**拖动过（抬起后保留，直到下一根手指按下）——
+        /// 用来挡「拖动收尾落在手机上被当成点手机接电话」。</summary>
+        private bool _panTouchWasDragging;
+
+        /// <summary>底部监控热区里候选「点按」的那根手指（fingerId；-1 = 没有）。</summary>
+        private int _monitorTapTouchId = -1;
+
+        /// <summary>候选手指按下的位置，松手时位移没超容差才算点按。</summary>
+        private Vector2 _monitorTapStartPos;
+
         private void Awake()
         {
+            // 安卓返回键 = Escape 键事件（永夜模式里「Esc 开暂停」直接可用）。
+            // 默认就是 false，写出来是防止别处顺手打开——开了它按返回会直接退应用。
+            Input.backButtonLeavesApp = false;
+
             EnsureGameManager();
             EnsureEventSystem();
             EnsureEnemyDirector();
@@ -989,13 +1027,21 @@ namespace NailongFNAF.UI
         {
             if (CanOperate(gm))
             {
-                float width = Screen.width;
-                float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
+                if (Application.isMobilePlatform)
+                {
+                    // 触屏是「拖动相对位移」，桌面是「绝对位置映射」——见各自方法头注释
+                    UpdateViewTouch();
+                }
+                else
+                {
+                    float width = Screen.width;
+                    float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
-                // 鼠标位置映射成转头量：正中 0，推到 |x−0.5| ≥ PanSaturationK 就满转。
-                // 中间那段按比例跟手，两边各留一段**饱和区**（推到那儿视角不再变）——
-                // 贴墙的按钮只有落在这段里，鼠标才压得住、点得到（见 BuildWallButtons）。
-                _panTarget = Mathf.Clamp((x - 0.5f) / PanSaturationK, -1f, 1f);
+                    // 鼠标位置映射成转头量：正中 0，推到 |x−0.5| ≥ PanSaturationK 就满转。
+                    // 中间那段按比例跟手，两边各留一段**饱和区**（推到那儿视角不再变）——
+                    // 贴墙的按钮只有落在这段里，鼠标才压得住、点得到（见 BuildWallButtons）。
+                    _panTarget = Mathf.Clamp((x - 0.5f) / PanSaturationK, -1f, 1f);
+                }
             }
             else
             {
@@ -1025,6 +1071,77 @@ namespace NailongFNAF.UI
             gm.SetView(view);
         }
 
+        /// <summary>
+        /// 触屏转向：**拖动相对位移**，不是「点哪转到哪」。
+        ///
+        /// 桌面能用绝对位置映射，是因为鼠标永远躺在屏幕上某个地方；
+        /// 触屏手指是「啪」一下出现的——照搬绝对映射，一碰屏视角就会猛跳过去。
+        /// 所以这里改成拖动累积：横向拖多少转多少，**松手后视角停在原地**（不回中），
+        /// 和桌面「鼠标停在哪儿视角就停在哪儿」一个效果。
+        ///
+        /// 手指选择：新按下的手指只要不压在 UGUI 上（按钮 / 手电筒 / 通话条）就接管转向，
+        /// 这样按住手电筒的同时还能用另一根手指转头；点按（位移小于容差）不动视角。
+        /// 增益见 <see cref="TouchDragGain"/>，真机手感不对只调那个值。
+        /// </summary>
+        private void UpdateViewTouch()
+        {
+            float width = Mathf.Max(1f, Screen.width);
+            float tapSlop = width * TouchTapSlopFrac;
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch touch = Input.GetTouch(i);
+
+                if (touch.phase == TouchPhase.Began)
+                {
+                    bool overUi = EventSystem.current != null
+                        && EventSystem.current.IsPointerOverGameObject(touch.fingerId);
+
+                    if (!overUi)
+                    {
+                        // 后按下的手指优先 —— 上一根导航手指还没抬起来也直接易主
+                        _panTouchId = touch.fingerId;
+                        _panTouchStartPos = touch.position;
+                        _panTouchDragging = false;
+                        _panTouchWasDragging = false;
+                    }
+
+                    continue;
+                }
+
+                if (touch.fingerId != _panTouchId)
+                {
+                    continue;
+                }
+
+                if (touch.phase == TouchPhase.Moved)
+                {
+                    if (!_panTouchDragging
+                        && (touch.position - _panTouchStartPos).magnitude > tapSlop)
+                    {
+                        _panTouchDragging = true;
+                        _panTouchWasDragging = true;
+                    }
+
+                    if (_panTouchDragging)
+                    {
+                        _panTarget = Mathf.Clamp(
+                            _panTarget + touch.deltaPosition.x / width * TouchDragGain,
+                            -1f, 1f);
+                    }
+                }
+                else if (touch.phase == TouchPhase.Ended
+                    || touch.phase == TouchPhase.Canceled)
+                {
+                    // 导航指让出来；_panTarget 不动 —— 视角停在松手的地方
+                    _panTouchId = -1;
+                    _panTouchDragging = false;
+                    // _panTouchWasDragging 故意保留：HandleNaibaoPhoneClick 靠它挡「拖动收尾
+                    // 恰好落在桌上手机上」被误判成点手机接电话，下一根手指按下时才清
+                }
+            }
+        }
+
         /// <summary>点桌上的手机接通奶包 —— 得先把她转到画面中间（那时手机亮着）。</summary>
         private void TryNaibaoPhoneClick(GameManager gm)
         {
@@ -1034,6 +1151,12 @@ namespace NailongFNAF.UI
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
         private void HandleMonitorHotspot(GameManager gm)
         {
+            if (Application.isMobilePlatform)
+            {
+                HandleMonitorHotspotTouch(gm);
+                return;
+            }
+
             float height = Screen.height;
             bool inZone = height > 0f && Input.mousePosition.y / height <= MonitorZone;
 
@@ -1043,6 +1166,55 @@ namespace NailongFNAF.UI
             }
 
             _wasInMonitorZone = inZone;
+        }
+
+        /// <summary>
+        /// 触屏版监控热区：**点按**屏幕底部才切换。
+        ///
+        /// 桌面是「鼠标划进底部边缘」——触屏照搬的话，转头拖动的手指扫过底部
+        /// 就会乱切监控。所以要求按下的位置在热区里、松手前位移一直小于点按容差；
+        /// 拖动（超出容差）直接作废候选。底部那条 MONITOR 把手就是点的地方。
+        /// </summary>
+        private void HandleMonitorHotspotTouch(GameManager gm)
+        {
+            float height = Mathf.Max(1f, Screen.height);
+            float tapSlop = Mathf.Max(1f, Screen.width) * TouchTapSlopFrac;
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch touch = Input.GetTouch(i);
+
+                if (touch.phase == TouchPhase.Began)
+                {
+                    // 已有候选手指就不抢 —— 热区一次只认一根
+                    if (_monitorTapTouchId == -1
+                        && touch.position.y / height <= MonitorZone)
+                    {
+                        _monitorTapTouchId = touch.fingerId;
+                        _monitorTapStartPos = touch.position;
+                    }
+
+                    continue;
+                }
+
+                if (touch.fingerId != _monitorTapTouchId)
+                {
+                    continue;
+                }
+
+                bool moved = (touch.position - _monitorTapStartPos).magnitude > tapSlop;
+
+                if (touch.phase == TouchPhase.Ended && !moved && CanOperate(gm))
+                {
+                    ToggleMonitor(gm);
+                }
+
+                if (moved || touch.phase == TouchPhase.Ended
+                    || touch.phase == TouchPhase.Canceled)
+                {
+                    _monitorTapTouchId = -1;
+                }
+            }
         }
 
         private static bool CanOperate(GameManager gm)
@@ -3092,16 +3264,39 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
+        /// 跳杀视频的加载地址。桌面是真实文件路径（能 <c>File.Exists</c> 探测）；
+        /// 安卓是 APK 内的 <c>jar:file://…!/assets/…</c>（streamingAssetsPath 本身就是），
+        /// 必须用 '/' 拼 —— Path.Combine 在安卓上会拼出反斜杠，VideoPlayer 认不出。
+        /// </summary>
+        private static string JumpscareVideoUrl(EnemyId id)
+        {
+            string relative = JumpscareVideoPath(id);
+
+#if UNITY_ANDROID
+            return Application.streamingAssetsPath + "/" + relative;
+#else
+            return Path.Combine(Application.streamingAssetsPath, relative);
+#endif
+        }
+
+        /// <summary>
         /// 尝试起播跳杀视频。成功返回 true（并已铺好视频层）；
         /// 素材缺失 / 起不来返回 false，交给调用方走静态图兜底。
         /// </summary>
         private bool TryPlayJumpscareVideo(EnemyId id)
         {
-            string path = Path.Combine(Application.streamingAssetsPath, JumpscareVideoPath(id));
-            if (!File.Exists(path))
+            string url = JumpscareVideoUrl(id);
+
+#if UNITY_ANDROID
+            // 安卓上 StreamingAssets 打进 APK 压缩包：不是真实文件，File.Exists 恒为 false。
+            // 这里不做存在性检查，直接把 URL 喂给 VideoPlayer；文件缺失 / 解码失败
+            // 照样走 errorReceived → 退回静态跳杀图（兜底永不黑屏）。
+#else
+            if (!File.Exists(url))
             {
                 return false;
             }
+#endif
 
             EnsureJumpscareVideo();
             if (_jumpscareVideo == null || _jumpscareVideoTarget == null)
@@ -3128,7 +3323,7 @@ namespace NailongFNAF.UI
             PlayJumpscareSfx();
 
             // 异步准备：好了在 prepareCompleted 里 Play，坏了在 errorReceived 里退回静态图
-            _jumpscareVideo.url = path;
+            _jumpscareVideo.url = url;
             _jumpscareVideo.Prepare();
 
             return true;
@@ -3692,8 +3887,11 @@ namespace NailongFNAF.UI
             }
 
             _naibaoCallText.text = line.Text;
-            // 提示里直接把键位写出来 —— 玩家不知道有快捷键就等于没有。
-            _naibaoCallHint.text = "空格 继续 · F 跳过　"
+            // 提示里直接把操作写出来 —— 玩家不知道怎么继续就等于卡死。
+            // 触屏没有键盘：条子右侧本来就有「继续 / 挂断」两个按钮，提示跟着指过去。
+            _naibaoCallHint.text = (Application.isMobilePlatform
+                    ? "点「继续 / 挂断」　"
+                    : "空格 继续 · F 跳过　")
                 + (call.Index + 1) + " / " + call.Count;
         }
 
@@ -3794,6 +3992,13 @@ namespace NailongFNAF.UI
             }
 
             if (!Input.GetMouseButtonUp(0))
+            {
+                return;
+            }
+
+            // 触屏：刚才是拖动转向，手指抬起的位置恰好落在手机上 —— 不算点手机。
+            // （桌面没这个问题：鼠标本来就是停在手机上才点的。）
+            if (Application.isMobilePlatform && _panTouchWasDragging)
             {
                 return;
             }
