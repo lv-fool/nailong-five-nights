@@ -4131,7 +4131,7 @@ namespace NailongFNAF.UI
             }
 
             bool hasTexture = image.sprite != null
-                && (image.sprite.name == "ui_wall_door" || image.sprite.name == "ui_wall_light");
+                && (image.sprite.name == "ui_wall_red" || image.sprite.name == "ui_wall_green");
 
             if (!hasTexture)
             {
@@ -4153,8 +4153,11 @@ namespace NailongFNAF.UI
                     break;
 
                 default:
-                    // 闲置：压暗，但保留颜色倾向
-                    image.color = new Color(0.62f, 0.62f, 0.62f, 1f);
+                    // 闲置：略微压暗，但保留颜色倾向。
+                    // ⚠️ 别压太狠 —— 贴图本身颜色就浓（红 198/绿 150），
+                    // 0.62 会暗到几乎看不出是红是绿（踩过）。0.82 既能
+                    // 和「激活」拉开差别，又不失真。
+                    image.color = new Color(0.82f, 0.82f, 0.82f, 1f);
                     break;
             }
         }
@@ -6597,8 +6600,29 @@ namespace NailongFNAF.UI
 
 
 
-        /// <summary>墙上 DOOR / LIGHT 按钮的尺寸（画布逻辑像素）。</summary>
-        private static readonly Vector2 WallButtonSize = new Vector2(190f, 62f);
+        // ── 墙面按钮面板（照 FNAF 1 原版参考图）──
+        //
+        // 原版是一块深色金属竖板，里面上下两个**方形**按钮，
+        // 文字（DOOR / LIGHT）印在按钮**下方**，不是压在按钮上。
+        //
+        // 尺寸（画布逻辑像素）：面板 132×209（照贴图 360×570 比例），
+        // 方按钮 92×55，文字行高 22。
+
+        /// <summary>
+        /// 整块面板的尺寸。
+        /// ⚠️ 别做大 —— 面板是**贴墙**的竖板，太宽会压到门框上（踩过）。
+        /// </summary>
+        private static readonly Vector2 WallPanelSize = new Vector2(104f, 165f);
+
+        /// <summary>面板里方形按钮的尺寸。</summary>
+        private static readonly Vector2 WallButtonSize = new Vector2(74f, 44f);
+
+        /// <summary>按钮上沿在面板里的相对高度（0=底 1=顶）。</summary>
+        private const float WallDoorButtonY = 0.655f;
+        private const float WallLightButtonY = 0.335f;
+
+        /// <summary>文字行相对面板的高度。</summary>
+        private const float WallLabelYOffset = -0.088f;
 
         /// <summary>LIGHT 按钮的光晕尺寸（画布逻辑像素）—— 比按钮大一圈。</summary>
         private static readonly Vector2 LightGlowSize = new Vector2(240f, 92f);
@@ -6606,10 +6630,13 @@ namespace NailongFNAF.UI
         // 墙上按钮锚的**世界点**（米）。在侧墙上、门框**外侧**一点：
         // 门洞 z ∈ [-1.80, -0.60]，按钮取 z = -1.976（门框外沿 -1.80 再往外 0.18m），
         // 世界偏航角约 ±106.6°。高度按「门在上、灯在下」取 1.55 / 1.05。
-        private static readonly Vector3 DoorButtonWorldRight = new Vector3(2.6f, 1.55f, -1.976f);
-        private static readonly Vector3 LightButtonWorldRight = new Vector3(2.6f, 1.05f, -1.976f);
-        private static readonly Vector3 DoorButtonWorldLeft = new Vector3(-2.6f, 1.55f, -1.976f);
-        private static readonly Vector3 LightButtonWorldLeft = new Vector3(-2.6f, 1.05f, -1.976f);
+        // ⚠️ z 从 -1.976 再往「离门更远」推到 -2.10 ——
+        // 面板是竖板，比原来的小胶囊宽，贴着 -1.976 会压到门框边。
+        // 推到 -2.10（离门框 0.30m）就不挡了。
+        private static readonly Vector3 DoorButtonWorldRight = new Vector3(2.6f, 1.55f, -2.10f);
+        private static readonly Vector3 LightButtonWorldRight = new Vector3(2.6f, 1.05f, -2.10f);
+        private static readonly Vector3 DoorButtonWorldLeft = new Vector3(-2.6f, 1.55f, -2.10f);
+        private static readonly Vector3 LightButtonWorldLeft = new Vector3(-2.6f, 1.05f, -2.10f);
 
         /// <summary>
         /// 两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。
@@ -6629,14 +6656,114 @@ namespace NailongFNAF.UI
         private void BuildWallButtons()
         {
             _leftWallGroup = MakeGroup("WallLeft");
-            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR", false, OnDoorLeft);
-            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT", true, OnLightLeft);
-            _lightLeftGlow = MakeLightGlow(_lightLeftButton.transform);
+            BuildWallPanel(_leftWallGroup.transform, "DoorLeft", "LightLeft",
+                OnDoorLeft, OnLightLeft,
+                out _doorLeftButton, out _lightLeftButton, out _lightLeftGlow);
 
             _rightWallGroup = MakeGroup("WallRight");
-            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR", false, OnDoorRight);
-            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT", true, OnLightRight);
-            _lightRightGlow = MakeLightGlow(_lightRightButton.transform);
+            BuildWallPanel(_rightWallGroup.transform, "DoorRight", "LightRight",
+                OnDoorRight, OnLightRight,
+                out _doorRightButton, out _lightRightButton, out _lightRightGlow);
+        }
+
+        /// <summary>
+        /// 造一整块墙面控制面板 —— 照 FNAF 1 原版：
+        /// 深色金属竖板，里面**上红下绿两个方形按钮**，文字印在按钮下方。
+        ///
+        /// 贴图缺失时逐个退回老样式（圆角胶囊 + 文字），保证按钮永远可点。
+        /// </summary>
+        private void BuildWallPanel(Transform parent, string doorName, string lightName,
+            UnityEngine.Events.UnityAction onDoor, UnityEngine.Events.UnityAction onLight,
+            out Image doorButton, out Image lightButton, out Image lightGlow)
+        {
+            // ── 面板底图 ──
+            var panelGo = new GameObject("Panel", typeof(RectTransform), typeof(Image));
+            panelGo.transform.SetParent(parent, false);
+
+            PlaceRect(panelGo.GetComponent<RectTransform>(),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, WallPanelSize);
+
+            var panelImage = panelGo.GetComponent<Image>();
+            var panelSprite = Resources.Load<Sprite>(WallPanelPath);
+
+            if (panelSprite != null)
+            {
+                panelImage.sprite = panelSprite;
+                panelImage.color = Color.white;
+            }
+            else
+            {
+                // 没面板贴图：透明底，只留按钮（不至于整块消失）
+                panelImage.color = new Color(0.10f, 0.10f, 0.11f, 0.92f);
+            }
+
+            panelImage.raycastTarget = false;
+
+            // ── 上：门（红）──
+            doorButton = MakeWallSquare(panelGo.transform, doorName, "DOOR", false,
+                WallDoorButtonY, onDoor);
+
+            // ── 下：灯（绿）+ 光晕 ──
+            lightButton = MakeWallSquare(panelGo.transform, lightName, "LIGHT", true,
+                WallLightButtonY, onLight);
+
+            lightGlow = MakeLightGlow(lightButton.transform);
+        }
+
+        /// <summary>
+        /// 面板里的一个方形按钮 + 它下方的文字标签。
+        /// </summary>
+        private Image MakeWallSquare(Transform panel, string name, string label,
+            bool isLight, float anchorY, UnityEngine.Events.UnityAction onClick)
+        {
+            string path = isLight ? WallButtonLightPath : WallButtonDoorPath;
+            var sprite = Resources.Load<Sprite>(path);
+
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(panel, false);
+
+            PlaceRect(go.GetComponent<RectTransform>(),
+                new Vector2(0.5f, anchorY), new Vector2(0.5f, 0.5f),
+                Vector2.zero, WallButtonSize);
+
+            var image = go.GetComponent<Image>();
+
+            if (sprite != null)
+            {
+                image.sprite = sprite;
+                image.color = Color.white;
+            }
+            else
+            {
+                // 兜底：老样式的纯色块
+                image.sprite = GetButtonSprite();
+                image.type = Image.Type.Sliced;
+                image.color = isLight ? LightOff : DoorOff;
+            }
+
+            image.raycastTarget = true;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            SetMenuButtonColors(button);
+
+            if (onClick != null)
+            {
+                button.onClick.AddListener(onClick);
+            }
+
+            // 文字在**按钮下方**（照原版），不是压在按钮面上
+            var labelText = MakeLabel(panel, label, 17,
+                new Color(0.93f, 0.93f, 0.90f),
+                new Vector2(0.5f, anchorY + WallLabelYOffset),
+                new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(WallPanelSize.x, 22f));
+
+            labelText.alignment = TextAnchor.MiddleCenter;
+            labelText.raycastTarget = false;
+
+            return image;
         }
 
         /// <summary>
@@ -8090,68 +8217,12 @@ namespace NailongFNAF.UI
         /// 墙上按钮。位置**不在建的时候定** —— 锚点钉在画布中心，之后每帧由
         /// <see cref="ApplyWallButtons"/> 按世界点投影摆过去。
         /// </summary>
-        /// <summary>墙面按钮的贴图路径（Resources 下，不带扩展名）。</summary>
-        private const string WallButtonDoorPath = "Art/ui_wall_door";
-        private const string WallButtonLightPath = "Art/ui_wall_light";
+        /// <summary>墙面面板与方按钮的贴图路径（Resources 下，不带扩展名）。</summary>
+        private const string WallPanelPath = "Art/ui_wall_panel";
+        private const string WallButtonDoorPath = "Art/ui_wall_red";
+        private const string WallButtonLightPath = "Art/ui_wall_green";
 
-        /// <summary>
-        /// 造一个墙面按钮。
-        ///
-        /// 用**程序渲的立体贴图**（红 = 门、绿 = 灯），不再走 MakeButton 的
-        /// 圆角胶囊 + 文字 —— 那看起来像 UI 浮层，不像墙上真按钮。
-        /// 贴图缺失时退回老样式，保证按钮永远可点。
-        /// </summary>
-        private Image MakeWallButton(Transform parent, string name, string label,
-            bool isLight, UnityEngine.Events.UnityAction onClick)
-        {
-            string path = isLight ? WallButtonLightPath : WallButtonDoorPath;
-            var icon = Resources.Load<Sprite>(path);
-
-            if (icon == null)
-            {
-                // 兜底：老样式（圆角胶囊 + 文字）
-                var fallback = MakeButton(parent, name, label,
-                    new Vector2(0.5f, 0.5f), Vector2.zero, WallButtonSize, onClick);
-                return fallback.GetComponent<Image>();
-            }
-
-            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
-            go.transform.SetParent(parent, false);
-
-            PlaceRect(go.GetComponent<RectTransform>(),
-                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                Vector2.zero, WallButtonSize);
-
-            var image = go.GetComponent<Image>();
-            image.sprite = icon;
-            image.color = Color.white;
-            image.raycastTarget = true;
-
-            var button = go.GetComponent<Button>();
-            button.targetGraphic = image;
-            SetMenuButtonColors(button);
-
-            if (onClick != null)
-            {
-                button.onClick.AddListener(onClick);
-            }
-
-            // 贴图上叠文字标签 —— 位置固定（上=门、下=灯）但要让人一眼认出来。
-            // 白字 + 深色描边：压在红/绿按钮面上都清楚。
-            var labelText = MakeLabel(go.transform, label, 22,
-                new Color(1f, 0.97f, 0.92f),
-                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                Vector2.zero, WallButtonSize);
-
-            labelText.alignment = TextAnchor.MiddleCenter;
-            labelText.raycastTarget = false;
-
-            var shadow = labelText.gameObject.AddComponent<UnityEngine.UI.Shadow>();
-            shadow.effectColor = new Color(0f, 0f, 0f, 0.85f);
-            shadow.effectDistance = new Vector2(1.5f, -1.5f);
-
-            return image;
-        }
+        // （旧的 MakeWallButton 已被 MakeWallSquare 取代 —— 新版按原版参考图拆成「面板 + 方按钮 + 下方文字」）
 
         /// <summary>
         /// 把一个固定世界点投到 ScreenSpaceOverlay 画布上的本地坐标。
@@ -8206,30 +8277,40 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // ⚠️ 现在门 / 灯按钮是**面板的子物体**（照原版一块竖板），
+            // 所以摆的是**面板**，不是按钮本身 —— 分别摆按钮会让它们
+            // 脱离面板各飞一边（踩过）。
             Vector2 doorPos;
             Vector2 lightPos;
             bool okDoor = TryProjectToCanvas(doorWorld, out doorPos) && InsideCanvas(doorPos);
             bool okLight = TryProjectToCanvas(lightWorld, out lightPos) && InsideCanvas(lightPos);
 
-            PlaceWallButton(doorButton, okDoor, doorPos);
-            PlaceWallButton(lightButton, okLight, lightPos);
-
             bool any = okDoor || okLight;
             group.alpha = any ? 1f : 0f;
             group.blocksRaycasts = any;
-        }
 
-        private void PlaceWallButton(Image button, bool visible, Vector2 canvasLocal)
-        {
-            if (button == null)
+            var panel = doorButton != null
+                ? doorButton.transform.parent as RectTransform
+                : null;
+
+            if (panel == null)
             {
                 return;
             }
 
-            button.gameObject.SetActive(visible);
-            if (visible)
+            // 面板中心对准「门按钮世界点」和「灯按钮世界点」的**中点** ——
+            // 那两个点本来就是按门/灯高度取的，中点正好是面板该在的位置。
+            if (okDoor && okLight)
             {
-                ((RectTransform)button.transform).anchoredPosition = canvasLocal;
+                panel.anchoredPosition = (doorPos + lightPos) * 0.5f;
+            }
+            else if (okDoor)
+            {
+                panel.anchoredPosition = doorPos;
+            }
+            else if (okLight)
+            {
+                panel.anchoredPosition = lightPos;
             }
         }
 
