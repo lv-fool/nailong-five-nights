@@ -3367,18 +3367,34 @@ namespace NailongFNAF.UI
             RectTransform canvasRt = _canvas.transform as RectTransform;
             Vector2 mapSize = new Vector2(MapPanelWidth, MapPanelHeight);
 
-            // 想要的位置：黑壳右沿 + 边距，垂直居中于黑壳
-            float wantX = cs[2].x + MapPanelMargin;
+            // 摆位规则：**右沿贴屏幕右边（留 8px），左沿最多压住黑壳 120px**。
+            //
+            // 为什么允许压壳：右侧空白只有约 290px，严格不压壳时地图只能缩到
+            // 0.52（用户反馈太小）。地图底色是 0.60 半透明暗玻璃（MapPanelFill），
+            // 压住一小条黑壳视觉上完全可接受，换来大得多的可读性。
+            const float RightGap = 8f;          // 右沿离屏幕边
+            // 允许压住黑壳的宽度：200 会把 CAM 4A/4B/6/7 那一片盖得太狠，
+            // 120 是「明显变大」和「不挡画面」的折中（约壳宽的 12%）。
+            const float OverlapBezel = 120f;
 
-            // 右侧能用的宽度：屏幕右沿 - 想要的起点
-            float availW = Screen.width - 8f - wantX;
+            // 挂外时地图可以比原始设计尺寸更大（框外空间有限，用户要求更大可读性）
+            const float MaxOutsideScale = 1.5f;
 
-            // 地图原始尺寸是设计像素；挂外不继承 Area 缩放，
-            // 这里按可用宽度**自适应缩放**（等比，最小 0.35 保底可读）
-            float outsideScale = Mathf.Clamp(availW / mapSize.x, 0.35f, MapPanelScale);
+            float rightEdge = Screen.width - RightGap;
+            float leftLimit = cs[2].x - OverlapBezel;
+            float availW = rightEdge - leftLimit;
 
-            // 放不下（窗口窄到右侧空白不够 35% 地图宽）→ 退回老位置
-            if (outsideScale <= 0.35f + 0.001f && availW < mapSize.x * 0.35f)
+            // ⚠️ **量纲要统一**：availW 是屏幕像素，而 mapSize 是设计像素；
+            // Canvas 的 scaleFactor（约 0.69）会让「设计像素 → 屏幕像素」打折。
+            // 漏掉它的话算出的 scale 会明显偏小（踩过：算出 0.81，实际只占 338px）。
+            float canvasScale = _canvas.scaleFactor > 0.001f ? _canvas.scaleFactor : 1f;
+
+            // 按可用总宽自适应缩放（等比，最小 0.35 保底可读）
+            float outsideScale = Mathf.Clamp(
+                availW / (mapSize.x * canvasScale), 0.35f, MaxOutsideScale);
+
+            // 放不下（窗口窄到连 35% 都塞不进）→ 退回老位置（同样按屏幕像素比）
+            if (availW < mapSize.x * canvasScale * 0.35f)
             {
                 _mapOutside.SetParent(_monitorArea, false);
                 _mapOutside.anchorMin = new Vector2(1f, 0f);
@@ -3398,27 +3414,24 @@ namespace NailongFNAF.UI
 
             _mapOutside.localScale = new Vector3(outsideScale, outsideScale, 1f);
 
-            // 缩放后的实际占宽
-            float scaledW = mapSize.x * outsideScale;
             float scaledH = mapSize.y * outsideScale;
 
             // 垂直：与黑壳居中对齐（黑壳范围可能比屏幕矮）
             float bezelH = cs[1].y - cs[0].y;
             float yCenter = cs[0].y + bezelH * 0.5f;
-            float worldYMin = yCenter - scaledH * 0.5f;
 
-            // 世界 → canvas 本地
-            Vector2 localMin;
+            // pivot = 右沿中点：anchoredPosition 直接就是「右沿中点」的本地坐标
+            Vector2 localRight;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 canvasRt,
-                new Vector2(wantX, worldYMin),
+                new Vector2(rightEdge, yCenter),
                 null,
-                out localMin);
+                out localRight);
 
             _mapOutside.anchorMin = new Vector2(0.5f, 0.5f);
             _mapOutside.anchorMax = new Vector2(0.5f, 0.5f);
-            _mapOutside.pivot = new Vector2(0f, 0.5f);
-            _mapOutside.anchoredPosition = localMin + new Vector2(0f, scaledH * 0.5f);
+            _mapOutside.pivot = new Vector2(1f, 0.5f);
+            _mapOutside.anchoredPosition = localRight;
         }
 
         /// <summary>
