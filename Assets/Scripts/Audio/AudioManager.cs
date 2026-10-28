@@ -90,6 +90,27 @@ namespace NailongFNAF.Audio
         /// <summary>开灯电音素材路径（Resources 下，不带扩展名）。</summary>
         private const string LightBuzzClipPath = "Audio/amb_light_buzz";
 
+        /// <summary>
+        /// 门 / 灯**被破坏后**点按钮时用的「默认音效」。
+        ///
+        /// 用 sfx_power_out（断电那个机械闷响）—— 它本来就在项目里、
+        /// 干涩短促，很适合表达「按了但没反应」，也不必新增素材。
+        /// </summary>
+        private AudioClip DefaultDoorClip
+        {
+            get
+            {
+                if (_defaultDoorClip == null)
+                {
+                    _defaultDoorClip = Resources.Load<AudioClip>("Audio/sfx_power_out");
+                }
+
+                return _defaultDoorClip;
+            }
+        }
+
+        private AudioClip _defaultDoorClip;
+
         // 开关门音效 —— 来自用户给的「关门.mp3」，一段音频里两个波：
         //   第一波（前）= 开门，第二波（后）= 关门，之后是无声音的尾巴，已切掉。
         // 切好的两个 wav 放在 Resources/Door/ 下。
@@ -250,8 +271,23 @@ namespace NailongFNAF.Audio
             _nextDistantAt = Time.time + UnityEngine.Random.Range(DistantMinGap, DistantMaxGap);
         }
 
-        public void PlayDoor(bool closed)
+        /// <summary>
+        /// 开关门的音效。
+        ///
+        /// <paramref name="disabled"/> = 这一侧已经被突破（门和灯都废了）。
+        /// 那时按钮按下去没有实际作用，但**还是要有反馈**，
+        /// 所以退回默认的机械音（<see cref="DefaultDoorClip"/>），
+        /// 而不是新录的那两段「很像真的开了/关了」的素材 ——
+        /// 明确告诉玩家「这扇门现在不归你管了」。
+        /// </summary>
+        public void PlayDoor(bool closed, bool disabled = false)
         {
+            if (disabled)
+            {
+                Play(DefaultDoorClip);
+                return;
+            }
+
             Play(closed ? _sfxDoorClose : _sfxDoorOpen);
         }
 
@@ -288,8 +324,21 @@ namespace NailongFNAF.Audio
                 current, _lightBuzzTarget, speed * Time.unscaledDeltaTime);
         }
 
-        public void PlayLight(bool on)
+        /// <summary>
+        /// 开关灯的音效。
+        ///
+        /// <paramref name="disabled"/> = 这一侧已经被突破（门和灯都废了）。
+        /// 和 <see cref="PlayDoor"/> 一样退回默认机械音 ——
+        /// 按下去没反应，但有反馈，玩家能立刻明白「这侧不归我管了」。
+        /// </summary>
+        public void PlayLight(bool on, bool disabled = false)
         {
+            if (disabled)
+            {
+                Play(DefaultDoorClip);
+                return;
+            }
+
             Play(on ? _sfxLightOn : _sfxLightOff);
         }
 

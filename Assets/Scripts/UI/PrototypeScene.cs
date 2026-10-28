@@ -8377,7 +8377,8 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.LeftDoorClosed != before)
             {
-                _audio.PlayDoor(gm.LeftDoorClosed);
+                // 该侧已被突破 → 门灯都废了，退回默认机械音（见 AudioManager.PlayDoor）
+                _audio.PlayDoor(gm.LeftDoorClosed, gm.IsSideDisabled(Side.Left));
             }
         }
 
@@ -8389,7 +8390,7 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.RightDoorClosed != before)
             {
-                _audio.PlayDoor(gm.RightDoorClosed);
+                _audio.PlayDoor(gm.RightDoorClosed, gm.IsSideDisabled(Side.Right));
             }
         }
 
@@ -8401,7 +8402,7 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.LeftLightOn != before)
             {
-                _audio.PlayLight(gm.LeftLightOn);
+                _audio.PlayLight(gm.LeftLightOn, gm.IsSideDisabled(Side.Left));
             }
         }
 
@@ -8413,7 +8414,7 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.RightLightOn != before)
             {
-                _audio.PlayLight(gm.RightLightOn);
+                _audio.PlayLight(gm.RightLightOn, gm.IsSideDisabled(Side.Right));
             }
         }
 
