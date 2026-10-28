@@ -6484,7 +6484,16 @@ namespace NailongFNAF.UI
         /// 手电筒按钮的显示尺寸（画布逻辑像素）。比例照原图 1262×1182，
         /// 配合 preserveAspect 不会拉变形。
         /// </summary>
-        private static readonly Vector2 FlashlightButtonSize = new Vector2(168f, 157f);
+        // 旋转 134° 后手电筒在框里「变细」，尺寸给大一点才醒目
+        private static readonly Vector2 FlashlightButtonSize = new Vector2(196f, 184f);
+
+        /// <summary>
+        /// 图标的旋转角（度，正 = 逆时针）。
+        ///
+        /// 原图里手电筒是**斜着**的（灯头左下、筒身右上，轴线约 +44°），
+        /// 要「正对着往上」（灯头朝上、筒身竖直向下）得顺时针转约 134°。
+        /// </summary>
+        private const float FlashlightIconRotation = -134f;
 
         private void BuildFlashlightButton()
         {
@@ -6511,6 +6520,10 @@ namespace NailongFNAF.UI
                 _flashlightButton.sprite = icon;
                 _flashlightButton.preserveAspect = true;
                 _flashlightButton.color = Color.white;
+
+                // 原图是斜的，转成「灯头朝上」—— 只转视觉，按钮命中区仍是矩形框
+                go.GetComponent<RectTransform>().localRotation =
+                    Quaternion.Euler(0f, 0f, FlashlightIconRotation);
             }
             else
             {
