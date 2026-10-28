@@ -1241,6 +1241,9 @@ namespace NailongFNAF.UI
             _endShown = false;
             _caughtHoldTimer = 0f;
             ResetDawn();
+
+            // 进关不要"啪"一下切过去：一层黑幕盖住再淡出
+            PlayEnterFade();
         }
 
         /// <summary>
@@ -1298,6 +1301,7 @@ namespace NailongFNAF.UI
             _endShown = false;
             _caughtHoldTimer = 0f;
             ResetDawn();
+            PlayEnterFade();
         }
 
         /// <summary>
@@ -1986,6 +1990,7 @@ namespace NailongFNAF.UI
             _menuRoot.SetActive(false);
             _menuOpen = false;
             _endShown = false;
+            PlayEnterFade();
             _caughtHoldTimer = 0f;
             ResetDawn();
         }

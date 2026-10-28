@@ -674,6 +674,20 @@ namespace NailongFNAF.UI
         /// </summary>
         private RectTransform _monitorArea;
 
+        // ── 进关渐变：从全黑淡出到正常画面 ──
+        //
+        // 进入夜晚时不要"啪"一下切过去，而是一层黑幕盖住 → 淡出。
+        // 时间很短（0.45 秒），只是把突兀的切换糊一下。
+
+        /// <summary>进门黑幕（盖住整个画面，只做淡出）。</summary>
+        private Image _enterFade;
+
+        /// <summary>淡出的总时长（秒）。</summary>
+        private const float EnterFadeSeconds = 0.45f;
+
+        /// <summary>剩余淡出时间；<= 0 表示没有在淡出。</summary>
+        private float _enterFadeLeft;
+
         /// <summary>监控底图用的劣化材质（扫描线 / 噪点 / 色偏 / 暗角）。</summary>
         private Material _monitorCrtMaterial;
 
@@ -1581,6 +1595,7 @@ namespace NailongFNAF.UI
 
             UpdateMonitorBlur(monitorUp);
             UpdateStatic();
+            UpdateEnterFade();
 
             // 监控收起时把「敌人移动签名」作废 —— 否则下次抬起监控，
             // 上次留下的旧签名和这一帧的新签名不同，会被判成「有人动」，
@@ -3489,6 +3504,64 @@ namespace NailongFNAF.UI
         ///
         /// 只在监控升起时开；降下时立刻关掉相机、隐藏图片，一分钱不花。
         /// </summary>
+        /// <summary>
+        /// 造进关黑幕。放在 canvas 最后（最上层），平时完全透明。
+        /// </summary>
+        private void BuildEnterFade()
+        {
+            _enterFade = MakeFullScreenImage("EnterFade", new Color(0f, 0f, 0f, 0f), false);
+            _enterFade.transform.SetAsLastSibling();
+            _enterFade.raycastTarget = false;
+        }
+
+        /// <summary>
+        /// 触发一次「从全黑淡出」。进关卡时调 —— 黑幕瞬间拉满，然后 0.45 秒淡出。
+        /// </summary>
+        private void PlayEnterFade()
+        {
+            if (_enterFade == null)
+            {
+                return;
+            }
+
+            _enterFadeLeft = EnterFadeSeconds;
+
+            var c = _enterFade.color;
+            c.a = 1f;
+            _enterFade.color = c;
+            _enterFade.enabled = true;
+        }
+
+        /// <summary>每帧推进淡出。</summary>
+        private void UpdateEnterFade()
+        {
+            if (_enterFade == null || _enterFadeLeft <= 0f)
+            {
+                return;
+            }
+
+            _enterFadeLeft -= Time.unscaledDeltaTime;
+
+            if (_enterFadeLeft <= 0f)
+            {
+                _enterFadeLeft = 0f;
+
+                var done = _enterFade.color;
+                done.a = 0f;
+                _enterFade.color = done;
+                _enterFade.enabled = false;
+                return;
+            }
+
+            // 缓出：开头淡得快，尾段更柔
+            float t = _enterFadeLeft / EnterFadeSeconds;
+            float a = t * t;          // 二次曲线，视觉上更接近"眼睛适应"
+
+            var c = _enterFade.color;
+            c.a = Mathf.Clamp01(a);
+            _enterFade.color = c;
+        }
+
         private void UpdateMonitorBlur(bool on)
         {
             if (_monitorBlurImage == null)
@@ -6375,6 +6448,9 @@ namespace NailongFNAF.UI
             BuildHud();
             BuildDebugLayer();
             BuildJumpscareLayer();
+
+            // 进关黑幕：最后建 = 最上层，盖得住跳杀层和监控层
+            BuildEnterFade();
         }
 
         private Canvas GetOrCreateCanvas()
