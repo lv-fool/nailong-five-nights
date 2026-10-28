@@ -731,6 +731,13 @@ namespace NailongFNAF.UI
         /// <summary>低分辨率渲染目标。屏幕尺寸变了要重建。</summary>
         private RenderTexture _blurRT;
 
+        /// <summary>
+        /// 模糊 RT 是否已经渲染过至少一帧。
+        /// 首次创建时 RT 内容是未初始化的（白/杂色），必须等相机渲过一帧
+        /// 才把它显示出来 —— 否则第一次开监控会闪白点。
+        /// </summary>
+        private bool _blurReady;
+
         /// <summary>模糊层把画面缩小到 1/6 再拉大 —— 数越大越糊、越便宜。</summary>
         private const int MonitorBlurDownscale = 6;
 
@@ -3484,6 +3491,10 @@ namespace NailongFNAF.UI
                     _blurCam.enabled = false;
                 }
 
+                // 关掉后 RT 里还是上次那帧旧画面（可能是上一个机位 / 旧窗口尺寸）。
+                // 下次打开要先让相机重新渲一帧，否则会闪出**上一次的画面**。
+                _blurReady = false;
+
                 return;
             }
 
@@ -3513,6 +3524,18 @@ namespace NailongFNAF.UI
                 _blurRT = new RenderTexture(w, h, 16, RenderTextureFormat.Default);
                 _blurRT.filterMode = FilterMode.Bilinear;
                 _blurRT.Create();
+
+                // ⚠️ 新建的 RT 内容是**未初始化的**（通常一片白/杂色）。
+                // 相机要等到本帧渲染结束才往里画，而 RawImage 一旦拿到它
+                // 就会立刻显示 —— 于是「第一次打开监控」会闪一下白点/白块。
+                // 先手动清成黑色，首帧就是黑的，不会闪。
+                var prev = RenderTexture.active;
+                RenderTexture.active = _blurRT;
+                GL.Clear(false, true, Color.black);
+                RenderTexture.active = prev;
+
+                // 这一帧先别显示模糊层，等相机真的渲过一帧再说
+                _blurReady = false;
             }
 
             if (_blurCam == null)
@@ -3539,6 +3562,21 @@ namespace NailongFNAF.UI
             }
 
             _monitorBlurImage.texture = _blurRT;
+
+            // 首帧不显示：RT 虽然已经清成黑色，但相机还没往里画，
+            // 这一帧显示出来就是「一块纯黑压在监控画面上」——
+            // 屏幕上像是闪了一下黑块。等下一帧再开。
+            if (!_blurReady)
+            {
+                _blurReady = true;
+
+                if (_monitorBlurImage.enabled)
+                {
+                    _monitorBlurImage.enabled = false;
+                }
+
+                return;
+            }
 
             if (!_monitorBlurImage.enabled)
             {
