@@ -256,6 +256,29 @@ namespace NailongFNAF.UI
         /// </summary>
         private const float JumpscareVideoSpeed = 3.5f;
 
+        // ── 贝利亚跳杀：大头图从远到近放大 ──
+        //
+        // 他没有视频（那版是失败品），改用一张**头部特写**做程序化放大：
+        // 从很小、很远处开始，一路怼到脸上，过程中还带一点抖动。
+        // 时长和别的跳杀完全一致（JumpscareVideoSeconds），玩家感觉不到差别。
+        //
+        // 素材：Resources/Belial/char_belial_lunge.png（尖冠 + 橙红发光眼的头部特写）
+
+        /// <summary>贝利亚跳杀用的头部特写。</summary>
+        private Image _belialLungeImage;
+
+        /// <summary>贝利亚跳杀的推进时间（秒）。</summary>
+        private float _belialLungeTime;
+
+        /// <summary>贝利亚跳杀是否正在播。</summary>
+        private bool _belialLungePlaying;
+
+        /// <summary>起始缩放（很小 = 很远）。</summary>
+        private const float BelialLungeStartScale = 0.18f;
+
+        /// <summary>结束缩放（很大 = 怼到脸上）。</summary>
+        private const float BelialLungeEndScale = 1.65f;
+
         /// <summary>
         /// 跳杀视频播多久（秒）= 前半段时长 ÷ 倍速。
         /// 素材 5.16 秒 → 前半段 2.58 秒 → ÷ 3.5 ≈ 0.74 秒。
@@ -1141,6 +1164,7 @@ namespace NailongFNAF.UI
             UpdateJumpscareShake();
             UpdateAudio(gm);
             UpdateJumpscareVideo();
+            UpdateBelialLunge();
         }
 
         private static void EnsureGameManager()
@@ -1731,6 +1755,7 @@ namespace NailongFNAF.UI
 
             ApplyFrontCharacter3D(gm);
             ApplyBelial(gm);
+            DetectBelialKill(gm);
 
             // 门洞外的走廊：开灯换亮版、关灯换暗版（同一构图，只换亮度）。
             // 照 FNAF 1 —— 开灯是唯一知道门外有什么的办法。
@@ -4709,6 +4734,209 @@ namespace NailongFNAF.UI
             _jumpscareVideoTarget = null;
         }
 
+        /// <summary>
+        /// 调试用：直接播一次贝利亚跳杀（不依赖任何游戏状态）。
+        /// 编辑器菜单和自检都走这个。
+        /// </summary>
+        private void DebugPlayBelialLunge()
+        {
+            _hasJumpscare = true;
+            _jumpscareTime = 0f;
+            _redSpread = 0f;
+            ApplyRedSpread();
+
+            if (_jumpscareOverlay != null)
+            {
+                _jumpscareOverlay.gameObject.SetActive(true);
+                _jumpscareOverlay.color = Color.black;
+            }
+
+            PlayBelialLunge();
+            PlayJumpscareSfx();
+        }
+
+        /// <summary>
+        /// 检测贝利亚把玩家弄死的那一刻，触发跳杀。
+        ///
+        /// ⚠️ 贝利亚**不在 EnemyId 里**（他是贝利亚之夜专属的遭遇战，
+        /// 走 BelialEncounter 那套独立逻辑），所以接不进 EnemyDirector.Attacked
+        /// 事件，只能在这里轮询「刚死 + 是他干的」这个状态。
+        ///
+        /// GameManager.TickBelialEncounter 里 ConsumeKill() 后调 MarkCaught()，
+        /// 但那个信号是一次性的，这里靠 HasBeenCaught 从 false 变 true 来判断。
+        /// </summary>
+        private void DetectBelialKill(GameManager gm)
+        {
+            bool caught = gm != null && gm.HasBeenCaught;
+            bool belialMode = gm != null && gm.BelialMode;
+
+            if (caught && belialMode && !_belialCaughtSeen)
+            {
+                _belialCaughtSeen = true;
+
+                // 走和普通跳杀一样的开场：黑幕 + 红扩散
+                _hasJumpscare = true;
+                _jumpscareEnemy = EnemyId.Nailong;   // 占位（贝利亚不在枚举里）
+                _jumpscareTime = 0f;
+                _redSpread = 0f;
+                ApplyRedSpread();
+
+                _jumpscareOverlay.gameObject.SetActive(true);
+                _jumpscareOverlay.color = Color.black;
+
+                PlayBelialLunge();
+                PlayJumpscareSfx();
+            }
+            else if (!caught)
+            {
+                _belialCaughtSeen = false;
+            }
+        }
+
+        /// <summary>贝利亚是否已经把玩家弄死（防重复触发）。</summary>
+        private bool _belialCaughtSeen;
+
+        /// <summary>
+        /// 贝利亚跳杀的图片层：一张头部特写，平时隐藏。
+        /// </summary>
+        private void BuildBelialLungeLayer()
+        {
+            // ⚠️ 挂在 **canvas 根**、且排在 JumpscareOverlay 之后 ——
+            // 挂在 overlay 下面的话会被那层的红色扩散盖住（那层是 RedSpread 材质，
+            // 跳杀中会整片变红，把贝利亚的大头糊掉）。
+            var go = new GameObject("BelialLunge", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            // 排到跳杀 overlay 之后 = 盖在它上面
+            if (_jumpscareOverlay != null)
+            {
+                go.transform.SetSiblingIndex(_jumpscareOverlay.transform.GetSiblingIndex() + 1);
+            }
+            else
+            {
+                go.transform.SetAsLastSibling();
+            }
+            
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(1000f, 1300f);
+
+            _belialLungeImage = go.GetComponent<Image>();
+
+            var sprite = Resources.Load<Sprite>("Belial/char_belial_lunge");
+            if (sprite != null)
+            {
+                _belialLungeImage.sprite = sprite;
+                _belialLungeImage.preserveAspect = true;
+            }
+
+            _belialLungeImage.color = Color.white;
+            _belialLungeImage.raycastTarget = false;
+
+            go.SetActive(false);
+        }
+
+        /// <summary>
+        /// 播一次贝利亚跳杀：大头从远到近放大。
+        /// 时长和视频跳杀一致（<see cref="JumpscareVideoSeconds"/>），玩家感觉不到差别。
+        /// </summary>
+        private void PlayBelialLunge()
+        {
+            if (_belialLungeImage == null)
+            {
+                return;
+            }
+
+            _belialLungePlaying = true;
+            _belialLungeTime = 0f;
+
+            _belialLungeImage.gameObject.SetActive(true);
+            _belialLungeImage.color = Color.white;
+
+            ApplyBelialLungeFrame(0f);
+        }
+
+        /// <summary>
+        /// 按进度 <paramref name="t"/>（0~1）摆一帧。
+        ///
+        /// 缩放走**三次方**：开头慢（看起来还在远处）、后段猛冲（压迫感），
+        /// 而不是线性匀速 —— 匀速看着像 PPT 放大。
+        /// 另外叠一点不规则抖动，模拟镜头被撞。
+        /// </summary>
+        private void ApplyBelialLungeFrame(float t)
+        {
+            if (_belialLungeImage == null)
+            {
+                return;
+            }
+
+            float clamped = Mathf.Clamp01(t);
+
+            // 三次方缓入：0 → 0，1 → 1，但中段爬得很慢
+            float eased = clamped * clamped * clamped;
+
+            float scale = Mathf.Lerp(BelialLungeStartScale, BelialLungeEndScale, eased);
+            _belialLungeImage.rectTransform.localScale = new Vector3(scale, scale, 1f);
+
+            // 抖动：越接近结尾越猛（幅度随 t 增大）
+            float shakeAmp = Mathf.Lerp(2f, 30f, clamped);
+            float sx = (Mathf.PerlinNoise(Time.time * 18f, 0f) - 0.5f) * 2f * shakeAmp;
+            float sy = (Mathf.PerlinNoise(0f, Time.time * 18f) - 0.5f) * 2f * shakeAmp;
+            _belialLungeImage.rectTransform.anchoredPosition = new Vector2(sx, sy);
+
+            // 最后 12% 时间淡出，接上结算页不至于硬切。
+            //
+            // ⚠️ alpha 要**每帧都写**，不能只在 t > 0.88 时写 ——
+            // 否则淡出留下的 0.00 会一直保留，下一轮从头播时整张图是透明的
+            // （踩过：跳杀只剩一片红，看不到贝利亚）。
+            float alpha = 1f;
+            if (clamped > 0.88f)
+            {
+                alpha = Mathf.InverseLerp(1f, 0.88f, clamped);
+                alpha = Mathf.Clamp01(alpha);
+            }
+
+            var col = _belialLungeImage.color;
+            col.a = alpha;
+            _belialLungeImage.color = col;
+        }
+
+        /// <summary>每帧推进贝利亚跳杀。</summary>
+        private void UpdateBelialLunge()
+        {
+            if (!_belialLungePlaying || _belialLungeImage == null)
+            {
+                return;
+            }
+
+            _belialLungeTime += Time.unscaledDeltaTime;
+
+            float t = _belialLungeTime / JumpscareVideoSeconds;
+            ApplyBelialLungeFrame(t);
+
+            if (t >= 1f)
+            {
+                _belialLungePlaying = false;
+                _belialLungeImage.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>停掉贝利亚跳杀并把图片收起来。</summary>
+        private void StopBelialLunge()
+        {
+            _belialLungePlaying = false;
+            _belialLungeTime = 0f;
+
+            if (_belialLungeImage != null)
+            {
+                _belialLungeImage.gameObject.SetActive(false);
+            }
+        }
+
         /// <summary>跳杀：先是「冲脸」快速放大，然后一直抖。</summary>
         private void UpdateJumpscareShake()
         {
@@ -6497,6 +6725,7 @@ namespace NailongFNAF.UI
             BuildHud();
             BuildDebugLayer();
             BuildJumpscareLayer();
+            BuildBelialLungeLayer();
 
             // 进关黑幕：最后建 = 最上层，盖得住跳杀层和监控层
             BuildEnterFade();
