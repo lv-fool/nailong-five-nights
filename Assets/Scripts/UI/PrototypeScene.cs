@@ -4261,6 +4261,15 @@ namespace NailongFNAF.UI
             float breathe = 0.82f + Mathf.Sin(Time.time * 2.4f) * 0.18f;
             ApplyLightGlow(_lightLeftGlow, gm.LeftLightOn && !leftDead, breathe);
             ApplyLightGlow(_lightRightGlow, gm.RightLightOn && !rightDead, breathe);
+
+            // 开灯电音：**任意一侧亮着就响**。
+            // ⚠️ 必须在这里汇总，不能挂到 OnLightLeft / OnLightRight 上各调一次 ——
+            // 那样左右会互相覆盖，关掉一侧时另一侧还亮着，声音却断了。
+            if (_audio != null)
+            {
+                bool anyLightOn = (gm.LeftLightOn && !leftDead) || (gm.RightLightOn && !rightDead);
+                _audio.SetLightBuzz(anyLightOn);
+            }
         }
 
         /// <summary>

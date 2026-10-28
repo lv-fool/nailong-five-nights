@@ -87,6 +87,9 @@ namespace NailongFNAF.Audio
         /// <summary>提示音的 Resources 路径（不带扩展名）。</summary>
         private const string LightRevealClipPath = "Audio/sfx_light_reveal_once";
 
+        /// <summary>开灯电音素材路径（Resources 下，不带扩展名）。</summary>
+        private const string LightBuzzClipPath = "Audio/amb_light_buzz";
+
         [Header("断电音乐（音乐盒，单独一条轨）")]
         [SerializeField] private AudioClip _powerOutMusic;
 
@@ -115,6 +118,30 @@ namespace NailongFNAF.Audio
         /// <summary>牛叫专用通道 —— 它需要单独设 pitch，不能和别的音效共用。</summary>
         private AudioSource _mooSource;
 
+        // ── 开灯电音 ──
+        //
+        // 灯亮着的时候要持续响，关灯立刻停 —— 所以是**循环音源**，
+        // 不能走 PlayOneShot（那个只响一次）。
+        //
+        // 素材是程序生成的 50Hz 交流嗡鸣 + 8kHz 镇流器啸叫 + 电流沙沙，
+        // 4 秒、首尾淡入淡出，循环无接缝。和常驻底噪（amb_electric_hum）
+        // 是两回事 —— 那个一直在响，这个只在开灯时加进来。
+
+        /// <summary>开灯循环音源。</summary>
+        private AudioSource _lightLoopSource;
+
+        /// <summary>开灯电音的素材。</summary>
+        private AudioClip _lightBuzz;
+
+        /// <summary>开灯电音的音量（比底噪明显，但不盖过语音和音效）。</summary>
+        private const float LightBuzzVolume = 0.34f;
+
+        /// <summary>开灯电音的淡入 / 淡出时长（秒）—— 硬切会"啪"一声。</summary>
+        private const float LightBuzzFadeSeconds = 0.22f;
+
+        /// <summary>当前电音通道的目标音量（0 = 关灯）。</summary>
+        private float _lightBuzzTarget;
+
         private void Awake()
         {
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
@@ -128,6 +155,15 @@ namespace NailongFNAF.Audio
             _music = CreateSource("PowerOutMusic", false, _musicVolume);
             _footstepSource = CreateSource("Footstep", false, _sfxVolume);
             _mooSource = CreateSource("Moo", false, _sfxVolume);
+
+            _lightLoopSource = CreateSource("LightBuzz", true, 0f);
+            _lightBuzz = Resources.Load<AudioClip>(LightBuzzClipPath);
+
+            if (_lightBuzz != null)
+            {
+                _lightLoopSource.clip = _lightBuzz;
+                _lightLoopSource.Play();   // 一直"播"着，音量 0 → 开灯时推上去
+            }
 
             PlayLoop(_ambientA, _ambFan);
             PlayLoop(_ambientB, _ambHum);
@@ -168,6 +204,9 @@ namespace NailongFNAF.Audio
         /// </summary>
         private void Update()
         {
+            // 电音淡入淡出必须最先跑 —— 下面几处 return 会把它跳过
+            UpdateLightBuzz();
+
             if (_ambDistant == null || _ambientC == null)
             {
                 return;
@@ -191,6 +230,39 @@ namespace NailongFNAF.Audio
         public void PlayDoor(bool closed)
         {
             Play(closed ? _sfxDoorClose : _sfxDoorOpen);
+        }
+
+        /// <summary>
+        /// 开关「开灯电音」的循环。
+        ///
+        /// ⚠️ 由调用方**汇总**后再传**（任意一侧亮着就 on）**，不要每侧各调一次 ——
+        /// 左右灯是分开调用的，各调一次会互相覆盖（开左灯 → on，开右灯 → 又 on，
+        /// 关左灯 → off，但右灯还亮着，声音就断了）。
+        /// </summary>
+        public void SetLightBuzz(bool on)
+        {
+            _lightBuzzTarget = on ? LightBuzzVolume : 0f;
+        }
+
+        /// <summary>每帧推进电音的淡入淡出。</summary>
+        private void UpdateLightBuzz()
+        {
+            if (_lightLoopSource == null || _lightBuzz == null)
+            {
+                return;
+            }
+
+            float current = _lightLoopSource.volume;
+
+            if (Mathf.Approximately(current, _lightBuzzTarget))
+            {
+                return;
+            }
+
+            float speed = LightBuzzVolume / Mathf.Max(0.01f, LightBuzzFadeSeconds);
+
+            _lightLoopSource.volume = Mathf.MoveTowards(
+                current, _lightBuzzTarget, speed * Time.unscaledDeltaTime);
         }
 
         public void PlayLight(bool on)
