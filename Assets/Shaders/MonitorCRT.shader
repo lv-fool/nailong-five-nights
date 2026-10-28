@@ -108,9 +108,12 @@ Shader "NailongFNAF/MonitorCRT"
                 float lum = dot(c.rgb, float3(0.299, 0.587, 0.114));
                 c.rgb = lerp(c.rgb, lum.xxx, 0.34 * s);
 
-                // ③c 降对比 + 抬黑位 → 灰蒙蒙的雾感
+                // ③c 降对比 → 灰蒙蒙的雾感。
+                //
+                // ⚠️ 这里**不再额外抬黑位**（原来有 c.rgb += 0.045）。
+                // 抬黑位等于给每个像素加一个常数 —— 纯黑区域被抬成灰，
+                // 再叠上噪点就变成「飘着的白点」。降对比本身已经让画面发灰了。
                 c.rgb = (c.rgb - 0.5) * lerp(1.0, 0.78, s) + 0.5;
-                c.rgb += 0.045 * s;
 
                 // ① 扫描线：更深的横纹，缓慢上滚
                 float scanPos = uv.y * 360.0 + _Time.y * 10.0;
@@ -123,20 +126,15 @@ Shader "NailongFNAF/MonitorCRT"
                 fixed3 coarse = tex2D(_MainTex, q).rgb * IN.color.rgb;
                 c.rgb = lerp(c.rgb, coarse, 0.22 * s);
 
-                // ② 颗粒噪点：逐像素 + 逐帧随机（比之前明显）
-                float n = Hash(floor(uv * float2(960.0, 540.0)) + floor(_Time.y * 30.0));
-                c.rgb += (n - 0.5) * 0.16 * s;
-
-                // ②b 偶发的亮噪点（信号毛刺）
+                // ② 颗粒噪点：逐像素 + 逐帧随机
                 //
-                // ⚠️ 三个约束都必要：
-                //   · 概率压到 0.2%（step 阈值 0.998 → 0.998）
-                //   · 亮度减半（0.55 → 0.28）—— 一整片 0.55 的白点很扎眼
-                //   · **开局前 2 秒不闪**：刚编译完 _Time.y 从 0 起算，
-                //     头几帧 hash 分布还没"散开"，看着就是一片白粒子飘过。
-                float sparkAge = step(2.0, _Time.y);
-                float spark = step(0.998, Hash(floor(uv * float2(360.0, 200.0)) + floor(_Time.y * 24.0)));
-                c.rgb += spark * 0.28 * s * sparkAge;
+                // ⚠️ **必须用乘法，不能用加法**（踩过，表现为「暗部飘白粒子」）：
+                // 加法是「往像素上加固定亮度」，画面几乎全黑的地方（天花板、黑箱）
+                // 加 0.08 就成了孤立的白点，看起来像一片白粒子在飘。
+                // 乘法是按比例扰动，黑色 × 任何值仍是黑色，只有本来有亮度的地方才见颗粒
+                // —— 这才是真实传感器的噪声行为。
+                float n = Hash(floor(uv * float2(960.0, 540.0)) + floor(_Time.y * 30.0));
+                c.rgb *= 1.0 + (n - 0.5) * 0.30 * s;
 
                 // ④ 暗角：到中心的距离越大越暗（更强）
                 float2 d = uv - 0.5;
@@ -146,9 +144,10 @@ Shader "NailongFNAF/MonitorCRT"
                 // ⑥ 整体压暗一点点 —— 老监控屏不会那么"透亮"
                 c.rgb *= lerp(1.0, 0.90, s);
 
-                // ⑦ 轻微重影：往右侧偏移一点点再叠一层，模拟信号反射
+                // ⑦ 轻微重影：往右侧偏移一点点再叠一层，模拟信号反射。
+                // 同样是**乘法**叠加 —— 加法会让纯黑区域浮出一层灰白。
                 fixed3 ghost = tex2D(_MainTex, uv + float2(0.0035, 0.0)).rgb * IN.color.rgb;
-                c.rgb += ghost * 0.13 * s;
+                c.rgb *= 1.0 + ghost * 0.10 * s;
 
                 return c;
             }
