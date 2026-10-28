@@ -575,7 +575,7 @@ namespace NailongFNAF.UI
         private static readonly Color FlashlightOff = new Color(0.24f, 0.23f, 0.20f);
 
         /// <summary>手电筒照在正前方时，画面整体提亮的强度。</summary>
-        private const float FlashlightGlowAlpha = 0.35f;
+        private const float FlashlightGlowAlpha = 0.52f;
 
         // 按钮底图：填色 + 一圈接近纯白的描边。Image.color 一乘，描边就比底色亮一档
         private static readonly Color ButtonFace = new Color(0.76f, 0.76f, 0.79f);
@@ -2064,8 +2064,10 @@ namespace NailongFNAF.UI
                 // 稍微向上偏一点（按钮贴图是竖着的，灯头在图标上方）。
                 if (_flashlightGlow != null)
                 {
+                    // 光斑中心往上抬 —— 手电是往上照的，照的是正门那一片，
+                    // 不是照桌面。120px 让亮斑落在门框附近。
                     ((RectTransform)_flashlightGlow.transform).anchoredPosition =
-                        flashPos + new Vector2(0f, 60f);
+                        flashPos + new Vector2(0f, 300f);
                 }
             }
 
@@ -6710,7 +6712,7 @@ namespace NailongFNAF.UI
         /// 和桌面上的手电筒位置对不上（用户反馈「手电筒光的位置也固定」）。
         /// 现在改成一块跟着手电世界点走的光斑，从手电的位置往外散。
         /// </summary>
-        private static readonly Vector2 FlashlightGlowSize = new Vector2(1100f, 900f);
+        private static readonly Vector2 FlashlightGlowSize = new Vector2(1500f, 1250f);
 
         private void BuildFlashlightGlow()
         {
