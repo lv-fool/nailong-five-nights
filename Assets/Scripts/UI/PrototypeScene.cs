@@ -193,7 +193,15 @@ namespace NailongFNAF.UI
         /// 手电筒按钮中心离屏幕底边多高。按钮半高 30，所以底边在 172 - 30 = 142，
         /// 高过监控热区（0.10 × 1080 = 108）—— 免得点它的时候顺手把监控收了。
         /// </summary>
-        private const float FlashlightButtonBottom = 208f;
+        // 手电筒按钮的位置 —— **贴在世界的桌面上**，不是钉在屏幕底部。
+        //
+        // 原来是固定屏幕位置（屏幕底正中），结果挡住了桌上的手机 UI（用户反馈）。
+        // 改成和墙上 DOOR / LIGHT 按钮一样的做法：锚一个世界点，每帧投影到画布，
+        // 转头时跟着桌子一起移动。
+        //
+        // 取手机右侧一点：手机在 (0.24, 1.02, 0)，手电放 x=0.62 —— 桌面上、
+        // 手机旁边、镜头朝正前时落在画面右下（不挡手机）。
+        private static readonly Vector3 FlashlightButtonWorld = new Vector3(0.92f, 1.00f, -0.10f);
 
         /// <summary>
         /// 断电时奶龙立绘的高度 = **门洞屏幕高度的多少倍**。
@@ -2040,6 +2048,14 @@ namespace NailongFNAF.UI
             if (_flashlightHold != null && _flashlightHold.IsHeld && !Input.GetMouseButton(0))
             {
                 _flashlightHold.Release();
+            }
+
+            // 位置每帧按世界点投影 —— 转头时手电跟着桌子一起动。
+            // ⚠️ 必须在 _room.SetPan(_pan) 之后调（相机朝向先定），
+            //    和墙上按钮同样的要求；ApplyFlashlight 本身就在那之后。
+            if (usable && _flashlightButton != null && TryProjectToCanvas(FlashlightButtonWorld, out Vector2 flashPos))
+            {
+                ((RectTransform)_flashlightButton.transform).anchoredPosition = flashPos;
             }
 
             // 按住左/右 Ctrl 等同于按住底部那个按钮 —— 键盘玩家不用去够屏幕底部。
@@ -6717,9 +6733,10 @@ namespace NailongFNAF.UI
                 typeof(RectTransform), typeof(Image), typeof(Button));
             go.transform.SetParent(_flashlightGroup.transform, false);
 
+            // 锚点钉在画布中心 —— 具体位置每帧由 ApplyFlashlight 按世界点投影摆过去
             PlaceRect(go.GetComponent<RectTransform>(),
-                new Vector2(0.5f, 0f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, FlashlightButtonBottom),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero,
                 FlashlightButtonSize);
 
             _flashlightButton = go.GetComponent<Image>();
