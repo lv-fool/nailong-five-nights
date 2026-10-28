@@ -90,6 +90,12 @@ namespace NailongFNAF.Audio
         /// <summary>开灯电音素材路径（Resources 下，不带扩展名）。</summary>
         private const string LightBuzzClipPath = "Audio/amb_light_buzz";
 
+        // 开关门音效 —— 来自用户给的「关门.mp3」，一段音频里两个波：
+        //   第一波（前）= 开门，第二波（后）= 关门，之后是无声音的尾巴，已切掉。
+        // 切好的两个 wav 放在 Resources/Door/ 下。
+        private const string DoorOpenClipPath = "Door/sfx_door_open";
+        private const string DoorCloseClipPath = "Door/sfx_door_close";
+
         [Header("断电音乐（音乐盒，单独一条轨）")]
         [SerializeField] private AudioClip _powerOutMusic;
 
@@ -155,6 +161,23 @@ namespace NailongFNAF.Audio
             _music = CreateSource("PowerOutMusic", false, _musicVolume);
             _footstepSource = CreateSource("Footstep", false, _sfxVolume);
             _mooSource = CreateSource("Moo", false, _sfxVolume);
+
+            // 开关门音效：**优先用 Resources 里的新素材**。
+            //
+            // ⚠️ 不能写成「场景没绑才兜底」—— Main.unity 里绑的是旧的
+            // sfx_door_open.ogg / sfx_door_close.ogg 的 GUID，那样永远走不到新素材。
+            // 换素材时这里不动场景也能生效。
+            var newOpen = Resources.Load<AudioClip>(DoorOpenClipPath);
+            if (newOpen != null)
+            {
+                _sfxDoorOpen = newOpen;
+            }
+
+            var newClose = Resources.Load<AudioClip>(DoorCloseClipPath);
+            if (newClose != null)
+            {
+                _sfxDoorClose = newClose;
+            }
 
             _lightLoopSource = CreateSource("LightBuzz", true, 0f);
             _lightBuzz = Resources.Load<AudioClip>(LightBuzzClipPath);
