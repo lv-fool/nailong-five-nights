@@ -4742,6 +4742,8 @@ namespace NailongFNAF.UI
         {
             _hasJumpscare = true;
             _jumpscareTime = 0f;
+
+            // 纯黑开场（_redSpread = 0 时 shader 输出全黑）
             _redSpread = 0f;
             ApplyRedSpread();
 
@@ -4950,6 +4952,15 @@ namespace NailongFNAF.UI
 
             // 视频在放的时候不再抖静态图 —— 让视频自己动（计时在 Update 里）
             if (_jumpscareVideoPlaying)
+            {
+                return;
+            }
+
+            // 贝利亚的大头放大期间也一样：**此时必须是纯黑背景**，
+            // 红色扩散要等跳杀结束才开始（用户明确要求）。
+            // 这里 early-return 就同时停掉了下面的红屏推进
+            // （_redSpread 那段在地方法末尾，见 ApplyRedSpread）。
+            if (_belialLungePlaying)
             {
                 return;
             }
