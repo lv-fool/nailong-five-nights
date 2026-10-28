@@ -8021,6 +8021,35 @@ namespace NailongFNAF.UI
                 t.raycastTarget = false;
             }
 
+            // ── 贝利亚跳杀（单独一个按钮）──
+            //
+            // 他不在 EnemyId 里（是遭遇战，走 BelialEncounter 那套），
+            // 所以不能塞进上面那个循环，单独接一个。
+            {
+                var btnGo = new GameObject("JumpBtnBelial",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                btnGo.transform.SetParent(panel.transform, false);
+
+                var btnRect = (RectTransform)btnGo.transform;
+                PlaceRect(btnRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(80f + 4 * 118f, 24f), new Vector2(110f, 40f));
+
+                var img = btnGo.GetComponent<Image>();
+                img.sprite = _buttonSprite;
+                // 深紫黑：和上面四个红色的区分开，一眼看出不是普通敌人
+                img.color = new Color(0.20f, 0.10f, 0.26f, 0.95f);
+
+                var btn = btnGo.GetComponent<Button>();
+                btn.targetGraphic = img;
+                btn.onClick.AddListener(DebugPlayBelialLunge);
+
+                Text t = MakeLabel(btnGo.transform, "贝利亚", 17,
+                    new Color(1f, 0.72f, 0.45f),
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                    Vector2.zero, new Vector2(110f, 40f));
+                t.raycastTarget = false;
+            }
+
             // ── 电量一键设定 ──
             Text powerLabel = MakeLabel(panel.transform, "电量：", 18,
                 new Color(0.65f, 0.85f, 0.65f),
