@@ -4098,16 +4098,65 @@ namespace NailongFNAF.UI
             bool leftDead = gm.IsSideDisabled(Side.Left);
             bool rightDead = gm.IsSideDisabled(Side.Right);
 
-            _doorLeftButton.color = leftDead ? Disabled : (gm.LeftDoorClosed ? DoorOn : DoorOff);
-            _doorRightButton.color = rightDead ? Disabled : (gm.RightDoorClosed ? DoorOn : DoorOff);
-            _lightLeftButton.color = leftDead ? Disabled : (gm.LeftLightOn ? LightOn : LightOff);
-            _lightRightButton.color = rightDead ? Disabled : (gm.RightLightOn ? LightOn : LightOff);
+            // 贴图按钮只调**亮度**，不染色 —— 红/绿已经画在贴图里了，
+            // 再乘 DoorOn/DoorOff 那种颜色会把整块糊成一片。
+            //   · 断开（On） ：原色，看起来「按下去、亮着」
+            //   · 闲置（Off）：压暗，看起来「没通电」
+            //   · 失效       ：更暗 + 偏灰
+            SetWallButtonState(_doorLeftButton, leftDead ? 2 : (gm.LeftDoorClosed ? 1 : 0), DoorOn, DoorOff);
+            SetWallButtonState(_doorRightButton, rightDead ? 2 : (gm.RightDoorClosed ? 1 : 0), DoorOn, DoorOff);
+            SetWallButtonState(_lightLeftButton, leftDead ? 2 : (gm.LeftLightOn ? 1 : 0), LightOn, LightOff);
+            SetWallButtonState(_lightRightButton, rightDead ? 2 : (gm.RightLightOn ? 1 : 0), LightOn, LightOff);
 
             // LIGHT 光晕：灯亮 → 亮绿呼吸（径向渐变淡入淡出），灯灭 → 熄灭。
             // 呼吸只动 alpha 和 scale，不动颜色。
             float breathe = 0.82f + Mathf.Sin(Time.time * 2.4f) * 0.18f;
             ApplyLightGlow(_lightLeftGlow, gm.LeftLightOn && !leftDead, breathe);
             ApplyLightGlow(_lightRightGlow, gm.RightLightOn && !rightDead, breathe);
+        }
+
+        /// <summary>
+        /// 设置墙面按钮的视觉状态。
+        ///
+        /// 有贴图时只调亮度（红/绿画在贴图里）；没贴图时退回老的染色逻辑。
+        ///
+        /// <paramref name="state"/>：0 = 闲置、1 = 激活（按下/亮着）、2 = 失效。
+        /// </summary>
+        private static void SetWallButtonState(Image image, int state,
+            Color onColor, Color offColor)
+        {
+            if (image == null)
+            {
+                return;
+            }
+
+            bool hasTexture = image.sprite != null
+                && (image.sprite.name == "ui_wall_door" || image.sprite.name == "ui_wall_light");
+
+            if (!hasTexture)
+            {
+                // 老逻辑：纯色染色
+                image.color = state == 2 ? Disabled : (state == 1 ? onColor : offColor);
+                return;
+            }
+
+            switch (state)
+            {
+                case 1:
+                    // 激活：原色（贴图本身的高光就够亮）
+                    image.color = Color.white;
+                    break;
+
+                case 2:
+                    // 失效：又暗又灰
+                    image.color = new Color(0.25f, 0.25f, 0.25f, 0.75f);
+                    break;
+
+                default:
+                    // 闲置：压暗，但保留颜色倾向
+                    image.color = new Color(0.62f, 0.62f, 0.62f, 1f);
+                    break;
+            }
         }
 
         private static void ApplyLightGlow(Image glow, bool on, float breathe)
@@ -6580,13 +6629,13 @@ namespace NailongFNAF.UI
         private void BuildWallButtons()
         {
             _leftWallGroup = MakeGroup("WallLeft");
-            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR", OnDoorLeft);
-            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT", OnLightLeft);
+            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR", false, OnDoorLeft);
+            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT", true, OnLightLeft);
             _lightLeftGlow = MakeLightGlow(_lightLeftButton.transform);
 
             _rightWallGroup = MakeGroup("WallRight");
-            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR", OnDoorRight);
-            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT", OnLightRight);
+            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR", false, OnDoorRight);
+            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT", true, OnLightRight);
             _lightRightGlow = MakeLightGlow(_lightRightButton.transform);
         }
 
@@ -8041,13 +8090,67 @@ namespace NailongFNAF.UI
         /// 墙上按钮。位置**不在建的时候定** —— 锚点钉在画布中心，之后每帧由
         /// <see cref="ApplyWallButtons"/> 按世界点投影摆过去。
         /// </summary>
-        private Image MakeWallButton(Transform parent, string name, string label,
-            UnityEngine.Events.UnityAction onClick)
-        {
-            var button = MakeButton(parent, name, label, new Vector2(0.5f, 0.5f), Vector2.zero,
-                WallButtonSize, onClick);
+        /// <summary>墙面按钮的贴图路径（Resources 下，不带扩展名）。</summary>
+        private const string WallButtonDoorPath = "Art/ui_wall_door";
+        private const string WallButtonLightPath = "Art/ui_wall_light";
 
-            return button.GetComponent<Image>();
+        /// <summary>
+        /// 造一个墙面按钮。
+        ///
+        /// 用**程序渲的立体贴图**（红 = 门、绿 = 灯），不再走 MakeButton 的
+        /// 圆角胶囊 + 文字 —— 那看起来像 UI 浮层，不像墙上真按钮。
+        /// 贴图缺失时退回老样式，保证按钮永远可点。
+        /// </summary>
+        private Image MakeWallButton(Transform parent, string name, string label,
+            bool isLight, UnityEngine.Events.UnityAction onClick)
+        {
+            string path = isLight ? WallButtonLightPath : WallButtonDoorPath;
+            var icon = Resources.Load<Sprite>(path);
+
+            if (icon == null)
+            {
+                // 兜底：老样式（圆角胶囊 + 文字）
+                var fallback = MakeButton(parent, name, label,
+                    new Vector2(0.5f, 0.5f), Vector2.zero, WallButtonSize, onClick);
+                return fallback.GetComponent<Image>();
+            }
+
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+
+            PlaceRect(go.GetComponent<RectTransform>(),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, WallButtonSize);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = icon;
+            image.color = Color.white;
+            image.raycastTarget = true;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            SetMenuButtonColors(button);
+
+            if (onClick != null)
+            {
+                button.onClick.AddListener(onClick);
+            }
+
+            // 贴图上叠文字标签 —— 位置固定（上=门、下=灯）但要让人一眼认出来。
+            // 白字 + 深色描边：压在红/绿按钮面上都清楚。
+            var labelText = MakeLabel(go.transform, label, 22,
+                new Color(1f, 0.97f, 0.92f),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, WallButtonSize);
+
+            labelText.alignment = TextAnchor.MiddleCenter;
+            labelText.raycastTarget = false;
+
+            var shadow = labelText.gameObject.AddComponent<UnityEngine.UI.Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.85f);
+            shadow.effectDistance = new Vector2(1.5f, -1.5f);
+
+            return image;
         }
 
         /// <summary>
