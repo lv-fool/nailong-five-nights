@@ -154,6 +154,9 @@ namespace NailongFNAF.Audio
         // 4 秒、首尾淡入淡出，循环无接缝。和常驻底噪（amb_electric_hum）
         // 是两回事 —— 那个一直在响，这个只在开灯时加进来。
 
+        /// <summary>门音效专属通道（开门要二倍速，需要独立的 pitch）。</summary>
+        private AudioSource _doorSource;
+
         /// <summary>开灯循环音源。</summary>
         private AudioSource _lightLoopSource;
 
@@ -199,6 +202,9 @@ namespace NailongFNAF.Audio
             {
                 _sfxDoorClose = newClose;
             }
+
+            // 门音效独立通道：开门要二倍速，neng pitch 只影响这一路
+            _doorSource = CreateSource("DoorSfx", false, _sfxVolume);
 
             _lightLoopSource = CreateSource("LightBuzz", true, 0f);
             _lightBuzz = Resources.Load<AudioClip>(LightBuzzClipPath);
@@ -288,7 +294,15 @@ namespace NailongFNAF.Audio
                 return;
             }
 
-            Play(closed ? _sfxDoorClose : _sfxDoorOpen);
+            if (closed)
+            {
+                PlayDoorClip(_sfxDoorClose, 1f);
+            }
+            else
+            {
+                // 开门用二倍速（见 DoorOpenPitch）
+                PlayDoorClip(_sfxDoorOpen, DoorOpenPitch);
+            }
         }
 
         /// <summary>
@@ -485,6 +499,12 @@ namespace NailongFNAF.Audio
             get { return _powerOutMusic != null ? _powerOutMusic.length : 0f; }
         }
 
+        /// <summary>
+        /// 开门音效的播放速度倍数（1 = 原速，2 = 二倍速）。
+        /// 用 pitch 而不是重采样素材：素材保持原样，这个数随时能改。
+        /// </summary>
+        private const float DoorOpenPitch = 2f;
+
         private void Play(AudioClip clip)
         {
             if (clip == null || _sfx == null)
@@ -493,6 +513,24 @@ namespace NailongFNAF.Audio
             }
 
             _sfx.PlayOneShot(clip, _sfxVolume);
+        }
+
+        /// <summary>
+        /// 用门音效专属通道播放，可带音高。
+        ///
+        /// ⚠️ 为什么不用 <c>_sfx</c> 临时改 pitch：那是共享通道，
+        /// 改 pitch 会连带影响同一帧播的其他音效（脚步 / 开关灯 / 提示音）。
+        /// 单独开一条通道，pitch 只作用在门声上，互不干扰。
+        /// </summary>
+        private void PlayDoorClip(AudioClip clip, float pitch)
+        {
+            if (clip == null || _doorSource == null)
+            {
+                return;
+            }
+
+            _doorSource.pitch = pitch;
+            _doorSource.PlayOneShot(clip, _sfxVolume);
         }
 
         /// <summary>由编辑器菜单调用，一次性注入全部素材。</summary>
