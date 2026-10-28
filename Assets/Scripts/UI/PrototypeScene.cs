@@ -4535,6 +4535,43 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>视频层 + VideoPlayer 只建一次，之后反复用。</summary>
+        /// <summary>
+        /// 造跳杀音效 / 奶包配音的音频源。**幂等**，重复调用安全。
+        ///
+        /// ⚠️ 这个方法必须独立于 <see cref="EnsureJumpscareVideo"/> ——
+        /// 早先这两条音频源是写在视频初始化里的，而贝利亚走**图片跳杀**
+        /// （PlayBelialLunge 不碰 VideoPlayer），于是第一次跳杀如果是贝利亚，
+        /// 音频源压根没建，整场跳杀没有声音。四个带视频的敌人反而正常。
+        /// </summary>
+        private void EnsureJumpscareAudio()
+        {
+            if (_jumpscareAudio == null)
+            {
+                // 跳杀音效：单独一条轨，别占环境音 / 音效的 source
+                var audioGo = new GameObject("JumpscareAudio");
+                audioGo.transform.SetParent(transform, false);
+                var audio = audioGo.AddComponent<AudioSource>();
+                audio.playOnAwake = false;
+                audio.loop = false;
+                audio.spatialBlend = 0f;
+                audio.volume = 0.9f;
+                _jumpscareAudio = audio;
+            }
+
+            if (_voiceSource == null)
+            {
+                // 奶包配音：再单独一条，别和跳杀抢同一路
+                var voiceGo = new GameObject("NaibaoVoice");
+                voiceGo.transform.SetParent(transform, false);
+                var voice = voiceGo.AddComponent<AudioSource>();
+                voice.playOnAwake = false;
+                voice.loop = false;
+                voice.spatialBlend = 0f;
+                voice.volume = 1f;
+                _voiceSource = voice;
+            }
+        }
+
         private void EnsureJumpscareVideo()
         {
             if (_jumpscareVideo != null)
@@ -4588,25 +4625,10 @@ namespace NailongFNAF.UI
             _jumpscareWatermarkMask = mask;
             maskGo.SetActive(false);
 
-            // 跳杀音效：单独一条轨，别占环境音 / 音效的 source
-            var audioGo = new GameObject("JumpscareAudio");
-            audioGo.transform.SetParent(transform, false);
-            var audio = audioGo.AddComponent<AudioSource>();
-            audio.playOnAwake = false;
-            audio.loop = false;
-            audio.spatialBlend = 0f;
-            audio.volume = 0.9f;
-            _jumpscareAudio = audio;
+            // 跳杀音效 / 奶包配音的音频源 —— 抽成独立方法，
+            // 因为**贝利亚走图片跳杀、不经过这里**（见 EnsureJumpscareAudio 注释）
+            EnsureJumpscareAudio();
 
-            // 奶包配音：再单独一条，别和跳杀抢同一路（跳杀要打断一切，配音只在旁边说话）
-            var voiceGo = new GameObject("NaibaoVoice");
-            voiceGo.transform.SetParent(transform, false);
-            var voice = voiceGo.AddComponent<AudioSource>();
-            voice.playOnAwake = false;
-            voice.loop = false;
-            voice.spatialBlend = 0f;
-            voice.volume = 1f;
-            _voiceSource = voice;
 
             var player = gameObject.AddComponent<VideoPlayer>();
             player.playOnAwake = false;
@@ -4680,6 +4702,9 @@ namespace NailongFNAF.UI
         /// </summary>
         private void PlayJumpscareSfx()
         {
+            // 音频源可能还没建（贝利亚跳杀不经过视频初始化）→ 这里补建
+            EnsureJumpscareAudio();
+
             if (_jumpscareAudio == null)
             {
                 return;
