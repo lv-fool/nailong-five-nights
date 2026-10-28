@@ -193,7 +193,7 @@ namespace NailongFNAF.UI
         /// 手电筒按钮中心离屏幕底边多高。按钮半高 30，所以底边在 172 - 30 = 142，
         /// 高过监控热区（0.10 × 1080 = 108）—— 免得点它的时候顺手把监控收了。
         /// </summary>
-        private const float FlashlightButtonBottom = 172f;
+        private const float FlashlightButtonBottom = 208f;
 
         /// <summary>
         /// 断电时奶龙立绘的高度 = **门洞屏幕高度的多少倍**。
@@ -2007,7 +2007,19 @@ namespace NailongFNAF.UI
             _flashlightGlow.color = glow;
             _flashlightGlow.enabled = _flashlightGlowAlpha > 0.001f;
 
-            _flashlightButton.color = gm.FlashlightOn ? FlashlightOn : FlashlightOff;
+            // 图标贴图不做色相染色，只调**亮度**：开着原色、关着压暗 ——
+            // 直接染成 FlashlightOn/Off 那两个暖黄/深灰色会把图标糊成一块。
+            if (_flashlightButton.sprite != null && _flashlightButton.sprite.name == "ui_flashlight")
+            {
+                _flashlightButton.color = gm.FlashlightOn
+                    ? Color.white
+                    : new Color(0.55f, 0.55f, 0.55f, 0.85f);
+            }
+            else
+            {
+                // 没图标时的老逻辑（纯色方块）
+                _flashlightButton.color = gm.FlashlightOn ? FlashlightOn : FlashlightOff;
+            }
         }
 
         private void OnFlashlightHold(bool held)
@@ -6465,18 +6477,54 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>手电筒按钮：按住才亮，松手就灭。</summary>
+        /// <summary>手电筒按钮的贴图路径（Resources 下，不带扩展名）。</summary>
+        private const string FlashlightIconPath = "Art/ui_flashlight";
+
+        /// <summary>
+        /// 手电筒按钮的显示尺寸（画布逻辑像素）。比例照原图 1262×1182，
+        /// 配合 preserveAspect 不会拉变形。
+        /// </summary>
+        private static readonly Vector2 FlashlightButtonSize = new Vector2(168f, 157f);
+
         private void BuildFlashlightButton()
         {
             _flashlightGroup = MakeGroup("FlashlightGroup");
 
-            var button = MakeButton(_flashlightGroup.transform, "FlashlightButton", "FLASHLIGHT",
-                new Vector2(0.5f, 0f), new Vector2(0f, FlashlightButtonBottom),
-                new Vector2(240f, 64f), null);
+            // 自己拼按钮而不是走 MakeButton：那个会套圆角胶囊底 + 居中文字，
+            // 而这里要的是**一张图**（手电筒图标，PNG 自带透明通道）。
+            var go = new GameObject("FlashlightButton",
+                typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(_flashlightGroup.transform, false);
 
-            _flashlightButton = button.GetComponent<Image>();
-            _flashlightButton.color = FlashlightOff;
+            PlaceRect(go.GetComponent<RectTransform>(),
+                new Vector2(0.5f, 0f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, FlashlightButtonBottom),
+                FlashlightButtonSize);
 
-            _flashlightHold = button.gameObject.AddComponent<HoldButton>();
+            _flashlightButton = go.GetComponent<Image>();
+
+            // 图标素材优先；缺了就退回纯色方块（至少还能点，不会没按钮）
+            var icon = Resources.Load<Sprite>(FlashlightIconPath);
+
+            if (icon != null)
+            {
+                _flashlightButton.sprite = icon;
+                _flashlightButton.preserveAspect = true;
+                _flashlightButton.color = Color.white;
+            }
+            else
+            {
+                _flashlightButton.sprite = GetButtonSprite();
+                _flashlightButton.type = Image.Type.Sliced;
+                _flashlightButton.color = FlashlightOff;
+            }
+
+            _flashlightButton.raycastTarget = true;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = _flashlightButton;
+
+            _flashlightHold = go.AddComponent<HoldButton>();
             _flashlightHold.HoldChanged = OnFlashlightHold;
 
             _flashlightGroup.alpha = 1f;
