@@ -1474,8 +1474,16 @@ namespace NailongFNAF.UI
                     _audio.PlayCameraSwitch();
                 }
 
-                // 切机位的一瞬：雪花炸满屏，然后衰减平息（0.28 秒）
-                BurstStatic(1f);
+                // 切机位的一瞬：雪花炸满屏，然后衰减平息（0.28 秒）。
+                //
+                // ⚠️ **只在监控已经开着时炸** ——
+                // 第一次打开监控时 ApplyMonitorOverlay 也会走这条路
+                // （机位从上次的值变到当前值），不该算「切机位」，
+                // 否则一开监控就有一片雪花飘过（用户反馈）。
+                if (gm.MonitorUp)
+                {
+                    BurstStatic(1f);
+                }
             }
         }
 
@@ -1573,6 +1581,15 @@ namespace NailongFNAF.UI
 
             UpdateMonitorBlur(monitorUp);
             UpdateStatic();
+
+            // 监控收起时把「敌人移动签名」作废 —— 否则下次抬起监控，
+            // 上次留下的旧签名和这一帧的新签名不同，会被判成「有人动」，
+            // 一开监控就闪一片雪花（用户反馈「雪花样飘过」）。
+            // （HideMonitorCharacters 里也有一处，但那条路径不是每次都会走。）
+            if (!monitorUp)
+            {
+                _monitorEnemySignatureReady = false;
+            }
 
             _monitorOverlay.gameObject.SetActive(monitorUp || animating);
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
