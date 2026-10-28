@@ -2053,9 +2053,20 @@ namespace NailongFNAF.UI
             // 位置每帧按世界点投影 —— 转头时手电跟着桌子一起动。
             // ⚠️ 必须在 _room.SetPan(_pan) 之后调（相机朝向先定），
             //    和墙上按钮同样的要求；ApplyFlashlight 本身就在那之后。
-            if (usable && _flashlightButton != null && TryProjectToCanvas(FlashlightButtonWorld, out Vector2 flashPos))
+            if (TryProjectToCanvas(FlashlightButtonWorld, out Vector2 flashPos))
             {
-                ((RectTransform)_flashlightButton.transform).anchoredPosition = flashPos;
+                if (usable && _flashlightButton != null)
+                {
+                    ((RectTransform)_flashlightButton.transform).anchoredPosition = flashPos;
+                }
+
+                // 光斑跟着手电的世界点走 —— 从手电位置往外散，不是从屏幕中心。
+                // 稍微向上偏一点（按钮贴图是竖着的，灯头在图标上方）。
+                if (_flashlightGlow != null)
+                {
+                    ((RectTransform)_flashlightGlow.transform).anchoredPosition =
+                        flashPos + new Vector2(0f, 60f);
+                }
             }
 
             // 按住左/右 Ctrl 等同于按住底部那个按钮 —— 键盘玩家不用去够屏幕底部。
@@ -6692,13 +6703,34 @@ namespace NailongFNAF.UI
         /// 手电筒的光 —— 盖在画面之上的一层提亮，中心亮、往外渐隐，
         /// 像一束光打在正前方。只在「亮着 + 朝正前方」时淡入。
         /// </summary>
+        /// <summary>
+        /// 手电筒的光斑尺寸（画布逻辑像素）。
+        ///
+        /// ⚠️ 原来这里是**全屏铺满**的径向渐变 —— 光是"从屏幕中心发散"，
+        /// 和桌面上的手电筒位置对不上（用户反馈「手电筒光的位置也固定」）。
+        /// 现在改成一块跟着手电世界点走的光斑，从手电的位置往外散。
+        /// </summary>
+        private static readonly Vector2 FlashlightGlowSize = new Vector2(1100f, 900f);
+
         private void BuildFlashlightGlow()
         {
-            _flashlightGlow = MakeFullScreenImage("FlashlightGlow",
-                new Color(1f, 0.97f, 0.86f, 0f));
+            // 不用 MakeFullScreenImage（那个会 StretchToParent 铺满整个画布）
+            var go = new GameObject("FlashlightGlow", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = FlashlightGlowSize;
+
+            _flashlightGlow = go.GetComponent<Image>();
 
             // 纯色铺满只会整体发灰，换成径向光斑
             _flashlightGlow.sprite = MakeRadialSprite();
+            _flashlightGlow.color = new Color(1f, 0.97f, 0.86f, 0f);
+            _flashlightGlow.raycastTarget = false;
 
             _flashlightGlow.enabled = false;
             _flashlightGlowAlpha = 0f;
