@@ -674,6 +674,15 @@ namespace NailongFNAF.UI
         /// </summary>
         private RectTransform _monitorArea;
 
+        /// <summary>监控底图用的劣化材质（扫描线 / 噪点 / 色偏 / 暗角）。</summary>
+        private Material _monitorCrtMaterial;
+
+        /// <summary>
+        /// 劣化强度：0 = 原图原样，1 = 正常游玩。
+        /// 想关掉/加重视觉干扰只改这一个数。
+        /// </summary>
+        private const float MonitorCrtStrength = 1f;
+
         /// <summary>
         /// 监控小地图的容器 —— **挂在监控层外面**（canvas 直属），
         /// 摆在画面框右侧的空白里。不开监控也常显，玩家随时能看平面图规划。
@@ -6928,6 +6937,25 @@ namespace NailongFNAF.UI
             _monitorFrame = MakeFullScreenImage("MonitorFrame", Color.white, false);
             _monitorFrame.transform.SetParent(_monitorArea, false);
             StretchToParent(_monitorFrame.rectTransform);
+
+            // 2.1) **劣质 CRT 效果** —— 扫描线 / 颗粒噪点 / 青绿色偏 / 暗角 / 行抖动。
+            //      挂在这个 shader 上而不是烤进贴图：这样才能让噪点"动"起来，
+            //      静态图看不出劣质感。编辑器里调点位时把 _Strength 设 0 即可关掉。
+            //
+            // ⚠️ 材质从 Resources 拿模板，不要只靠 Shader.Find ——
+            // 这个 shader 没有别的资源引用它，打包会被当"没人用"剔除
+            // （和 MonitorCharacter 一个坑，见那边注释）。
+            var crtTemplate = Resources.Load<Material>("MonitorCRTMaterial");
+            var crtShader = crtTemplate != null
+                ? crtTemplate.shader
+                : Shader.Find("NailongFNAF/MonitorCRT");
+
+            if (crtShader != null)
+            {
+                _monitorCrtMaterial = new Material(crtShader);
+                _monitorCrtMaterial.SetFloat("_Strength", MonitorCrtStrength);
+                _monitorFrame.material = _monitorCrtMaterial;
+            }
 
             // 2.5) 贴图层：墙上海报 / 涂鸦 / 警示牌 —— **在底图之上、敌人之下**。
             //      跟着底图那层一起，但不参与它的缩放（贴图自己有归一化坐标）。
