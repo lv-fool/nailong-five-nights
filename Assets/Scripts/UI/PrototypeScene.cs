@@ -682,8 +682,12 @@ namespace NailongFNAF.UI
         /// <summary>进门黑幕（盖住整个画面，只做淡出）。</summary>
         private Image _enterFade;
 
-        /// <summary>淡出的总时长（秒）。</summary>
-        private const float EnterFadeSeconds = 0.45f;
+        /// <summary>
+        /// 淡出的总时长（秒）。
+        /// 0.45 太快 —— 玩家还没看清就完了，像没做过场（用户反馈）。
+        /// 1.1 秒足够看清「黑 → 亮」这件事，又不至于等得烦。
+        /// </summary>
+        private const float EnterFadeSeconds = 1.1f;
 
         /// <summary>剩余淡出时间；<= 0 表示没有在淡出。</summary>
         private float _enterFadeLeft;
@@ -3553,9 +3557,10 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // 缓出：开头淡得快，尾段更柔
+            // 缓出：开头淡得快，尾段更柔、更长 —— 像眼睛逐渐适应黑暗。
+            // 三次曲线比二次的"尾巴"更长，视觉上更从容。
             float t = _enterFadeLeft / EnterFadeSeconds;
-            float a = t * t;          // 二次曲线，视觉上更接近"眼睛适应"
+            float a = t * t * t;
 
             var c = _enterFade.color;
             c.a = Mathf.Clamp01(a);

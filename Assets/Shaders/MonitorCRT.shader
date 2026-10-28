@@ -79,7 +79,10 @@ Shader "NailongFNAF/MonitorCRT"
             fixed4 frag(v2f IN) : SV_Target
             {
                 float2 uv = IN.texcoord;
-                float s = _Strength;
+                // 开局 1 秒内让劣化强度渐入 —— 刚进 Play 时 _Time.y 很小，
+                // 所有基于它的 hash 都还不稳定，直接满强度会看着"脏得突然"。
+                float warmup = saturate(_Time.y / 1.0);
+                float s = _Strength * lerp(0.35, 1.0, warmup);
 
                 if (s <= 0.001)
                 {
@@ -125,8 +128,15 @@ Shader "NailongFNAF/MonitorCRT"
                 c.rgb += (n - 0.5) * 0.16 * s;
 
                 // ②b 偶发的亮噪点（信号毛刺）
-                float spark = step(0.9985, Hash(floor(uv * float2(360.0, 200.0)) + floor(_Time.y * 24.0)));
-                c.rgb += spark * 0.55 * s;
+                //
+                // ⚠️ 三个约束都必要：
+                //   · 概率压到 0.2%（step 阈值 0.998 → 0.998）
+                //   · 亮度减半（0.55 → 0.28）—— 一整片 0.55 的白点很扎眼
+                //   · **开局前 2 秒不闪**：刚编译完 _Time.y 从 0 起算，
+                //     头几帧 hash 分布还没"散开"，看着就是一片白粒子飘过。
+                float sparkAge = step(2.0, _Time.y);
+                float spark = step(0.998, Hash(floor(uv * float2(360.0, 200.0)) + floor(_Time.y * 24.0)));
+                c.rgb += spark * 0.28 * s * sparkAge;
 
                 // ④ 暗角：到中心的距离越大越暗（更强）
                 float2 d = uv - 0.5;
