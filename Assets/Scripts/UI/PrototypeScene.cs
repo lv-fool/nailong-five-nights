@@ -201,7 +201,7 @@ namespace NailongFNAF.UI
         //
         // 取手机右侧一点：手机在 (0.24, 1.02, 0)，手电放 x=0.62 —— 桌面上、
         // 手机旁边、镜头朝正前时落在画面右下（不挡手机）。
-        private static readonly Vector3 FlashlightButtonWorld = new Vector3(0.92f, 1.00f, -0.10f);
+        private static readonly Vector3 FlashlightButtonWorld = new Vector3(0.00f, 1.00f, -0.10f);
 
         /// <summary>
         /// 断电时奶龙立绘的高度 = **门洞屏幕高度的多少倍**。
