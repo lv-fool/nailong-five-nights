@@ -30,7 +30,7 @@ Material:
     m_Ints: []
     m_Floats:
     - _Softness: 0.16
-    - _Spread: 0
+    - _Spread: 1.2
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _Red: {r: 0.72, g: 0.03, b: 0.06, a: 1}
