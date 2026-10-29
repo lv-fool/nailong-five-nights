@@ -1,7 +1,7 @@
 # AGENTS.md · 项目约定
 
 > 给 AI 助手和协作者看的开工须知。每次动这个项目之前先读一遍。
-> 最后更新：2026-10-27（补安卓分支）
+> 最后更新：2026-10-29（同步桌面 main 的监控 / 插画 / 关卡 AI 改动）
 >
 > ⚠️ **本文档在 2026-10-11 之后长期没跟上代码，2026-10-18 已按实际代码纠偏。**
 > 最大的偏差：画面方案早就不是「2D 静态图 + 热点」，而是**程序渲的 3D 圆柱全景 + 相机真转**。
@@ -63,7 +63,7 @@
 | `Assets/Editor/` | 编辑器扩展脚本（打包后不进入游戏） |
 | `Assets/Tests/EditMode/` | 纯逻辑的单元测试，在 Test Runner 里跑 |
 | `Assets/Prefabs/` | 预制体 |
-| `Assets/Resources/` | 运行时按字符串加载的资源（会全量打进包体）：`office_pano.png`、`PanoMaterial.mat`、`Fonts/SourceHanSansCN-Normal.ttf` |
+| `Assets/Resources/` | 运行时按字符串加载的资源（会全量打进包体）：`office_pano.png`、`PanoMaterial.mat`、`MonitorStaticMaterial.mat` 等模板材质、`Posters/`（24 张墙上海报）、`poster_layout.json`、`night_difficulty.json`、`Fonts/SourceHanSansCN-Normal.ttf` |
 | `Assets/Scenes/` | 场景文件 |
 | `Assets/Scripts/Core/` | 游戏状态机、时间推进、存档、全局管理器 |
 | `Assets/Scripts/Gameplay/` | 电量、门、监控、敌人 AI |
@@ -107,6 +107,9 @@
   **不是**若干张视角帧交叉淡化 —— 那版中间帧是复制的，看着就是转场，已作废
 - 材质走 `Resources.Load<Material>("PanoMaterial")`（**不是** `Shader.Find`）：
   发行版会把没人引用的内置 shader 剔除掉，`Shader.Find` 返回 null 会让办公室整个崩
+- ⚠️ **自定义 shader 一律配一个 Resources 模板材质**（`PanoMaterial` / `MonitorCharacterMaterial` /
+  `RedSpreadMaterial` / `MonitorStaticMaterial`）。2026-10-29 就漏了 `MonitorStatic` 这一个：
+  编辑器里雪花正常，发行包里 shader 被剔除、雪花层整层消失（见 `docs/10-安卓移植.md` 一.5）
 - ⚠️ 投影约定在 `render_pano.py` 与 `OfficeRoom.cs` **两边必须一致**（θ=0 正前、覆盖 ±145°、
   斜率 ±0.72、相机 (0, 1.30, -1.20)）。改一边不改另一边 = 全景和门洞对不上
 - ⚠️ 圆柱内壁三角面**绕序必须顺时针**，反了整屏全黑（内置 `Unlit/Texture` 没有 `_Cull` 可救）
@@ -172,7 +175,7 @@
 `-playSmoke` 进 Play 自动截图，完整命令与坑（要去掉代理环境变量、参数必须拼成一个带引号的
 字符串、跑完进程不退出会占着锁文件）见 `docs/08-无头验证.md`。
 ⚠️ **Unity 2022.3.62f3c1 的安装路径每台机器不一样，别看死某个盘**：
-这台机器（当前工作目录 `F:\nailong f`）在 `F:\Unity\2022.3.62f3c1\Editor\Unity.exe`；
+这台机器在 `F:\Unity\2022.3.62f3c1\Editor\Unity.exe`（桌面原项目和本安卓仓库共用同一个编辑器安装）；
 协作者的机器上曾装在 `D:\Unity\...`。用之前先确认路径存在（`Test-Path`），
 找不到就按 `docs/01-环境搭建.md` 重装，别照抄文档里的盘符。
 
@@ -197,7 +200,7 @@
 - 已在 `.gitignore` 排除、**不入库**的本地目录：`Library/`、`Temp/`、`Logs/`、`Builds/`、
   `UserSettings/`、`.workbuddy-ai/`、`Packages/MCPForUnity/`（本地嵌入的 MCP 包）、
   `__pycache__/`。换机器要按 `docs/02-开发工具.md` 重建 MCP 包。
-- ⚠️ **构建产物在 `Builds/`**（Windows 版约 320 MB、安卓 APK 约 121 MB），别误当源码删了；
+- ⚠️ **构建产物在 `Builds/`**（Windows 版约 320 MB、安卓 APK 约 142 MB），别误当源码删了；
   它是可再生的，但重新构建要几分钟。
 - ⚠️ **Windows 版只装了 Mono 变体**（`PlaybackEngines\WindowsStandaloneSupport\Variations\` 下无 IL2CPP）。
   打包走 `Assets/Editor/BuildWindows.cs`（菜单「奶龙 / 10. 打包 Windows 版」或
@@ -206,4 +209,4 @@
   要 IL2CPP 得先用 Hub 补装 **Windows Build Support (IL2CPP)** 模块
 - **安卓版**：`Assets/Editor/BuildAndroid.cs`（菜单「奶龙 / 11. 打包安卓版」或
   `-executeMethod NailongFNAF.EditorTools.BuildAndroid.Build`），IL2CPP + ARM64，
-  产物 `Builds/Android/NailongFiveNights.apk`（约 121 MB）。环境、坑、真机清单见 `docs/10-安卓移植.md`
+  产物 `Builds/Android/NailongFiveNights.apk`（约 142 MB）。环境、坑、真机清单见 `docs/10-安卓移植.md`
