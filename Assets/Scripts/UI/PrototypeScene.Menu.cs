@@ -168,9 +168,84 @@ namespace NailongFNAF.UI
             OpenTitle();
         }
 
+        /// <summary>
+        /// 标题页两侧的敌人剪影 —— 左右各两只，从画面边缘探出来。
+        ///
+        /// 用各角色的 _stare（直视）图，压成**近黑剪影**：看得见轮廓和一点点体积，
+        /// 但看不出表情，比直接放彩图更有压迫感（也是 FNAF 标题页的老套路）。
+        /// 它们比标题层更靠下，光线暗淡地「围着」中间的菜单。
+        /// </summary>
+        private void BuildTitleSilhouettes(Transform parent)
+        {
+            // 左：牛来（上）+ 噜噜（下）；右：袋鼠（上）+ 奶龙（下）
+            // 锚点略超出 0~1 → 只露出半个身子，像是从画面外探进来
+            BuildSilhouette(parent, EnemyId.Niulai,   0.055f, 0.70f, 0.46f, 0.16f);
+            BuildSilhouette(parent, EnemyId.Lulu,     0.035f, 0.26f, 0.40f, 0.13f);
+            BuildSilhouette(parent, EnemyId.Daishu,   0.945f, 0.66f, 0.48f, 0.17f);
+            BuildSilhouette(parent, EnemyId.Nailong,  0.965f, 0.24f, 0.42f, 0.14f);
+        }
+
+        /// <summary>
+        /// 摆一个剪影。<paramref name="anchorX"/> 超出 0~1 就是「露出部分身体」。
+        /// </summary>
+        private void BuildSilhouette(Transform parent, EnemyId id, float anchorX,
+            float anchorY, float heightFraction, float alpha)
+        {
+            // 角色图不是 Resources 素材，是场景里序列化到 _characters 的 CharacterArt。
+            // 没有 Stare 就退 Idle —— 一张都没有就不画（不报错，静默跳过）。
+            CharacterArt art = FindCharacter(id);
+            Sprite sprite = art != null
+                ? (art.Stare != null ? art.Stare : art.Idle)
+                : null;
+
+            if (sprite == null)
+            {
+                return;
+            }
+
+            var go = new GameObject("Silhouette_" + id,
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+
+            var rect = go.GetComponent<RectTransform>();
+
+            // 用父级（标题层，铺满画布）的实时尺寸算，窗口怎么变都不会错位。
+            // 高度 = 画布高的 heightFraction，宽度按图片原始比例跟着走 —— 不会拉变形。
+            var parentRect = parent as RectTransform;
+            Vector2 canvasSize = parentRect != null ? parentRect.rect.size : new Vector2(1920f, 1080f);
+
+            if (canvasSize.x < 1f || canvasSize.y < 1f)
+            {
+                canvasSize = new Vector2(1920f, 1080f);
+            }
+
+            float h = canvasSize.y * heightFraction;
+            float aspect = sprite.rect.height > 0.001f
+                ? sprite.rect.width / sprite.rect.height
+                : 1f;
+            float w = h * aspect;
+
+            rect.anchorMin = new Vector2(anchorX, anchorY);
+            rect.anchorMax = new Vector2(anchorX, anchorY);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(w, h);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+
+            // 剪影：不是纯黑，留一点冷灰蓝 —— 纯黑在纯黑背景上看不见。
+            // 亮度靠 alpha 控制（0.22~0.28），比背景 (#050508) 明显但依然暗。
+            image.color = new Color(0.22f, 0.24f, 0.30f, alpha);
+            image.raycastTarget = false;
+        }
+
         private void BuildTitleView()
         {
             _titleView = MakeFullScreenPanel("TitleView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
+
+            BuildTitleSilhouettes(_titleView.transform);
 
             MakeLabel(_titleView.transform, "奶龙的五夜后宫", 72, new Color(0.95f, 0.85f, 0.3f),
                 new Vector2(0.5f, 0.82f), new Vector2(0.5f, 0.82f), new Vector2(0f, 0f), new Vector2(1100f, 120f));
