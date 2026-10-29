@@ -169,6 +169,12 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
+        /// 标题页雪花背景的不透明度。
+        /// 0.10 太淡看不出来，0.25 会盖过剪影；0.14 是能看出在动、又不抢戏的位置。
+        /// </summary>
+        private const float TitleStaticAlpha = 0.14f;
+
+        /// <summary>
         /// 标题页两侧的敌人剪影 —— 左右各两只，从画面边缘探出来。
         ///
         /// 用各角色的 _stare（直视）图，压成**近黑剪影**：看得见轮廓和一点点体积，
@@ -247,9 +253,51 @@ namespace NailongFNAF.UI
             image.raycastTarget = false;
         }
 
+        /// <summary>
+        /// 标题页的「没信号的监视器」背景 —— 一层低强度雪花噪点 + 横向扫描线。
+        ///
+        /// 复用监控画面那个 MonitorStatic shader（程序化、不需要贴图），
+        /// 但强度压得很低（alpha≈0.14）：它是背景，不能抢按钮和剪影的注意力。
+        /// 好处是**画面会动** —— 纯静态的深色底看着太空、太死。
+        /// </summary>
+        private void BuildTitleStatic(Transform parent)
+        {
+            var go = new GameObject("TitleStatic",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
+            go.transform.SetParent(parent, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            var raw = go.GetComponent<RawImage>();
+            raw.raycastTarget = false;
+
+            var shader = Shader.Find("NailongFNAF/MonitorStatic");
+            if (shader == null)
+            {
+                // shader 缺失就整层不要（标题页照常能用，只是没有动态背景）
+                go.SetActive(false);
+                return;
+            }
+
+            var mat = new Material(shader);
+            raw.material = mat;
+            raw.texture = Texture2D.whiteTexture;
+
+            // ⚠️ 强度走**顶点色 alpha**（shader 里读 IN.color.a），
+            // 不是 material.SetFloat —— 后者读得到但渲染时是 0（在监控那边踩过）。
+            raw.color = new Color(1f, 1f, 1f, TitleStaticAlpha);
+        }
+
         private void BuildTitleView()
         {
             _titleView = MakeFullScreenPanel("TitleView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
+
+            // 背景：动态雪花屏（最底层）
+            BuildTitleStatic(_titleView.transform);
 
             BuildTitleSilhouettes(_titleView.transform);
 
