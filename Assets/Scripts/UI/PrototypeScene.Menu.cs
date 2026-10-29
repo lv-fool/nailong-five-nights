@@ -179,17 +179,20 @@ namespace NailongFNAF.UI
         {
             // 左：牛来（上）+ 噜噜（下）；右：袋鼠（上）+ 奶龙（下）
             // 锚点略超出 0~1 → 只露出半个身子，像是从画面外探进来
-            BuildSilhouette(parent, EnemyId.Niulai,   0.055f, 0.70f, 0.46f, 0.30f);
-            BuildSilhouette(parent, EnemyId.Lulu,     0.035f, 0.26f, 0.40f, 0.26f);
-            BuildSilhouette(parent, EnemyId.Daishu,   0.945f, 0.66f, 0.48f, 0.32f);
-            BuildSilhouette(parent, EnemyId.Nailong,  0.965f, 0.24f, 0.42f, 0.28f);
+            // 四个位置都错开 —— x 不摆在同一竖线上、y 也拉开，再加不同旋转，
+            // 免得像排队。特意让右侧两只一高一低一内一外（原来袋鼠和奶龙
+            // 都挤在 x≈0.95，撞到一起了）。
+            BuildSilhouette(parent, EnemyId.Niulai,   0.045f, 0.74f, 0.48f, 0.30f, -7f);
+            BuildSilhouette(parent, EnemyId.Lulu,     0.115f, 0.19f, 0.38f, 0.26f,  6f);
+            BuildSilhouette(parent, EnemyId.Daishu,   0.985f, 0.80f, 0.44f, 0.32f,  9f);
+            BuildSilhouette(parent, EnemyId.Nailong,  0.895f, 0.16f, 0.38f, 0.28f, -7f);
         }
 
         /// <summary>
         /// 摆一个剪影。<paramref name="anchorX"/> 超出 0~1 就是「露出部分身体」。
         /// </summary>
         private void BuildSilhouette(Transform parent, EnemyId id, float anchorX,
-            float anchorY, float heightFraction, float alpha)
+            float anchorY, float heightFraction, float alpha, float rotationZ = 0f)
         {
             // 角色图不是 Resources 素材，是场景里序列化到 _characters 的 CharacterArt。
             // 没有 Stare 就退 Idle —— 一张都没有就不画（不报错，静默跳过）。
@@ -230,6 +233,9 @@ namespace NailongFNAF.UI
             rect.pivot = new Vector2(0.5f, 0.5f);
             rect.anchoredPosition = Vector2.zero;
             rect.sizeDelta = new Vector2(w, h);
+
+            // 轻微倾斜 —— 全直立看着像排队，歪一点才有「探头偷看」的感觉
+            rect.localRotation = Quaternion.Euler(0f, 0f, rotationZ);
 
             var image = go.GetComponent<Image>();
             image.sprite = sprite;
