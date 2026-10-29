@@ -6590,10 +6590,26 @@ namespace NailongFNAF.UI
             _staticOverlay.raycastTarget = false;
             _staticOverlay.enabled = false;
 
-            var staticShader = Shader.Find("NailongFNAF/MonitorStatic");
-            if (staticShader != null)
+            // ⚠️ 优先从 Resources 拿模板材质，**不要只靠 Shader.Find**：
+            //    发行版会把没被任何材质 / 场景引用的 shader 剔除掉，真机包里
+            //    Shader.Find 返回 null，雪花层就整层消失（2026-10-29 安卓包实测：
+            //    构建报告里只出现了 MonitorCharacter / RedSpread / UnlitTexture）。
+            var staticTemplate = Resources.Load<Material>("MonitorStaticMaterial");
+            if (staticTemplate != null)
             {
-                _staticMaterial = new Material(staticShader);
+                _staticMaterial = new Material(staticTemplate);
+            }
+            else
+            {
+                var staticShader = Shader.Find("NailongFNAF/MonitorStatic");
+                if (staticShader != null)
+                {
+                    _staticMaterial = new Material(staticShader);
+                }
+            }
+
+            if (_staticMaterial != null)
+            {
                 _staticOverlay.material = _staticMaterial;
                 _staticOverlay.color = Color.white;
                 _staticOverlay.texture = Texture2D.whiteTexture;
