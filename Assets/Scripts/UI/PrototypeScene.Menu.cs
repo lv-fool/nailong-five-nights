@@ -1068,7 +1068,7 @@ namespace NailongFNAF.UI
 
             if (gm.HasSurvived)
             {
-                ShowWinEnd();
+                PlayDawnThenWin();
                 return;
             }
 
@@ -1122,6 +1122,7 @@ namespace NailongFNAF.UI
 
             _endShown = false;
             _caughtHoldTimer = 0f;
+            ResetDawn();
         }
 
         private void OnStartClicked()
@@ -1275,6 +1276,7 @@ namespace NailongFNAF.UI
             _menuOpen = false;
             _endShown = false;
             _caughtHoldTimer = 0f;
+            ResetDawn();
         }
 
         /// <summary>
@@ -1331,6 +1333,7 @@ namespace NailongFNAF.UI
             _menuOpen = false;
             _endShown = false;
             _caughtHoldTimer = 0f;
+            ResetDawn();
         }
 
         /// <summary>
@@ -1366,8 +1369,72 @@ namespace NailongFNAF.UI
             }
         }
 
+        // ── 通关天亮 ──────────────────────────────────────────────────
+
+        /// <summary>天亮渐白用时（秒）。</summary>
+        private const float DawnRiseSeconds = 1.8f;
+
+        /// <summary>白到顶之后停多久再弹结算（秒）。</summary>
+        private const float DawnHoldSeconds = 0.9f;
+
+        /// <summary>白幕最亮时的 alpha —— 不到 1，留一点办公室的影子。</summary>
+        private const float DawnPeakAlpha = 0.95f;
+
+        /// <summary>
+        /// 通关那一刻：屏幕从当前画面逐渐变亮到近白，停一会儿，再弹结算。
+        ///
+        /// 照 FNAF 1 的 6AM —— 先看见「天亮了」，才知道自己活下来了；
+        /// 直接蹦结算面板，那一夜的紧张没有落地的地方。
+        /// </summary>
+        private void PlayDawnThenWin()
+        {
+            if (_dawnOverlay == null)
+            {
+                ShowWinEnd();
+                return;
+            }
+
+            // 用「白幕开着没有」当状态，不另立布尔 —— 少一个要记得重置的字段
+            if (!_dawnOverlay.gameObject.activeSelf)
+            {
+                _dawnOverlay.gameObject.SetActive(true);
+                _dawnOverlay.transform.SetAsLastSibling();
+                _dawnTimer = 0f;
+            }
+
+            _dawnTimer += Time.deltaTime;
+
+            // 缓出：先快后慢，像真的天在亮，而不是线性拉白
+            float rise = Mathf.Clamp01(_dawnTimer / DawnRiseSeconds);
+            rise = 1f - (1f - rise) * (1f - rise);
+
+            _dawnOverlay.color = new Color(1f, 1f, 1f, rise * DawnPeakAlpha);
+
+            if (_dawnTimer >= DawnRiseSeconds + DawnHoldSeconds)
+            {
+                ShowWinEnd();
+            }
+        }
+
+        /// <summary>收起天亮白幕（通关演出中途回标题 / 重开时用）。</summary>
+        private void ResetDawn()
+        {
+            _dawnTimer = 0f;
+
+            if (_dawnOverlay != null)
+            {
+                _dawnOverlay.gameObject.SetActive(false);
+            }
+        }
+
         private void ShowWinEnd()
         {
+            // 天亮白幕到此为止 —— 结算面板要露出来
+            if (_dawnOverlay != null)
+            {
+                _dawnOverlay.gameObject.SetActive(false);
+            }
+
             _endShown = true;
             _menuOpen = true;
             _menuRoot.SetActive(true);
@@ -1955,6 +2022,7 @@ namespace NailongFNAF.UI
             _menuOpen = false;
             _endShown = false;
             _caughtHoldTimer = 0f;
+            ResetDawn();
         }
 
         /// <summary>

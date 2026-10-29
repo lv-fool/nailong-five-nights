@@ -47,8 +47,78 @@ namespace NailongFNAF.Gameplay
             _levels[nightIndex * EnemyIds.All.Length + (int)enemy] = Clamp(level);
         }
 
-        /// <summary>默认难度曲线。</summary>
+        /// <summary>
+        /// 运行时入口：**优先读 Assets/Resources/night_difficulty.json**，
+        /// 读不到或某格没写才退回写死的默认曲线。
+        ///
+        /// ⚠️ 默认曲线在 <see cref="CreateDefaultRaw"/> 里 —— 那个不读文件，
+        /// 编辑器窗口的「恢复默认」用它，免得自己读自己写出来的东西。
+        /// </summary>
         public static NightDifficulty CreateDefault()
+        {
+            NightDifficultyTable table = LoadTable();
+
+            if (table == null)
+            {
+                return CreateDefaultRaw();
+            }
+
+            var difficulty = new NightDifficulty();
+            var fallback = CreateDefaultRaw();
+
+            for (int n = 0; n < NightCount; n++)
+            {
+                foreach (var id in EnemyIds.All)
+                {
+                    int v = table.GetLevel(n, id);
+
+                    // -1 = json 里没写这一格 → 用默认
+                    difficulty.SetLevel(n, id, v >= 0 ? v : fallback.GetLevel(n, id));
+                }
+            }
+
+            return difficulty;
+        }
+
+        /// <summary>缓存的难度表 —— 只在第一次用时读一次 Resources。</summary>
+        private static NightDifficultyTable _table;
+        private static bool _tableLoaded;
+
+        private static NightDifficultyTable LoadTable()
+        {
+            if (_tableLoaded)
+            {
+                return _table;
+            }
+
+            _tableLoaded = true;
+
+            var asset = UnityEngine.Resources.Load<UnityEngine.TextAsset>(
+                NightDifficultyTable.ResourcePath);
+
+            if (asset == null)
+            {
+                return null;
+            }
+
+            NightDifficultyTable parsed;
+            if (NightDifficultyTable.TryParse(asset.text, out parsed))
+            {
+                _table = parsed;
+            }
+
+            return _table;
+        }
+
+        /// <summary>编辑器改了 json 之后让缓存失效（窗口保存时调）。</summary>
+        public static void InvalidateTableCache()
+        {
+            _table = null;
+            _tableLoaded = false;
+        }
+
+        /// <summary>写死的默认难度曲线（不读文件）。</summary>
+        public static NightDifficulty CreateDefaultRaw()
         {
             var difficulty = new NightDifficulty();
 

@@ -49,8 +49,13 @@ desktop.ini
 
 # ===== 本地临时文件 =====
 *.bak
+*.bak.meta
 *.orig
 *~
+
+# MCP 截图默认落到 Assets/Screenshots/，验证图应存 .workbuddy-ai/screenshots/
+/Assets/Screenshots/
+/Assets/Screenshots.meta
 
 # ===== AI 工具本地数据 =====
 # 项目记忆与工作日志，属于本地工具数据，不进版本库

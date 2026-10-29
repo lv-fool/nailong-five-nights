@@ -586,9 +586,10 @@ namespace NailongFNAF.UI
         private static readonly Color UsageRed = new Color(0.90f, 0.26f, 0.22f);
         private static readonly Color UsageOff = new Color(0.20f, 0.20f, 0.22f);
 
-        // 小地图 —— 照官方原图：房间只描边不填色，CAM 标号是深色小方块
-        private static readonly Color MapPanelFill = new Color(0.055f, 0.065f, 0.075f, 1f);
-        private static readonly Color MapRoomFill = new Color(0.075f, 0.085f, 0.095f, 1f);
+        // 小地图 —— 照官方原图：房间只描边不填色，CAM 标号是深色小方块。
+        // 底色半透明（2026-10-25）：整块黑底改成能透出监控画面的暗玻璃
+        private static readonly Color MapPanelFill = new Color(0.055f, 0.065f, 0.075f, 0.60f);
+        private static readonly Color MapRoomFill = new Color(0.075f, 0.085f, 0.095f, 0.55f);
         private static readonly Color MapRoomBorder = new Color(0.42f, 0.47f, 0.44f, 0.90f);
         private static readonly Color MapCorridorColor = new Color(0.34f, 0.38f, 0.36f, 0.85f);
         private static readonly Color MapButtonFill = new Color(0.11f, 0.12f, 0.14f, 1f);
@@ -659,6 +660,62 @@ namespace NailongFNAF.UI
         private Image _flashlightGlow;
         private float _flashlightGlowAlpha;
         private Image _monitorOverlay;
+
+        /// <summary>
+        /// 监控画面的**16:9 设计区** —— 底图、贴图、敌人、小地图全都挂在它下面。
+        ///
+        /// 尺寸**固定** 1920×1080（设计像素），再靠 <c>localScale</c> 等比缩到窗口里完整放下。
+        /// 为什么不直接把 overlay 铺满屏幕：overlay 的尺寸跟着窗口宽高比走
+        /// （宽屏下能到 2350×882），而编辑器「奶龙 / 6. 监控画面编辑器」里的预览
+        /// **永远是 mon_*.png 的 16:9**。两边坐标系一比一才谈得上「所见即所得」——
+        /// 否则同一张海报在编辑器里是 32% 高，进游戏变成 48% 高（2026-10-24 绿子报的
+        /// 「调的比例与监控显示不同」就是这个）。
+        /// </summary>
+        private RectTransform _monitorArea;
+
+        /// <summary>监控画面的设计分辨率（= mon_*.png 的原尺寸）。</summary>
+        public const float MonitorDesignWidth = 1920f;
+        public const float MonitorDesignHeight = 1080f;
+
+        /// <summary>黑壳比画面框外扩多少（设计像素）—— 34 ≈ 屏幕宽的 1.8%。</summary>
+        private const float MonitorBezelPad = 34f;
+
+        /// <summary>
+        /// 监控画面相对窗口留多少（0.92 = 上下左右各留 4%）。
+        /// 留出来的地方是黑壳 + 糊掉的办公室。**改这一个数就能调大小。**
+        /// </summary>
+        private const float MonitorInset = 0.92f;
+
+        /// <summary>黑壳颜色：近黑略带一点冷灰，别用纯黑（和画面里的黑糊成一片）。</summary>
+        private static readonly Color MonitorBezelColor = new Color(0.055f, 0.065f, 0.070f, 1f);
+
+        /// <summary>
+        /// 黑壳节点 —— 它的**内沿**就是画面框边界。
+        /// 敌人立绘按画面框的**屏幕像素矩形**裁剪（_ScreenRect，见 MonitorAreaScreenRect），
+        /// 溢出画面的部分不画（不能用 RectMask2D：会换掉自定义 shader，见 BuildMonitorLayer 注释）。
+        /// </summary>
+        private RectTransform _monitorBezel;
+
+        /// <summary>壳内沿那圈细亮线比画面框外扩多少（设计像素）。</summary>
+        private const float MonitorBezelRimPad = 3f;
+
+        /// <summary>细亮线的颜色 —— 比壳亮一档就够，太亮会像发光边框。</summary>
+        private static readonly Color MonitorBezelRimColor = new Color(0.22f, 0.23f, 0.24f, 1f);
+
+        /// <summary>
+        /// 画面框外那层模糊：显示 `_blurRT`（低分辨率渲的办公室），铺满整屏，
+        /// 挂在 overlay 第一个子物体，监控画面框盖在它上面。
+        /// </summary>
+        private RawImage _monitorBlurImage;
+
+        /// <summary>专门给模糊层渲低分辨率画面的相机（复制主相机的位姿 / FOV）。</summary>
+        private Camera _blurCam;
+
+        /// <summary>低分辨率渲染目标。屏幕尺寸变了要重建。</summary>
+        private RenderTexture _blurRT;
+
+        /// <summary>模糊层把画面缩小到 1/6 再拉大 —— 数越大越糊、越便宜。</summary>
+        private const int MonitorBlurDownscale = 6;
 
         /// <summary>
         /// 监控画面的**底图**（挂在 overlay 下面单独一层）。
@@ -773,6 +830,17 @@ namespace NailongFNAF.UI
         private Text _debugPowerText;
         private Image _jumpscareOverlay;
         private Image _jumpscareImage;
+
+        // ── 通关天亮 ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// 通关时的全屏白幕：从透明渐到近白，停一会儿再弹结算面板。
+        /// 层在最上面（见 <see cref="BuildUI"/>），结算一出来就关掉。
+        /// </summary>
+        private Image _dawnOverlay;
+
+        /// <summary>天亮演出已经走了多少秒（0 = 刚开始）。</summary>
+        private float _dawnTimer;
 
         // ── 跳杀结束后的红屏蔓延 ──────────────────────────────────────
 
@@ -1085,7 +1153,26 @@ namespace NailongFNAF.UI
 
         private void UpdateView(GameManager gm)
         {
-            if (CanOperate(gm))
+            if (!CanOperate(gm))
+            {
+                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
+                _panTarget = 0f;
+            }
+            else if (gm.MonitorUp)
+            {
+                // ⚠️ 监控开着时**不要跟鼠标转** ——
+                // 画面整个被监控盖住了，跟手转头毫无反馈，还会让切回来的
+                // 瞬间视角莫名其妙在边上。冻结当前视角（_panTarget 不动），
+                // 放下监控的那一刻就是抬头前的方向。
+            }
+            else if (gm.NaibaoTalking)
+            {
+                // ⚠️ 和奶包通电话时**也不许转头** ——
+                // 手机就摆在桌上，她的话音正对着你；一歪头手机就跑出画面中间，
+                // 通话面板和桌面手机对不上，氛围也散了。
+                // 冻结视角（_panTarget 不动），挂断后从原方向接着看。
+            }
+            else
             {
                 if (Application.isMobilePlatform)
                 {
@@ -1102,11 +1189,6 @@ namespace NailongFNAF.UI
                     // 贴墙的按钮只有落在这段里，鼠标才压得住、点得到（见 BuildWallButtons）。
                     _panTarget = Mathf.Clamp((x - 0.5f) / PanSaturationK, -1f, 1f);
                 }
-            }
-            else
-            {
-                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
-                _panTarget = 0f;
             }
 
             // 一点缓动：跟手，但不让鼠标的微小抖动直接抖到画面上
@@ -1206,6 +1288,174 @@ namespace NailongFNAF.UI
         private void TryNaibaoPhoneClick(GameManager gm)
         {
             HandleNaibaoPhoneClick(gm);
+        }
+
+        // ── 监控平板动画 ──
+        // 开关不再是瞬间出现/消失：黑平板从屏幕底部**抬起/放下**（约 0.18 秒），
+        // 期间监控画面跟着平板走。放下的那一小段里画面还在（半透明渐隐），
+        // 不是啪一下没了。
+
+        /// <summary>平板动画时长（秒）。</summary>
+        private const float MonitorAnimSeconds = 0.18f;
+
+        /// <summary>当前动画进度：0 = 完全放下，1 = 完全抬起。</summary>
+        private float _monitorAnim;
+
+        /// <summary>动画方向：1 抬起中，-1 放下中，0 = 静止。</summary>
+        private int _monitorAnimDir;
+
+        /// <summary>动画期间的平板容器（黑壳 + 画面都在里面，整体位移/倾斜）。</summary>
+        private RectTransform _monitorTablet;
+
+        /// <summary>
+        /// 监控平板的视觉状态。
+        /// 返回 true 表示动画还在进行中（这一帧别把 overlay SetActive(false)）。
+        /// </summary>
+        private bool UpdateMonitorTabletAnim(bool wantUp)
+        {
+            // 目标进度
+            float target = wantUp ? 1f : 0f;
+            int dir = wantUp ? 1 : -1;
+
+            if (_monitorTablet == null)
+            {
+                return false;
+            }
+
+            // 已经到位且没有动画要播
+            if (_monitorAnimDir == 0 && Mathf.Approximately(_monitorAnim, target))
+            {
+                return false;
+            }
+
+            if (_monitorAnimDir != dir && Mathf.Approximately(_monitorAnim, target))
+            {
+                _monitorAnimDir = 0;
+                return false;
+            }
+
+            _monitorAnimDir = dir;
+
+            // 推进
+            float dt = Time.unscaledDeltaTime;
+            _monitorAnim = Mathf.MoveTowards(_monitorAnim, target, dt / MonitorAnimSeconds);
+
+            // 缓动：easeOutCubic 的感觉
+            float eased = 1f - Mathf.Pow(1f - _monitorAnim, 3f);
+
+            // 平板从屏幕底部抬起来：位移 + 轻微透视倾斜
+            float h = Screen.height;
+            float rise = (1f - eased) * h * 0.85f;
+
+            _monitorTablet.anchoredPosition = new Vector2(0f, -rise);
+            _monitorTablet.localRotation = Quaternion.Euler(0f, 0f, 0f);
+
+            // 画面透明度跟动画走（放下的过程渐隐）
+            float alpha = Mathf.Clamp01(eased * 1.6f);
+            var cg = _monitorTablet.GetComponent<UnityEngine.CanvasGroup>();
+            if (cg != null)
+            {
+                cg.alpha = alpha;
+            }
+
+            bool running = !Mathf.Approximately(_monitorAnim, target);
+            if (!running)
+            {
+                _monitorAnimDir = 0;
+            }
+
+            return true;
+        }
+
+        // ── 监控雪花噪点（切机位的一瞬炸一下）──
+
+        /// <summary>噪点材质（程序化 shader，无贴图依赖）。</summary>
+        private Material _staticMaterial;
+
+        /// <summary>当前噪点强度（0 = 画面正常）。</summary>
+        private float _staticStrength;
+
+        /// <summary>噪点完全平息所需秒数。</summary>
+        private const float StaticFadeSeconds = 0.28f;
+
+        /// <summary>
+        /// 敌人挪窝时抖的那一下有多强。切机位是 1（整屏炸），
+        /// 这个要明显轻 —— 是「画面被人碰了一下」，不是「换台」。
+        /// </summary>
+        private const float MonitorMoveStaticStrength = 0.5f;
+
+        /// <summary>上一帧这一机位上的敌人组成（id + 姿势），用来判断「有人动了」。</summary>
+        private int _monitorEnemySignature;
+
+        /// <summary>签名是否有效。刚抬起监控的第一帧不算「有人动」。</summary>
+        private bool _monitorEnemySignatureReady;
+
+        /// <summary>噪点覆盖层（全屏 RawImage，盖在画面框之上）。</summary>
+        private UnityEngine.UI.RawImage _staticOverlay;
+
+        /// <summary>
+        /// 切机位的一瞬把噪点拉满，之后随时间衰减。
+        /// 平时也可以偶尔来一下（低概率），让玩家不敢盯着发呆。
+        /// </summary>
+        private void BurstStatic(float strength)
+        {
+            _staticStrength = Mathf.Max(_staticStrength, Mathf.Clamp01(strength));
+        }
+
+        /// <summary>每帧衰减噪点强度并写进材质。</summary>
+        private void UpdateStatic()
+        {
+            if (_staticOverlay == null)
+            {
+                return;
+            }
+
+            if (_staticStrength > 0f)
+            {
+                _staticStrength = Mathf.MoveTowards(
+                    _staticStrength, 0f, Time.unscaledDeltaTime / StaticFadeSeconds);
+
+                _staticOverlay.enabled = true;
+
+                // 强度走**顶点色 alpha**（shader 里读 IN.color.a）。
+                // ⚠️ 别改回 `_staticMaterial.SetFloat("_Strength", ...)`：
+                // 材质上读得到、渲染时却是 0，整层透明 —— 踩过。
+                //
+                // 用 Graphic.color 而不是 CanvasRenderer.SetAlpha：
+                // 后者只改渲染器层的乘数，不确定会落到顶点色里，
+                // 而这个 quad 本来就要跟着监控一起重建，多它一个不多。
+                _staticOverlay.color = new Color(1f, 1f, 1f, _staticStrength);
+            }
+            else if (_staticOverlay.enabled)
+            {
+                _staticOverlay.enabled = false;
+            }
+        }
+
+        /// <summary>
+        /// 监控画面里的敌人换了位置 / 换了姿势 → 抖一层雪花。
+        ///
+        /// 只认**当前这一机位看得见的**敌人：没在看的地方有人走动不该有反应，
+        /// 否则玩家能靠雪花反推自己没看的房间发生了什么。
+        /// 「有人动了」在监控上的表现本来就是「画面里的人忽然挪了 / 没了」，
+        /// 这一下抖动是把那个跳变糊过去，而不是额外报信。
+        /// </summary>
+        private void DetectMonitorEnemyMovement(EnemyId[] ids, CharacterPose[] poses, int count)
+        {
+            int signature = 17;
+            for (int i = 0; i < count; i++)
+            {
+                signature = signature * 31 + ((int)ids[i] + 1) * 7 + (int)poses[i];
+            }
+
+            // 刚抬起监控的第一帧不抖 —— 那是「打开」，不是「有人动」
+            if (_monitorEnemySignatureReady && signature != _monitorEnemySignature)
+            {
+                BurstStatic(MonitorMoveStaticStrength);
+            }
+
+            _monitorEnemySignature = signature;
+            _monitorEnemySignatureReady = true;
         }
 
         /// <summary>鼠标碰到屏幕底部边缘就升 / 放监控（进入边缘算一次，不是每帧）。</summary>
@@ -1326,9 +1576,15 @@ namespace NailongFNAF.UI
             int before = gm.CurrentCameraIndex;
             gm.SetCamera(index);
 
-            if (_audio != null && gm.CurrentCameraIndex != before)
+            if (gm.CurrentCameraIndex != before)
             {
-                _audio.PlayCameraSwitch();
+                if (_audio != null)
+                {
+                    _audio.PlayCameraSwitch();
+                }
+
+                // 切机位的一瞬：雪花炸满屏，然后衰减平息（0.28 秒）
+                BurstStatic(1f);
             }
         }
 
@@ -1446,12 +1702,21 @@ namespace NailongFNAF.UI
 
             // 监控层：断电后整套掉线，别挡着断电演出
             bool monitorUp = gm.MonitorUp && !_hasJumpscare && !gm.HasPowerOut;
+
+            // 平板动画：抬 / 放的过程里 overlay **保持激活**，
+            // 让画面跟着平板滑出来 / 滑回去，而不是啪一下出现或消失。
+            bool animating = UpdateMonitorTabletAnim(monitorUp);
+
             if (monitorUp)
             {
+                UpdateMonitorAreaScale();
                 ApplyMonitorOverlay(gm);
             }
 
-            _monitorOverlay.gameObject.SetActive(monitorUp);
+            UpdateMonitorBlur(monitorUp);
+            UpdateStatic();
+
+            _monitorOverlay.gameObject.SetActive(monitorUp || animating);
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
             _monitorMapGroup.blocksRaycasts = monitorUp;
 
@@ -1920,6 +2185,9 @@ namespace NailongFNAF.UI
         /// <summary>把所有监控角色槽位收起来。</summary>
         private void HideMonitorCharacters()
         {
+            // 收起 = 这一帧的画面作废。下次抬起监控的第一帧不该被判成「有人动」。
+            _monitorEnemySignatureReady = false;
+
             if (_monitorCharacters == null)
             {
                 return;
@@ -2221,6 +2489,12 @@ namespace NailongFNAF.UI
                 SetMonitorFrame(_solidSprite, Color.black);
                 _monitorLabel.text = CameraName(index) + "    (AUDIO ONLY)";
                 HideMonitorCharacters();
+
+                // ⚠️ 这里也要清贴图 —— 这条分支提前 return，不走下面的
+                // ApplyMonitorBackground，否则会残留上一个机位的插画，
+                // 在黑屏上飘着。传 null = 整组隐藏。
+                ApplyMonitorStickers(null);
+
                 UpdateCameraBoxes(index);
                 return;
             }
@@ -2468,6 +2742,10 @@ namespace NailongFNAF.UI
                 count++;
             }
 
+            // 这一机位上「谁在、谁什么姿势」跟上一帧不一样 → 抖一层雪花。
+            // 放在摆位之前：抖的是「刚刚发生的变化」，和这一帧怎么摆无关。
+            DetectMonitorEnemyMovement(ids, poses, count);
+
             // ⚠️ **位置和角色绑定，不按「当前有几个」重排**。
             // 以前是按 count 均分（1 个居中 / 2 个 ±130 / 3 个 ±230）——
             // 结果同一间屋里走了一个人，剩下的人会**整个挪一下**，看着像画面在动。
@@ -2529,9 +2807,10 @@ namespace NailongFNAF.UI
                 MonitorPoint custom = FindMonitorPoint(ids[i], cam);
                 if (custom != null)
                 {
-                    var overlayRt = (RectTransform)_monitorOverlay.transform;
-                    x = (custom.x - 0.5f) * overlayRt.rect.width;
-                    rect.anchoredPosition = new Vector2(x, custom.y * overlayRt.rect.height);
+                    // 归一化坐标 → **设计区**像素（1920×1080），不是 overlay 的尺寸
+                    Rect areaRect = MonitorAreaRect();
+                    x = (custom.x - 0.5f) * areaRect.width;
+                    rect.anchoredPosition = new Vector2(x, custom.y * areaRect.height);
                 }
                 else
                 {
@@ -2564,6 +2843,65 @@ namespace NailongFNAF.UI
 
             // 只给「远档」的敌人套遮挡（近档站在家具前面，不裁）
             ApplyOccluderToCharacters(cam);
+
+            // ── 可视区裁剪：立绘探出监控画面框的部分不画 ──
+            //
+            // 敌人摆在画面边缘（尤其编辑器手拖的点位）时，半个身子会画到
+            // 框外、盖住黑壳 —— 穿模。
+            //
+            // ⚠️ 坐标系只认**屏幕像素**（2026-10-25 第四版，前三个方案都翻车）：
+            //   · 拿 anchoredPosition 当父坐标 → 父节点 pivot 在画面下沿，差半个画面
+            //   · 拿世界坐标 → Overlay Canvas 的 unity_ObjectToWorld 含 scaleFactor，对不上
+            //   · 拿 TransformPoint 反算父坐标 → 数值看着对，实机仍然削掉敌人下半身
+            // 现在 C# 只负责把**画面框的屏幕像素矩形**算好，shader 用 ComputeScreenPos
+            // 把片元换到同一把尺上比较 —— 只有一个参照系，没有换算歧义。
+            //
+            // ⚠️ 也不能用 RectMask2D：IMaterialModifier 会换掉自定义 shader，
+            // 家具遮挡失效（更早的坑）。
+            Vector4 screenRect = MonitorAreaScreenRect();
+
+            foreach (var img in _monitorCharacters)
+            {
+                if (img == null || img.material == null
+                    || !img.material.HasProperty("_ScreenRect"))
+                {
+                    continue;
+                }
+
+                img.material.SetVector("_ScreenRect", screenRect);
+            }
+        }
+
+        /// <summary>
+        /// 监控画面框（<see cref="MonitorArea"/>）在屏幕上的像素矩形：
+        /// <c>xy</c> = 左下角，<c>zw</c> = 右上角，原点在屏幕左下。
+        /// </summary>
+        private Vector4 MonitorAreaScreenRect()
+        {
+            if (_monitorArea == null)
+            {
+                return new Vector4(-10000f, -10000f, 10000f, 10000f);
+            }
+
+            var corners = new Vector3[4];
+            _monitorArea.GetWorldCorners(corners);
+
+            float minX = float.MaxValue;
+            float minY = float.MaxValue;
+            float maxX = float.MinValue;
+            float maxY = float.MinValue;
+
+            for (int i = 0; i < corners.Length; i++)
+            {
+                // Overlay Canvas 传 null 相机：世界坐标就是画布坐标，直接换成屏幕像素
+                Vector2 p = RectTransformUtility.WorldToScreenPoint(null, corners[i]);
+                minX = Mathf.Min(minX, p.x);
+                minY = Mathf.Min(minY, p.y);
+                maxX = Mathf.Max(maxX, p.x);
+                maxY = Mathf.Max(maxY, p.y);
+            }
+
+            return new Vector4(minX, minY, maxX, maxY);
         }
 
         /// <summary>
@@ -2831,8 +3169,7 @@ namespace NailongFNAF.UI
                 return slotX;
             }
 
-            var overlayRect = (RectTransform)_monitorOverlay.transform;
-            float width = overlayRect.rect.width;
+            float width = MonitorAreaRect().width;
             float boxCenterX = ((minX + maxX) * 0.5f - 0.5f) * width;
 
             // 往箱子中心靠 60%
@@ -2961,6 +3298,60 @@ namespace NailongFNAF.UI
             public float bgScale = 1f;
 
             public MonitorPoint[] points;
+
+            /// <summary>
+            /// 这一机位上贴的插画（墙上海报、涂鸦、警示牌…）。
+            /// 由编辑器「奶龙 / 6. 监控画面编辑器」的**贴图**模式摆出来。
+            /// </summary>
+            public MonitorSticker[] stickers;
+        }
+
+        /// <summary>
+        /// 贴在监控画面上的**一张插画** —— 归一化坐标（0..1，左下原点），
+        /// 和底图 / 敌人点位同一套坐标系，编辑器里拖完直接就是运行时位置。
+        /// </summary>
+        [System.Serializable]
+        private class MonitorSticker
+        {
+            /// <summary>
+            /// Resources 里的贴图路径（不带扩展名）—— 相对 Assets/Resources/。
+            /// 例如 "Posters/poster_01"。
+            /// </summary>
+            public string image;
+
+            /// <summary>中心点归一化坐标（0..1，左下原点）。</summary>
+            public float x = 0.5f;
+            public float y = 0.5f;
+
+            /// <summary>
+            /// 宽度占画面宽度的比例 —— **只在 corners 为空时用**。
+            /// 有 corners 时以四个角为准。
+            /// </summary>
+            public float width = 0.2f;
+
+            /// <summary>绕自身中心的旋转角（度，逆时针）—— 同样只在没有 corners 时用。</summary>
+            public float rotation;
+
+            /// <summary>不透明度 0..1。</summary>
+            public float alpha = 1f;
+
+            /// <summary>
+            /// **自由四边形**的四个角，归一化坐标（0..1，左下原点）。
+            ///
+            /// 顺序：左下、左上、右上、右下（顺时针）。
+            /// 空数组 = 用老的 x/y/width/rotation 走正矩形 —— 老存档兼容。
+            /// 长度不是 8（4 个点 × 2 个分量）时也当空处理。
+            /// </summary>
+            public float[] corners;
+        }
+
+        /// <summary>
+        /// 贴图的「四角模式」是否可用。<paramref name="corners"/> 必须是 8 个浮点数
+        /// （4 个点，每个 x,y 归一化）。
+        /// </summary>
+        private static bool HasCorners(MonitorSticker st)
+        {
+            return st != null && st.corners != null && st.corners.Length == 8;
         }
 
         [System.Serializable]
@@ -3041,6 +3432,160 @@ namespace NailongFNAF.UI
             return null;
         }
 
+        /// <summary>
+        /// 把 16:9 设计区等比缩到窗口里**完整放下**（整张监控图不裁、不拉伸）。
+        ///
+        /// 取 <c>min</c>：宁可窗口不是 16:9 时两侧（或上下）留空，也要让画面完整。
+        /// 试过 <c>max</c>（铺满、裁边），但 2.66:1 那种宽窗口要裁掉三成高度，
+        /// 天花板 / 地板说没就没 —— 绿子 2026-10-24 看过之后选了「完整显示」。
+        ///
+        /// 再乘 <see cref="MonitorInset"/>：**画面永远不顶到屏幕边缘**，
+        /// 留出黑壳（`MonitorBezelPad`）和一圈糊掉的办公室 —— 监控得像一台摆在那儿的设备，
+        /// 而不是一张贴满屏幕的图（绿子 2026-10-24：「画框外加模糊，给监控一个黑壳边框」）。
+        ///
+        /// 只改 <c>localScale</c>，不动 <c>sizeDelta</c> —— 设计区里的坐标永远是
+        /// 1920×1080 那一套，编辑器预览和运行时才对得上。
+        /// </summary>
+        private void UpdateMonitorAreaScale()
+        {
+            if (_monitorArea == null || _monitorOverlay == null)
+            {
+                return;
+            }
+
+            Rect host = _monitorOverlay.rectTransform.rect;
+            if (host.width < 1f || host.height < 1f)
+            {
+                return;
+            }
+
+            float s = Mathf.Min(host.width / MonitorDesignWidth, host.height / MonitorDesignHeight)
+                * MonitorInset;
+            if (s <= 0f)
+            {
+                return;
+            }
+
+            var scale = new Vector3(s, s, 1f);
+            if (_monitorArea.localScale != scale)
+            {
+                _monitorArea.localScale = scale;
+            }
+
+            // 完整放下时永远是居中的，偏移归零
+            if (_monitorArea.anchoredPosition != Vector2.zero)
+            {
+                _monitorArea.anchoredPosition = Vector2.zero;
+            }
+        }
+
+        /// <summary>
+        /// 监控画面框外那圈「虚化的办公室」。
+        ///
+        /// 做法：另开一台相机（不碰 `Camera.main`，免得 `WorldToScreenPoint`
+        /// 变成渲染目标的像素坐标、把墙上的按钮和门口立绘算错），
+        /// 每帧复制主相机的位姿 / FOV，渲到 **1/6 分辨率** 的 RenderTexture，
+        /// 再用一张全屏 RawImage 双线性拉大 —— 就是一团柔和的虚化。
+        ///
+        /// 只在监控升起时开；降下时立刻关掉相机、隐藏图片，一分钱不花。
+        /// </summary>
+        private void UpdateMonitorBlur(bool on)
+        {
+            if (_monitorBlurImage == null)
+            {
+                return;
+            }
+
+            if (!on)
+            {
+                if (_monitorBlurImage.enabled)
+                {
+                    _monitorBlurImage.enabled = false;
+                }
+
+                if (_blurCam != null && _blurCam.enabled)
+                {
+                    _blurCam.enabled = false;
+                }
+
+                return;
+            }
+
+            Camera main = Camera.main;
+            if (main == null)
+            {
+                _monitorBlurImage.enabled = false;
+                return;
+            }
+
+            int w = Mathf.Max(8, Screen.width / MonitorBlurDownscale);
+            int h = Mathf.Max(8, Screen.height / MonitorBlurDownscale);
+
+            if (_blurRT == null || _blurRT.width != w || _blurRT.height != h)
+            {
+                if (_blurCam != null)
+                {
+                    _blurCam.targetTexture = null;
+                }
+
+                if (_blurRT != null)
+                {
+                    _blurRT.Release();
+                    Destroy(_blurRT);
+                }
+
+                _blurRT = new RenderTexture(w, h, 16, RenderTextureFormat.Default);
+                _blurRT.filterMode = FilterMode.Bilinear;
+                _blurRT.Create();
+            }
+
+            if (_blurCam == null)
+            {
+                var go = new GameObject("MonitorBlurCamera");
+                _blurCam = go.AddComponent<Camera>();
+                _blurCam.clearFlags = CameraClearFlags.SolidColor;
+                _blurCam.backgroundColor = Color.black;
+                _blurCam.nearClipPlane = 0.05f;
+                _blurCam.farClipPlane = 60f;
+                _blurCam.allowHDR = false;
+                _blurCam.allowMSAA = false;
+                _blurCam.useOcclusionCulling = false;
+            }
+
+            _blurCam.transform.SetPositionAndRotation(main.transform.position, main.transform.rotation);
+            _blurCam.fieldOfView = main.fieldOfView;
+            _blurCam.cullingMask = main.cullingMask;
+            _blurCam.targetTexture = _blurRT;
+
+            if (!_blurCam.enabled)
+            {
+                _blurCam.enabled = true;
+            }
+
+            _monitorBlurImage.texture = _blurRT;
+
+            if (!_monitorBlurImage.enabled)
+            {
+                _monitorBlurImage.enabled = true;
+            }
+        }
+
+        /// <summary>
+        /// 监控画面的**设计区矩形**（1920×1080，原点在左下）。
+        /// 所有归一化坐标（点位 / 贴图 / 遮挡）都以它为基准 —— 不是 overlay。
+        /// </summary>
+        private Rect MonitorAreaRect()
+        {
+            if (_monitorArea != null)
+            {
+                return _monitorArea.rect;
+            }
+
+            return _monitorOverlay != null
+                ? _monitorOverlay.rectTransform.rect
+                : new Rect(0f, 0f, MonitorDesignWidth, MonitorDesignHeight);
+        }
+
         /// <summary>把底图的平移 / 缩放套到画面上。没配该机位就复位。</summary>
         private void ApplyMonitorBackground(int cameraIndex)
         {
@@ -3053,9 +3598,11 @@ namespace NailongFNAF.UI
 
             var rt = _monitorFrame.rectTransform;
 
-            MonitorLayoutRoom room;
-            if (_monitorLayout != null && _monitorLayout.TryGetValue(cameraIndex, out room) && room != null)
+            MonitorLayoutRoom room = null;
+            if (_monitorLayout != null && _monitorLayout.TryGetValue(cameraIndex, out MonitorLayoutRoom found)
+                && found != null)
             {
+                room = found;
                 float s = room.bgScale <= 0.01f ? 1f : room.bgScale;
                 rt.anchoredPosition = new Vector2(room.bgX, room.bgY);
                 rt.localScale = new Vector3(s, s, 1f);
@@ -3065,6 +3612,156 @@ namespace NailongFNAF.UI
                 rt.anchoredPosition = Vector2.zero;
                 rt.localScale = Vector3.one;
             }
+
+            ApplyMonitorStickers(room);
+        }
+
+        // ---------------- 监控画面上的插画（贴图）----------------
+
+        /// <summary>
+        /// 每个机位一组贴图层；切机位时整组换掉。
+        /// 不复用单个控件是因为一屏可能要贴好几张（墙上海报 + 涂鸦 + 警示牌）。
+        ///
+        /// 用 <see cref="QuadGraphic"/> 而不是 Image：
+        /// Image 只能画正矩形，没法「拖四个角」做透视变形。
+        /// </summary>
+        private readonly System.Collections.Generic.List<QuadGraphic> _stickerPool =
+            new System.Collections.Generic.List<QuadGraphic>();
+
+        /// <summary>贴图挂在哪个父物体下（监控画面那一层，跟着画面一起缩放）。</summary>
+        private RectTransform _stickerRoot;
+
+        /// <summary>
+        /// 把某个机位上配的插画摆上去。
+        ///
+        /// 坐标和底图 / 敌人点位同一套：归一化 0..1、**左下原点**。
+        /// 没配就整组隐藏，不报错。
+        /// </summary>
+        private void ApplyMonitorStickers(MonitorLayoutRoom room)
+        {
+            if (_stickerRoot == null)
+            {
+                return;
+            }
+
+            var stickers = room != null ? room.stickers : null;
+            int count = stickers != null ? stickers.Length : 0;
+
+            // 池子不够就补
+            while (_stickerPool.Count < count)
+            {
+                var go = new GameObject("Sticker",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(QuadGraphic));
+                go.transform.SetParent(_stickerRoot, false);
+
+                var quad = go.GetComponent<QuadGraphic>();
+                quad.raycastTarget = false;
+
+                _stickerPool.Add(quad);
+            }
+
+            RectTransform host = _stickerRoot;
+            float hostW = host != null ? host.rect.width : 0f;
+            float hostH = host != null ? host.rect.height : 0f;
+
+            for (int i = 0; i < _stickerPool.Count; i++)
+            {
+                var quad = _stickerPool[i];
+
+                if (i >= count || stickers[i] == null || string.IsNullOrEmpty(stickers[i].image))
+                {
+                    if (quad.gameObject.activeSelf)
+                    {
+                        quad.gameObject.SetActive(false);
+                    }
+
+                    continue;
+                }
+
+                var st = stickers[i];
+
+                Texture texture = LoadStickerTexture(st.image);
+                if (texture == null)
+                {
+                    quad.gameObject.SetActive(false);
+                    continue;
+                }
+
+                if (!quad.gameObject.activeSelf)
+                {
+                    quad.gameObject.SetActive(true);
+                }
+
+                quad.Texture = texture;
+                quad.color = new Color(1f, 1f, 1f, Mathf.Clamp01(st.alpha));
+
+                var rt = quad.rectTransform;
+                rt.anchorMin = new Vector2(0.5f, 0.5f);
+                rt.anchorMax = new Vector2(0.5f, 0.5f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.sizeDelta = Vector2.zero;
+                rt.anchoredPosition = Vector2.zero;
+                rt.localRotation = Quaternion.identity;
+
+                if (HasCorners(st))
+                {
+                    // 自由四边形：四个角直接从数据来（归一化 → 以画面中心为原点的像素）
+                    quad.SetCorners(
+                        StickerCorner(st, 0, hostW, hostH),
+                        StickerCorner(st, 1, hostW, hostH),
+                        StickerCorner(st, 2, hostW, hostH),
+                        StickerCorner(st, 3, hostW, hostH));
+                }
+                else
+                {
+                    // 老数据：正矩形 + 旋转
+                    float w = hostW * Mathf.Max(0.01f, st.width);
+                    float aspect = texture.height / Mathf.Max(1f, texture.width);
+                    float h = w * aspect;
+
+                    quad.SetCornersFromSize(w, h, 0f, 0f);
+
+                    rt.anchoredPosition = new Vector2(
+                        st.x * hostW - hostW * 0.5f,
+                        st.y * hostH - hostH * 0.5f);
+
+                    rt.localRotation = Quaternion.Euler(0f, 0f, st.rotation);
+                }
+            }
+        }
+
+        /// <summary>取第 <paramref name="index"/> 个角的本地像素坐标（以画面中心为原点）。</summary>
+        private static Vector2 StickerCorner(MonitorSticker st, int index, float hostW, float hostH)
+        {
+            return new Vector2(
+                st.corners[index * 2] * hostW - hostW * 0.5f,
+                st.corners[index * 2 + 1] * hostH - hostH * 0.5f);
+        }
+
+        /// <summary>贴图缓存：Resources 路径 → Texture2D。</summary>
+        private readonly System.Collections.Generic.Dictionary<string, Texture2D> _stickerTextures =
+            new System.Collections.Generic.Dictionary<string, Texture2D>();
+
+        /// <summary>
+        /// 载入一张贴图。<c>image</c> 是相对 Assets/Resources/ 的路径（不带扩展名），
+        /// 例如 "Posters/poster_01"。
+        /// </summary>
+        private Texture2D LoadStickerTexture(string image)
+        {
+            if (string.IsNullOrEmpty(image))
+            {
+                return null;
+            }
+
+            Texture2D cached;
+            if (_stickerTextures.TryGetValue(image, out cached))
+            {
+                return cached;
+            }
+
+            var texture = Resources.Load<Texture2D>(image);
+            _stickerTextures[image] = texture;
+            return texture;
         }
 
         /// <summary>多边形遮罩纹理缓存（按机位）。</summary>
@@ -3338,41 +4035,37 @@ namespace NailongFNAF.UI
                     // 用世界角点反算，而不是拼 anchoredPosition ——
                     // 立绘外面套着 mask 父节点、pivot 又在底部，纯算偏移会错。
                     //
-                    // ⚠️ 基准必须是**监控图本身占的那块区域**，不是 overlay：
-                    // overlay 是 2241x925（铺满画布），而监控图是 16:9 的 1920x1080，
-                    // 两者宽高比不同，直接按 overlay 算会让采样坐标整体偏掉。
-                    var imgRect = img.rectTransform;
-                    var overlayRect = (RectTransform)_monitorOverlay.transform;
-
-                    // 监控图在 overlay 里的**实际显示区域**。
-                    // 图是 16:9，overlay 是 2241x925（宽高比 2.42:1），
-                    // 所以图会被拉伸铺满 —— 遮罩和背景图用的是同一张 1920x1080 内容，
-                    // 两者在 overlay 里占的是**同一块区域**，直接按 overlay 归一化即可。
-                    //
-                    // （早先担心的「宽高比不一致」其实不存在：拉伸对背景和遮罩
-                    //   是同时发生的，所以它们的归一化坐标仍然一一对应。）
-                    // ⚠️ 必须用 **InverseTransformPoint 转进 overlay 的本地空间**，
+                    // ⚠️ 基准必须是**监控画面的设计区**（1920×1080，和遮罩图同尺寸），
+                    // 不是 overlay：overlay 的宽高比跟着窗口走，拿它归一化会让采样坐标整体偏掉。
+                    // 2026-10-24 起 overlay 里放了一块固定 16:9 的 MonitorArea，
+                    // 底图 / 贴图 / 立绘 / 遮罩全都对齐到它。
+                    // ⚠️ 必须用 **InverseTransformPoint 转进设计区的本地空间**，
                     // 不能拿世界坐标相减再除以 rect.size ——
                     // Canvas 有缩放系数（CanvasScaler），世界单位 ≠ 本地单位，
                     // 混用会算出**偏小且偏移**的矩形，遮挡就跑到画面别处去了
                     // （2026-10-18 踩过：算出来 0.05 宽，实际应该是 0.09）。
+                    var imgRect = img.rectTransform;
+                    RectTransform areaRt = _monitorArea != null
+                        ? _monitorArea
+                        : (RectTransform)_monitorOverlay.transform;
+
                     Vector3[] corners = new Vector3[4];
                     imgRect.GetWorldCorners(corners);
 
-                    Rect local = overlayRect.rect;
+                    Rect local = areaRt.rect;
 
                     Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
                     Vector2 max = new Vector2(float.MinValue, float.MinValue);
                     for (int ci = 0; ci < 4; ci++)
                     {
-                        Vector3 p = overlayRect.InverseTransformPoint(corners[ci]);
+                        Vector3 p = areaRt.InverseTransformPoint(corners[ci]);
                         min.x = Mathf.Min(min.x, p.x);
                         min.y = Mathf.Min(min.y, p.y);
                         max.x = Mathf.Max(max.x, p.x);
                         max.y = Mathf.Max(max.y, p.y);
                     }
 
-                    // 本地坐标 → 0..1（以 overlay 左下角为原点）
+                    // 本地坐标 → 0..1（以设计区左下角为原点）
                     float u0 = (min.x - local.xMin) / local.width;
                     float du = (max.x - min.x) / local.width;
 
@@ -3934,20 +4627,242 @@ namespace NailongFNAF.UI
                 _musicPlaying = false;
             }
 
-            if (gm.HasBeenCaught || _enemyDirector == null || !AnyEnemyNearby())
+            if (gm.HasBeenCaught || _enemyDirector == null)
             {
                 _footstepTimer = 0f;
+                _footstepLeft = 0;
                 return;
             }
 
-            // 有敌人在走廊或更近的位置 —— 按不规则的间隔传出脚步
-            _footstepTimer -= Time.deltaTime;
-            if (_footstepTimer <= 0f)
+            UpdateFootsteps();
+            UpdateMoo();
+        }
+
+        /// <summary>
+        /// 牛来进出厨房时的牛叫。
+        ///
+        /// 厨房（CAM 6）是官方那个「只有声音没有画面」的机位 ——
+        /// 玩家切过去是一片黑，只能听。所以：
+        ///   · 刚进厨房 → 原调牛叫（他进去了）
+        ///   · 刚出厨房 → **降调**牛叫（他出来了 / 走远了）
+        /// 音高差得不小（1.0 vs 0.78），不看画面也分得清方向。
+        /// </summary>
+        private void UpdateMoo()
+        {
+            if (_enemyDirector == null)
             {
-                _audio.PlayFootstep();
-                _footstepTimer = Random.Range(0.7f, 1.5f);
+                return;
+            }
+
+            var niulai = _enemyDirector.GetBrain(EnemyId.Niulai) as DoorEnemyBrain;
+            if (niulai == null || !niulai.HasCameraPath)
+            {
+                return;
+            }
+
+            int stage = niulai.Stage;
+
+            // 第一帧只记状态，不播 —— 否则一进夜就会先叫一声
+            if (_lastNiulaiStage < 0)
+            {
+                _lastNiulaiStage = stage;
+                return;
+            }
+
+            if (stage == _lastNiulaiStage)
+            {
+                return;
+            }
+
+            bool wasInKitchen = IsKitchenStage(niulai, _lastNiulaiStage);
+            bool isInKitchen = IsKitchenStage(niulai, stage);
+
+            _lastNiulaiStage = stage;
+
+            if (_audio == null)
+            {
+                return;
+            }
+
+            if (!wasInKitchen && isInKitchen)
+            {
+                // 进去：原调
+                _audio.PlayMoo(false);
+            }
+            else if (wasInKitchen && !isInKitchen)
+            {
+                // 出来：降调
+                _audio.PlayMoo(true);
             }
         }
+
+        /// <summary>这个 Stage 是不是厨房那一格。</summary>
+        private static bool IsKitchenStage(DoorEnemyBrain niulai, int stage)
+        {
+            return niulai.PathCameraIndexAt(stage) == KitchenCameraIndex;
+        }
+
+        // ── 脚步 ────────────────────────────────────────────────────
+        //
+        // 规则（用户 2026-10-24 定）：
+        //   · 敌人离 YOU 越近，脚步越响
+        //   · 每次「靠近或离开」触发一串 **2~4 步**
+        //   · 左右脚**交替**（有方位感，不像节拍器）
+        //   · 每串之间隔一会儿再响
+        //
+        // 「靠近或离开」= 某只敌人的 Stage 变了（换房间 / 走向门口 / 退走）。
+        // 不去算欧氏距离 —— 敌人本来就在固定的机位路径上，Stage 就是距离。
+
+        /// <summary>还差几步放完（0 = 这一串走完了）。</summary>
+        private int _footstepLeft;
+
+        /// <summary>下一声的脚步时刻（Time.time）。</summary>
+        private float _footstepNextAt;
+
+        /// <summary>true = 下一步是右脚。</summary>
+        private bool _footstepRightFoot;
+
+        /// <summary>上一次看到的「最近敌人距离」，用来检测靠近 / 离开。</summary>
+        private float _lastNearestDistance = -1f;
+
+        /// <summary>
+        /// 牛来上一次的 Stage —— 用来检测「刚进厨房 / 刚出厨房」。
+        ///
+        /// 厨房（CAM 6）没有画面，所以「他在里面」这件事只能靠听。
+        /// 进厨房放原调牛叫、出厨房放**降调**牛叫（走远了）。
+        /// -1 = 还没初始化过（第一帧不播）。
+        /// </summary>
+        private int _lastNiulaiStage = -1;
+
+        /// <summary>一串脚步之间的最短间隔（秒）。</summary>
+        private const float FootstepBurstMinGap = 1.2f;
+        private const float FootstepBurstMaxGap = 2.8f;
+
+        /// <summary>
+        /// 相邻两步之间隔多久（秒）—— 走路的速度感。
+        /// 0.62 秒一步 ≈ 每秒 1.6 步，比正常走路慢，听起来像**在黑暗里摸索**。
+        /// （原来是 0.42，太急，像小跑。）
+        /// </summary>
+        private const float FootstepStepGap = 0.62f;
+
+        /// <summary>
+        /// 敌人「离 YOU 多远」：0 = 刚到走廊、1 = 站在门口。
+        /// 取所有敌人里**最近**的那只 —— 玩家听到的是最近那个人的脚步。
+        /// 没有敌人在动时返回 -1。
+        /// </summary>
+        private float NearestEnemyDistance()
+        {
+            if (_enemyDirector == null)
+            {
+                return -1f;
+            }
+
+            float nearest = -1f;
+
+            foreach (var brain in _enemyDirector.Brains)
+            {
+                int max = brain.MaxStage;
+                if (max <= 0)
+                {
+                    continue;
+                }
+
+                // Stage 0 = 出生地（很远），Stage = MaxStage = 门口（最近）
+                float d = brain.Stage / (float)max;
+                if (d < 0f) { d = 0f; }
+                if (d > 1f) { d = 1f; }
+
+                if (d > nearest)
+                {
+                    nearest = d;
+                }
+            }
+
+            return nearest;
+        }
+
+        private void UpdateFootsteps()
+        {
+            float distance = NearestEnemyDistance();
+
+            // 太远就不该听见 —— 低于这个门槛一律静音
+            const float AudibleFrom = 0.22f;
+
+            // ── 正在放一串 ──
+            if (_footstepLeft > 0)
+            {
+                if (Time.time < _footstepNextAt)
+                {
+                    return;
+                }
+
+                EmitFootstep(distance);
+                _footstepLeft--;
+
+                if (_footstepLeft > 0)
+                {
+                    _footstepNextAt = Time.time + FootstepStepGap;
+                }
+                else
+                {
+                    // 这一串走完，歇一会儿
+                    _footstepNextAt = Time.time + Random.Range(FootstepBurstMinGap, FootstepBurstMaxGap);
+                    _footstepTimer = _footstepNextAt - Time.time;
+                }
+
+                _lastNearestDistance = distance;
+                return;
+            }
+
+            // ── 不在放：有空档才能起新的一串 ──
+            if (Time.time < _footstepNextAt)
+            {
+                _lastNearestDistance = distance;
+                return;
+            }
+
+            // ── 判断「靠近或离开」──
+            bool moved = _lastNearestDistance >= 0f
+                && Mathf.Abs(distance - _lastNearestDistance) > 0.01f;
+
+            _lastNearestDistance = distance;
+
+            if (!moved || distance < AudibleFrom)
+            {
+                return;
+            }
+
+            // 起一串：2~4 步，第一步随机左右
+            _footstepLeft = Random.Range(2, 5);
+            _footstepRightFoot = Random.value < 0.5f;
+            EmitFootstep(distance);
+            _footstepLeft--;
+            _footstepNextAt = Time.time + FootstepStepGap;
+        }
+
+        /// <summary>
+        /// 放一声脚步。**响度随距离线性上升**：
+        /// 刚进走廊时几乎听不见（0.15），站到门口就是满音量。
+        /// </summary>
+        private void EmitFootstep(float distance)
+        {
+            if (_audio == null)
+            {
+                return;
+            }
+
+            // 更响：最远端从 0.15 提到 0.45（刚进走廊就能听见），
+            // 最近端给到 1.35 —— PlayOneShot 的音量可以超过 1，会自然削顶，
+            // 听感上就是「贴着耳朵踩了一脚」。
+            float volume = Mathf.Lerp(0.45f, 1.35f, Mathf.Clamp01(distance));
+
+            _audio.PlayFootstep(_footstepRightFoot, volume);
+
+            // 交替
+            _footstepRightFoot = !_footstepRightFoot;
+        }
+
+        /// <summary>（旧的「附近就无规则响」判据，保留给别处用）</summary>
 
         /// <summary>
         /// 音乐盒只在断电演出的音乐段响。它一停，画面就该彻底黑下去 ——
@@ -5631,23 +6546,148 @@ namespace NailongFNAF.UI
             _monitorOverlay = MakeFullScreenImage("MonitorOverlay", MonitorFallback, true);
 
             // overlay 本身只当**容器**用，别再往上画东西（否则底图一缩放，
-            // 敌人立绘、小地图、机位名会跟着缩）。底色压黑即可。
-            _monitorOverlay.color = Color.black;
+            // 敌人立绘、小地图、机位名会跟着缩）。
+            //
+            // **底色透明**：监控升起时，16:9 画面框之外要看得见办公室
+            // （绿子 2026-10-24：「打开监控的时候剩下的部分应该能看到办公室」）。
+            // 只有画面框**里面**才垫黑（MonitorBackdrop），像一块真的屏幕。
+            // 注意 raycastTarget 仍是 true —— 透明也要挡住背后的点击。
+            _monitorOverlay.color = Color.clear;
 
-            // 1) 纯黑垫底：底图缩小 / 平移后露出来的地方必须是黑的，
-            //    否则会透出办公室画面，看着像"监控没铺满"。
+            // 0) 框外模糊：把办公室**低分辨率渲一遍**再拉大，自然就糊了。
+            //    监控画面框（连同黑壳）盖在它上面，所以只有框外是糊的。
+            //
+            // ⚠️ 别用 GrabPass 做实时高斯 —— 试过：抓屏 + 25 抽样在这台机器上
+            //    掉到 50fps（不开是 160fps），比低分辨率渲一遍贵一个数量级。
+            //    低分辨率方案基本免费，模糊感也够（背景本来就该看不清）。
+            var blurGo = new GameObject("MonitorBlur", typeof(RectTransform), typeof(RawImage));
+            blurGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _monitorBlurImage = blurGo.GetComponent<RawImage>();
+            StretchToParent(_monitorBlurImage.rectTransform);
+            _monitorBlurImage.raycastTarget = false;
+            // 稍微压暗一点点，别让模糊的背景比监控画面还抢眼
+            _monitorBlurImage.color = new Color(0.88f, 0.89f, 0.92f, 1f);
+            blurGo.transform.SetAsFirstSibling();
+
+            // 1.5) 16:9 设计区 —— 监控画面的一切都挂在这下面。
+            //
+            // **固定 1920×1080 设计像素**，再按窗口等比缩放（见 UpdateMonitorAreaScale）。
+            // 这样编辑器预览里的「归一化坐标 / 设计像素」和运行时是同一套，
+            // 摆多大就是多大；窗口不是 16:9 时留黑边，而不是把画面拉扁或裁掉。
+            // 1.57) 雪花噪点层：切机位的一瞬炸一下（见 BurstStatic / UpdateStatic）。
+            //       程序化 shader，无贴图。
+            //       ⚠️ 创建时**先不挂父**（那时 MonitorArea 还没建），
+            //       方法末尾统一挂到 MonitorArea 下（继承等比缩放）并置顶。
+            var staticGo = new GameObject("MonitorStatic", typeof(RectTransform), typeof(UnityEngine.UI.RawImage));
+
+            _staticOverlay = staticGo.GetComponent<UnityEngine.UI.RawImage>();
+            _staticOverlay.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _staticOverlay.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _staticOverlay.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            _staticOverlay.rectTransform.anchoredPosition = Vector2.zero;
+            _staticOverlay.rectTransform.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
+            _staticOverlay.raycastTarget = false;
+            _staticOverlay.enabled = false;
+
+            var staticShader = Shader.Find("NailongFNAF/MonitorStatic");
+            if (staticShader != null)
+            {
+                _staticMaterial = new Material(staticShader);
+                _staticOverlay.material = _staticMaterial;
+                _staticOverlay.color = Color.white;
+                _staticOverlay.texture = Texture2D.whiteTexture;
+            }
+
+            staticGo.transform.SetAsLastSibling();
+
+            // 1.55) 平板容器：包住设计区（黑壳 + 画面 + 敌人 + 小地图都在里面）。
+            //       开关监控时这块整体从屏幕底部抬起 / 放下（见 UpdateMonitorTabletAnim）。
+            //       ⚠️ 框外模糊**不在**容器里 —— 抬起时办公室就该先看见，
+            //       只有平板本体在滑。
+            var tabletGo = new GameObject("MonitorTablet", typeof(RectTransform), typeof(UnityEngine.CanvasGroup));
+            tabletGo.transform.SetParent(_monitorOverlay.transform, false);
+
+            _monitorTablet = tabletGo.GetComponent<RectTransform>();
+            _monitorTablet.anchorMin = new Vector2(0.5f, 0.5f);
+            _monitorTablet.anchorMax = new Vector2(0.5f, 0.5f);
+            _monitorTablet.pivot = new Vector2(0.5f, 0.5f);
+            _monitorTablet.anchoredPosition = Vector2.zero;
+            _monitorTablet.sizeDelta = Vector2.zero;
+
+            var areaGo = new GameObject("MonitorArea", typeof(RectTransform));
+            areaGo.transform.SetParent(_monitorTablet, false);
+
+            _monitorArea = areaGo.GetComponent<RectTransform>();
+            _monitorArea.anchorMin = new Vector2(0.5f, 0.5f);
+            _monitorArea.anchorMax = new Vector2(0.5f, 0.5f);
+            _monitorArea.pivot = new Vector2(0.5f, 0.5f);
+            _monitorArea.anchoredPosition = Vector2.zero;
+            _monitorArea.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
+            _monitorArea.localScale = Vector3.one;
+
+            // 1.6) 黑壳：比画面框大一圈的圆角黑板，让监控像一台真的显示器。
+            //      挂在设计区里（跟着一起缩放），排在垫底之前 —— 只露出发给框外的那一圈。
+            var bezelGo = new GameObject("MonitorBezel", typeof(RectTransform), typeof(Image));
+            bezelGo.transform.SetParent(_monitorArea, false);
+
+            _monitorBezel = bezelGo.GetComponent<RectTransform>();
+
+            var bezelRect = bezelGo.GetComponent<RectTransform>();
+            bezelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            bezelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            bezelRect.pivot = new Vector2(0.5f, 0.5f);
+            bezelRect.anchoredPosition = Vector2.zero;
+            bezelRect.sizeDelta = new Vector2(
+                MonitorDesignWidth + MonitorBezelPad * 2f,
+                MonitorDesignHeight + MonitorBezelPad * 2f);
+
+            var bezelImage = bezelGo.GetComponent<Image>();
+            bezelImage.sprite = GetButtonSprite();
+            bezelImage.type = Image.Type.Sliced;
+            bezelImage.color = MonitorBezelColor;
+            bezelImage.raycastTarget = false;
+
+            // 1.7) 壳内沿的一圈细亮线：纯黑壳贴着一片暗画面时看不出边界，
+            //      加这条 3px 的灰线才有「屏幕嵌在壳里」的立体感。
+            var rimGo = new GameObject("MonitorBezelRim", typeof(RectTransform), typeof(Image));
+            rimGo.transform.SetParent(_monitorArea, false);
+
+            var rimRect = rimGo.GetComponent<RectTransform>();
+            rimRect.anchorMin = new Vector2(0.5f, 0.5f);
+            rimRect.anchorMax = new Vector2(0.5f, 0.5f);
+            rimRect.pivot = new Vector2(0.5f, 0.5f);
+            rimRect.anchoredPosition = Vector2.zero;
+            rimRect.sizeDelta = new Vector2(
+                MonitorDesignWidth + MonitorBezelRimPad * 2f,
+                MonitorDesignHeight + MonitorBezelRimPad * 2f);
+
+            var rimImage = rimGo.GetComponent<Image>();
+            rimImage.sprite = GetButtonSprite();
+            rimImage.type = Image.Type.Sliced;
+            rimImage.color = MonitorBezelRimColor;
+            rimImage.raycastTarget = false;
+
+            // 1) 画面框内的纯黑垫底：底图缩小 / 平移后露出来的地方必须是黑的
+            //    （屏幕该有的黑），**只盖画面框这一块** —— 框外是糊掉的办公室。
             _monitorBackdrop = MakeFullScreenImage("MonitorBackdrop", Color.black, false);
-            _monitorBackdrop.transform.SetParent(_monitorOverlay.transform, false);
+            _monitorBackdrop.transform.SetParent(_monitorArea, false);
             StretchToParent(_monitorBackdrop.rectTransform);
-            _monitorBackdrop.transform.SetAsFirstSibling();
 
             // 2) 底图：可单独平移 / 缩放（以后换分块背景靠它对齐）
             _monitorFrame = MakeFullScreenImage("MonitorFrame", Color.white, false);
-            _monitorFrame.transform.SetParent(_monitorOverlay.transform, false);
+            _monitorFrame.transform.SetParent(_monitorArea, false);
             StretchToParent(_monitorFrame.rectTransform);
-            _monitorFrame.transform.SetSiblingIndex(1);
 
-            _monitorLabel = MakeText(_monitorOverlay.transform, "MonitorLabel", "CAM 1B",
+            // 2.5) 贴图层：墙上海报 / 涂鸦 / 警示牌 —— **在底图之上、敌人之下**。
+            //      跟着底图那层一起，但不参与它的缩放（贴图自己有归一化坐标）。
+            var stickerGo = new GameObject("MonitorStickers", typeof(RectTransform));
+            stickerGo.transform.SetParent(_monitorArea, false);
+
+            _stickerRoot = stickerGo.GetComponent<RectTransform>();
+            StretchToParent(_stickerRoot);
+
+            _monitorLabel = MakeText(_monitorArea, "MonitorLabel", "CAM 1B",
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
 
@@ -5666,7 +6706,7 @@ namespace NailongFNAF.UI
                 // 现在的裁剪全靠 MonitorCharacter.shader 逐像素 clip，不需要 RectMask2D。
                 var maskGo = new GameObject("MonitorCharacterMask" + i,
                     typeof(RectTransform));
-                maskGo.transform.SetParent(_monitorOverlay.transform, false);
+                maskGo.transform.SetParent(_monitorArea, false);
 
                 // 保险：场景里若残留旧的 RectMask2D（早期版本建的），一并清掉
                 var staleMask = maskGo.GetComponent<RectMask2D>();
@@ -5727,7 +6767,7 @@ namespace NailongFNAF.UI
 
             // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
-            map.transform.SetParent(_monitorOverlay.transform, false);
+            map.transform.SetParent(_monitorArea, false);
 
             var mapRect = map.GetComponent<RectTransform>();
             PlaceRect(mapRect, new Vector2(1f, 0f), new Vector2(1f, 0f),
@@ -5787,6 +6827,25 @@ namespace NailongFNAF.UI
 
             _monitorMapGroup.alpha = 0f;
             _monitorMapGroup.blocksRaycasts = false;
+
+            // ⚠️ 噪点层**必须挂在 MonitorArea 下，不是 Tablet 下** ——
+            // 等比缩放（localScale ≈ 0.75）是设在 MonitorArea 上的，
+            // 挂在 Tablet 下会以 1920×1080 原尺寸铺开，比画面框大一圈
+            // （实测 Area x[314,1311] 而 Static x[149,1476]，雪花溢出画面）。
+            // 挂进 Area 就自动继承缩放，和画面框一比一对齐。
+            if (_staticOverlay != null && _monitorArea != null)
+            {
+                _staticOverlay.transform.SetParent(_monitorArea, false);
+
+                _staticOverlay.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+                _staticOverlay.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+                _staticOverlay.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                _staticOverlay.rectTransform.anchoredPosition = Vector2.zero;
+                _staticOverlay.rectTransform.sizeDelta = new Vector2(
+                    MonitorDesignWidth, MonitorDesignHeight);
+
+                _staticOverlay.transform.SetAsLastSibling();
+            }
         }
 
         private void BuildMonitorHandle()
@@ -6817,6 +7876,14 @@ namespace NailongFNAF.UI
         {
             _jumpscareOverlay = MakeFullScreenImage("JumpscareOverlay", Color.black);
             _jumpscareOverlay.transform.SetAsLastSibling();
+
+            // 天亮白幕：通关那一刻盖在最上面（见 PlayDawnThenWin）。
+            // 放在跳杀层之后建，SetAsLastSibling 才轮得到它 —— 但要排在
+            // 结算面板（MenuRoot）之下，否则白幕会盖住结算。所以 ShowWinEnd
+            // 里会把它关掉，而不是靠层级。
+            _dawnOverlay = MakeFullScreenImage("DawnOverlay", Color.white);
+            _dawnOverlay.transform.SetAsLastSibling();
+            _dawnOverlay.gameObject.SetActive(false);
 
             // 红屏蔓延材质：把遮罩改成「红从边缘向中心推」的渐变。
             //

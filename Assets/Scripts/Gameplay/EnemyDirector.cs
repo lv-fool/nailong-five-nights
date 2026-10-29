@@ -38,9 +38,14 @@ namespace NailongFNAF.Gameplay
         [SerializeField] private int[] _daishuPath = { 0, 1, 5, 3, 4 };
 
         [Tooltip("牛来（右门，照奇卡）沿路停留的机位下标。走到路径尽头就是右门口。"
-            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 10=7厕所 6=4A东走廊 7=4B东走廊转角。"
+            + "下标照 PrototypeScene.CameraNames：0=1A舞台 1=1B餐厅 10=7厕所 "
+            + "9=6厨房（无画面） 6=4A东走廊 7=4B东走廊转角。"
+            + "厨房那一格是「只有声音没有画面」的 —— 进出会放牛叫。"
             + "同样从舞台出发 —— 见上。")]
-        [SerializeField] private int[] _niulaiPath = { 0, 1, 10, 6, 7 };
+        // ⚠️ 中间插了 9（厨房 CAM 6）—— 照 FNAF 1，奇卡那条线会经过厨房，
+        // 而厨房是官方那个「只有声音没有画面」的机位：玩家看不到他，
+        // 只能靠牛叫判断「他在里面 / 他出来了」。
+        [SerializeField] private int[] _niulaiPath = { 0, 1, 10, 9, 6, 7 };
 
         [Tooltip("奶龙（右门，照弗莱迪）沿路停留的机位下标。走到路径尽头就是右门口。"
             + "弗莱迪 FNAF 1 里从舞台 → 餐厅 → 东走廊 → 东转角逼近右门："

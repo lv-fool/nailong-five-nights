@@ -1,3 +1,4 @@
+using NailongFNAF.Gameplay;
 using UnityEngine;
 
 namespace NailongFNAF.UI
@@ -59,7 +60,131 @@ namespace NailongFNAF.UI
         {
             EnsureCamera();
             BuildPanorama();
+            BuildPosters();
             SetPan(0f);
+        }
+
+        /// <summary>
+        /// 把墙上插画贴到圆柱内壁。
+        ///
+        /// 位置由 <see cref="PosterLayout"/> 给（角度 + 高度 + 宽度），
+        /// 摆法和全景条一致：yaw 决定 (x,z)，高度直接给 y。
+        /// 每张是个独立的四边形面片，比圆柱内壁**往里缩 2 厘米**避免 z-fighting。
+        ///
+        /// 贴图缺失的条目直接跳过 —— 少一张画不该让整个房间崩。
+        /// </summary>
+        private void BuildPosters()
+        {
+            var layout = PosterLayout.Load();
+
+            if (layout == null || layout.Posters == null || layout.Posters.Count == 0)
+            {
+                return;
+            }
+
+            var root = new GameObject("OfficePosters");
+            root.transform.SetParent(transform, false);
+
+            var center = new Vector3(0f, EyeHeight, EyeZ);
+            const float Inset = 0.02f;   // 往里缩一点，盖在全景条前面
+
+            foreach (var poster in layout.Posters)
+            {
+                if (poster == null || string.IsNullOrEmpty(poster.Image))
+                {
+                    continue;
+                }
+
+                var texture = Resources.Load<Texture2D>(
+                    PosterLayout.ImageFolder + poster.Image);
+
+                if (texture == null)
+                {
+                    Debug.LogWarning("[奶龙] 缺插画 Resources/" +
+                        PosterLayout.ImageFolder + poster.Image);
+                    continue;
+                }
+
+                // 高按原图比例算 —— 不拉伸
+                float aspect = texture.height / (float)texture.width;
+                float w = Mathf.Max(0.05f, poster.Width);
+                float h = w * aspect;
+
+                float yawRad = poster.Yaw * Mathf.Deg2Rad;
+                float r = Radius - Inset;
+
+                var go = new GameObject("Poster_" + poster.Image);
+                go.transform.SetParent(root.transform, false);
+
+                // 面的中心点：贴在圆柱内壁上，朝向圆心
+                Vector3 pos = new Vector3(
+                    center.x + r * Mathf.Sin(yawRad),
+                    poster.Height,
+                    center.z + r * Mathf.Cos(yawRad));
+
+                go.transform.position = pos;
+
+                // 朝向圆心（圆柱中轴）—— 法线指向房间里
+                go.transform.rotation = Quaternion.Euler(0f, poster.Yaw + 180f, 0f);
+
+                var mf = go.AddComponent<MeshFilter>();
+                var mr = go.AddComponent<MeshRenderer>();
+
+                mf.sharedMesh = MakeQuadMesh(w, h);
+
+                // 和全景条用同一个 unlit shader（办公室没有实时光照，
+                // Standard 会渲成全黑）
+                var bankMaterial = Resources.Load<Material>("PanoMaterial");
+                Shader shader = bankMaterial != null
+                    ? bankMaterial.shader
+                    : Shader.Find("NailongFNAF/UnlitTexture");
+
+                if (shader == null)
+                {
+                    continue;
+                }
+
+                var mat = new Material(shader);
+                mat.mainTexture = texture;
+                mat.SetColor("_Color", new Color(1f, 1f, 1f,
+                    Mathf.Clamp01(poster.Alpha <= 0f ? 1f : poster.Alpha)));
+
+                mr.sharedMaterial = mat;
+                mr.sortingOrder = 1;      // 画在全景条上面
+            }
+        }
+
+        /// <summary>一个居中的矩形面片（法线 +z，绕序顺时针）。</summary>
+        private static Mesh MakeQuadMesh(float w, float h)
+        {
+            var mesh = new Mesh();
+            mesh.name = "PosterQuad";
+
+            float hw = w * 0.5f;
+            float hh = h * 0.5f;
+
+            mesh.vertices = new[]
+            {
+                new Vector3(-hw, -hh, 0f),
+                new Vector3(-hw,  hh, 0f),
+                new Vector3( hw,  hh, 0f),
+                new Vector3( hw, -hh, 0f),
+            };
+
+            mesh.uv = new[]
+            {
+                new Vector2(0f, 0f),
+                new Vector2(0f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(1f, 0f),
+            };
+
+            // ⚠️ 顺时针（从 +z 方向看）—— 反了会被背面剔除，整张画消失
+            mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         private void EnsureCamera()

@@ -39,7 +39,8 @@ namespace NailongFNAF.EditorTools
         {
             Occluders,
             Enemies,
-            Background
+            Background,
+            Stickers
         }
 
         private static readonly string[] RoomNames =
@@ -386,8 +387,9 @@ namespace NailongFNAF.EditorTools
                 bool hasBg = Mathf.Abs(r.bgX) > 0.01f
                              || Mathf.Abs(r.bgY) > 0.01f
                              || Mathf.Abs(r.bgScale - 1f) > 0.001f;
+                bool hasStickers = r.stickers != null && r.stickers.Length > 0;
 
-                if (!hasPoints && !hasBg)
+                if (!hasPoints && !hasBg && !hasStickers)
                 {
                     continue;
                 }
@@ -466,6 +468,9 @@ namespace NailongFNAF.EditorTools
                 case Mode.Enemies:
                     DrawEnemyPoints(rect);
                     break;
+                case Mode.Stickers:
+                    DrawStickers(rect);
+                    break;
                 default:
                     DrawShapes(rect);
                     DrawCurrent(rect);
@@ -473,8 +478,297 @@ namespace NailongFNAF.EditorTools
                     break;
             }
 
+            // 贴图模式的编辑面板：**必须放在图片下方的一块独立区域里**。
+            //
+            // ⚠️ EditorGUILayout 是从窗口**顶部**往下排的，而上方那张图是用
+            // GUI.DrawTexture 直接画的（不推进布局流）。所以面板会整个压在
+            // 图片上，「+」按钮一旦落进图片区，点击就先被 HandleStickerInput
+            // 吃掉 —— 表现就是「按钮点不到」。
+            // 用 GUILayout.BeginArea 把面板钉在图片下沿之下，两者不再重叠。
+            //
+            // 面板高度**可拖动**（中间那条分隔条）—— 素材多的时候能拉大，
+            // 想多看画面就把面板压小。比例存在 EditorPrefs 里，关了窗口还记得。
+            if (_mode == Mode.Stickers)
+            {
+                Rect splitter;
+                Rect panelRect = StickerAreas(rect, out splitter);
+
+                DrawSplitter(splitter);
+
+                // ⚠️ 用 try/finally 保证 EndArea 一定执行 ——
+                // DrawStickerPanel 内部有几处提前 return（没选中、贴图缺失…），
+                // 那些 return 会跳过 EndArea，Unity 抛
+                // "Invalid GUILayout state" 之后**整个窗口的按钮都点不动**。
+                //
+                // 外面再包一层**滚动视图**：面板内容（网格 + 属性行 + 按钮）
+                // 加起来通常比面板区高，不给滚动的话下半截直接被裁掉看不见。
+                // 面板内的「加一张」网格因此改成**不滚动**（只靠这一层），
+                // 避免滚动区套滚动区。
+                GUILayout.BeginArea(panelRect);
+
+                try
+                {
+                    _stickerPanelScroll = EditorGUILayout.BeginScrollView(
+                        _stickerPanelScroll, false, true);
+
+                    try
+                    {
+                        DrawStickerPanel();
+                    }
+                    finally
+                    {
+                        EditorGUILayout.EndScrollView();
+                    }
+                }
+                finally
+                {
+                    GUILayout.EndArea();
+                }
+            }
+
             HandleInput(rect);
+
+            // 贴图的鼠标事件放在**所有布局闭合之后**处理 ——
+            // 布局还在进行时 e.Use() 会破坏 Begin/End 配对。
+            if (_mode == Mode.Stickers)
+            {
+                HandleStickerInput(rect, StickersOf(_room));
+            }
+
             DrawFooter();
+        }
+
+        /// <summary>
+        /// 贴图模式的编辑面板：加一张 / 删掉选中的 / 调宽度、旋转、透明度。
+        ///
+        /// 位置靠**拖动画面上的画**来改 —— 这里只管那些拖不出来的属性。
+        /// </summary>
+        /// <summary>
+        /// 一行「标签 + −[输入框]+」的数值调节。
+        ///
+        /// 比滑动条顺手得多：滑动条想精确调到 0.18 要来回蹭，
+        /// 窗口一窄还只剩几像素行程；输入框直接敲数字，± 用来微调。
+        ///
+        /// <paramref name="dirty"/> 返回**这一行有没有被改**，
+        /// 调用方据此决定要不要置脏。
+        /// </summary>
+        private static float DrawNumberRow(string label, float value,
+            float min, float max, float step, out bool dirty)
+        {
+            dirty = false;
+
+            EditorGUILayout.BeginHorizontal();
+
+            // ⚠️ 宽度都**收窄**了：原来标签 90 + 两个 24 按钮 + 输入框 90
+            // + 范围文字，一行要 330px 以上 —— 编辑器窗口一窄（或右侧
+            // 面板被挤），「+」和范围就会被推到可视区外面，**点不到**。
+            // 现在标签 70、输入框 70，范围改成只显示在 tooltip 里。
+            GUILayout.Label(label, GUILayout.Width(70f));
+
+            if (GUILayout.Button("−", GUILayout.Width(22f)))
+            {
+                value = Mathf.Clamp(value - step, min, max);
+                dirty = true;
+            }
+
+            float typed = EditorGUILayout.FloatField(value, GUILayout.Width(70f));
+
+            if (!Mathf.Approximately(typed, value))
+            {
+                value = Mathf.Clamp(typed, min, max);
+                dirty = true;
+            }
+
+            if (GUILayout.Button("+", GUILayout.Width(22f)))
+            {
+                value = Mathf.Clamp(value + step, min, max);
+                dirty = true;
+            }
+
+            // 范围改到 tooltip —— 常驻显示会把「+」挤出屏幕
+            GUILayout.Label(new GUIContent(string.Empty,
+                "范围 " + min.ToString("F2") + " ~ " + max.ToString("F2")
+                + "，步长 " + step.ToString("G") ),
+                GUILayout.Width(16f));
+
+            EditorGUILayout.EndHorizontal();
+
+            return value;
+        }
+
+        /// <summary>
+        /// 把某张贴到当前机位中央（默认 18% 宽）。
+        /// 加完自动选中它 —— 刚加的那张通常就是要马上调的。
+        /// </summary>
+        private void AddSticker(string imagePath, LayoutSticker[] stickers)
+        {
+            var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
+
+            list.Add(new LayoutSticker
+            {
+                image = imagePath,
+                x = 0.5f,
+                y = 0.5f,
+                width = 0.18f,
+                rotation = 0f,
+                alpha = 1f
+            });
+
+            Layout(_room).stickers = list.ToArray();
+            _selSticker = list.Count - 1;
+            _dirty = true;
+            GUI.FocusControl(null);
+        }
+
+        private void DrawStickerPanel()
+        {
+            if (_stickerImages.Length == 0)
+            {
+                RefreshStickerImages();
+            }
+
+            var stickers = StickersOf(_room);
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("贴图（" + RoomNames[_room] + "）", EditorStyles.boldLabel);
+
+            // ── 加一张：带缩略图的网格（图片多了以后一行放不下）──
+            if (_stickerImages.Length == 0)
+            {
+                EditorGUILayout.HelpBox("Assets/Resources/Posters 里没有图片", MessageType.Warning);
+            }
+            else
+            {
+                GUILayout.Label("加一张（" + _stickerImages.Length + " 张可用）",
+                    EditorStyles.miniBoldLabel);
+
+                // ⚠️ 这里**不再自己滚** —— 外层面板已经套了一个滚动视图，
+                // 滚动区套滚动区在 Unity 里容易出问题。
+                // 网格该多高就多高，由外层统一滚。
+
+                const int PerRow = 4;
+                const float CellW = 92f;
+                const float ThumbH = 52f;
+
+                // ⚠️ **不能在循环里 return** —— 那会跳过 EndVertical /
+                // EndHorizontal / EndScrollView，GUILayout 的 Begin/End 就对不上，
+                // Unity 会抛「Invalid GUILayout state」并且整个窗口的按钮都点不动。
+                // 所以先记下点了哪张，等滚动区正常闭合之后再处理。
+                string clicked = null;
+
+                for (int i = 0; i < _stickerImages.Length; i += PerRow)
+                {
+                    EditorGUILayout.BeginHorizontal();
+
+                    for (int k = 0; k < PerRow && i + k < _stickerImages.Length; k++)
+                    {
+                        int idx = i + k;
+                        string shortName = _stickerImages[idx].Replace("Posters/", string.Empty);
+
+                        EditorGUILayout.BeginVertical(GUILayout.Width(CellW));
+
+                        Texture2D thumb = StickerTexture(_stickerImages[idx]);
+
+                        GUIContent content = thumb != null
+                            ? new GUIContent(thumb, shortName)
+                            : new GUIContent(shortName);
+
+                        if (GUILayout.Button(content, GUILayout.Width(CellW - 4f),
+                                GUILayout.Height(ThumbH)))
+                        {
+                            clicked = _stickerImages[idx];
+                        }
+
+                        GUILayout.Label(shortName, EditorStyles.miniLabel, GUILayout.Width(CellW));
+
+                        EditorGUILayout.EndVertical();
+                    }
+
+                    EditorGUILayout.EndHorizontal();
+                }
+
+                // 网格已经画完，这里再处理点击
+                if (clicked != null)
+                {
+                    AddSticker(clicked, stickers);
+                }
+            }
+
+            if (GUILayout.Button("刷新图片列表", GUILayout.Width(110f)))
+            {
+                RefreshStickerImages();
+                return;
+            }
+
+            // ⚠️ 这里**不能 return** —— 调用方（OnGUI）还开着 GUILayout.BeginArea，
+            // 提前 return 会让 EndArea 执行不到，Unity 直接抛
+            // "Invalid GUILayout state"，然后**整个窗口的按钮都点不动**。
+            // 用 if 包住剩下的部分来替代提前返回。
+            LayoutSticker st = null;
+
+            if (_selSticker >= 0 && _selSticker < stickers.Length)
+            {
+                st = stickers[_selSticker];
+            }
+
+            if (st == null)
+            {
+                EditorGUILayout.LabelField("（点画面上的画来选中）", EditorStyles.miniLabel);
+                return;
+            }
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("选中：" + st.image, EditorStyles.boldLabel);
+
+            // ⚠️ 用**输入框 + 微调按钮**而不是滑动条：
+            // 滑动条在编辑器里手感很差 —— 想精确调到 0.18 得来回蹭，
+            // 而且窗口一窄它就只剩几像素行程。输入框可以直接敲数字，
+            // 旁边的 ± 用来微调，两边都顺手。
+
+            st.width = DrawNumberRow("宽度", st.width, 0.02f, 1.2f, 0.01f, out bool dirtyW);
+            if (dirtyW) { _dirty = true; }
+
+            st.rotation = DrawNumberRow("旋转", st.rotation, -180f, 180f, 1f, out bool dirtyR);
+            if (dirtyR) { _dirty = true; }
+
+            st.alpha = DrawNumberRow("透明度", st.alpha, 0f, 1f, 0.05f, out bool dirtyA);
+            if (dirtyA) { _dirty = true; }
+
+            // X / Y 也做成可输入 —— 拖画面调不准的时候可以直接敲
+            st.x = DrawNumberRow("X（左右）", st.x, 0f, 1f, 0.01f, out bool dirtyX);
+            if (dirtyX) { _dirty = true; }
+
+            st.y = DrawNumberRow("Y（上下）", st.y, 0f, 1f, 0.01f, out bool dirtyY);
+            if (dirtyY) { _dirty = true; }
+
+            EditorGUILayout.LabelField(
+                "（也可以直接在画面上拖这张画）",
+                EditorStyles.miniLabel);
+
+            // 四角模式的操作 —— 拖歪了能一键回到正矩形
+            if (HasCorners(st))
+            {
+                EditorGUILayout.HelpBox(
+                    "这是**自由四边形**（四个角可独立拖动）。",
+                    MessageType.None);
+
+                if (GUILayout.Button("重置为矩形", GUILayout.Width(110f)))
+                {
+                    st.corners = null;
+                    _dirty = true;
+                    GUI.FocusControl(null);
+                }
+            }
+
+            if (GUILayout.Button("删掉这张", GUILayout.Width(110f)))
+            {
+                var list = new System.Collections.Generic.List<LayoutSticker>(stickers);
+                list.RemoveAt(_selSticker);
+                Layout(_room).stickers = list.ToArray();
+                _selSticker = -1;
+                _dirty = true;
+                GUI.FocusControl(null);
+            }
         }
 
         /// <summary>
@@ -538,6 +832,12 @@ namespace NailongFNAF.EditorTools
                     EditorStyles.toolbarButton, GUILayout.Width(62f)))
             {
                 SwitchMode(Mode.Background);
+            }
+
+            if (GUILayout.Toggle(_mode == Mode.Stickers, "贴图",
+                    EditorStyles.toolbarButton, GUILayout.Width(50f)))
+            {
+                SwitchMode(Mode.Stickers);
             }
 
             GUILayout.Space(10f);
@@ -689,8 +989,29 @@ namespace NailongFNAF.EditorTools
             const float top = 62f;
             const float bottom = 52f;
 
+            // ⚠️ 贴图模式下要给下面的属性面板**留出高度**。
+            // 原来这里只扣了标题栏和页脚，图片区会一直铺到窗口底部，
+            // 而 DrawStickerPanel() 用 EditorGUILayout 从上往下排在同一个
+            // 窗口里 —— 两者必然重叠。面板上的「+」按钮一旦落在图片区
+            // 范围内，点击就先被 HandleStickerInput 吃掉（它 e.Use()），
+            // 表现就是「按钮点不到」。
+            //
+            // 贴图模式下：面板**占满**图片下沿到页脚之间的全部空间，
+            // 所以这里预留的是「(1 − 比例) 那块高度之外的全部」——
+            // 也就是图片只能画到画面区的那一截，剩下的全归面板。
+            //
+            // 换句话说 PanelHeightRatio 现在决定「画面占多少」：
+            // 比例大 = 面板大 = 画面小。
+            float panelReserve = 0f;
+
+            if (_mode == Mode.Stickers)
+            {
+                float usable = Mathf.Max(1f, position.height - top - bottom);
+                panelReserve = SplitterHeight + usable * PanelHeightRatio;
+            }
+
             float availW = position.width - 20f;
-            float availH = position.height - top - bottom;
+            float availH = position.height - top - bottom - panelReserve;
             float aspect = (float)_tex.width / _tex.height;
 
             float w = availW;
@@ -1035,6 +1356,673 @@ namespace NailongFNAF.EditorTools
             return new Vector2(w * total, h * total);
         }
 
+        // ── 贴图模式 ──────────────────────────────────────────────
+        //
+        // 在监控画面上自由摆插画（墙上海报 / 涂鸦 / 警示牌）。
+        // 坐标是归一化 0..1、左下原点 —— 和底图 / 敌人点位同一套，
+        // 拖完直接就是运行时的位置，不用换算。
+
+        /// <summary>Resources/Posters 下可用的贴图（下拉框用）。</summary>
+        private string[] _stickerImages = new string[0];
+
+        /// <summary>当前选中的贴图下标（-1 = 没选）。</summary>
+        private int _selSticker = -1;
+
+        /// <summary>「加一张」网格的滚动位置。</summary>
+        private Vector2 _stickerPickScroll;
+
+        /// <summary>属性面板自己的滚动位置（图片下方那块区域可能放不下）。</summary>
+        private Vector2 _stickerPanelScroll;
+
+        // ── 面板高度（可拖动分隔条调整）──
+
+        private const string PanelHeightKey = "NailongFNAF.OccluderEditor.StickerPanelHeight";
+
+        /// <summary>面板占的高度比例（0.15 ~ 0.9）。拖动分隔条时改这个。</summary>
+        private float _panelHeightRatio = -1f;
+
+        /// <summary>是否正在拖分隔条。</summary>
+        private bool _splitterDragging;
+
+        /// <summary>分隔条的高度（像素）—— 够宽才好点中。</summary>
+        private const float SplitterHeight = 8f;
+
+        private float PanelHeightRatio
+        {
+            get
+            {
+                if (_panelHeightRatio < 0f)
+                {
+                    _panelHeightRatio = EditorPrefs.GetFloat(PanelHeightKey, 0.46f);
+                }
+
+                return Mathf.Clamp(_panelHeightRatio, 0.15f, 0.9f);
+            }
+            set
+            {
+                _panelHeightRatio = Mathf.Clamp(value, 0.15f, 0.9f);
+                EditorPrefs.SetFloat(PanelHeightKey, _panelHeightRatio);
+            }
+        }
+
+        /// <summary>
+        /// 算出面板区和分隔条的矩形。
+        ///
+        /// 面板**占满**图片下沿到页脚之间的全部空间 —— 不再按比例只取一部分。
+        /// 原来按 46% 算，剩下 54% 就是一大块什么都没画、露出窗口底色的
+        /// 灰色区域（用户看到的就是这个）。
+        ///
+        /// <see cref="PanelHeightRatio"/> 现在只决定「画面 / 面板」的分界位置，
+        /// 也就是说它决定**画面画多大**，而不是面板留多高 ——
+        /// 面板永远把剩下的空间吃干。
+        /// </summary>
+        private Rect StickerAreas(Rect imageRect, out Rect splitterRect)
+        {
+            const float BottomBar = 56f;
+
+            float top = imageRect.yMax + SplitterHeight;
+            float bottom = position.height - BottomBar;
+            float panelH = Mathf.Max(90f, bottom - top);
+
+            // 分隔条贴在图片下沿
+            splitterRect = new Rect(
+                0f,
+                imageRect.yMax,
+                position.width,
+                SplitterHeight);
+
+            return new Rect(
+                4f,
+                imageRect.yMax + SplitterHeight,
+                position.width - 8f,
+                panelH);
+        }
+
+        /// <summary>
+        /// 画分隔条并处理拖动。
+        ///
+        /// 拖的时候直接按住整条（不要求精确点中），并显示上下箭头光标，
+        /// 让「这里能拖」这件事一眼看得出来。
+        /// </summary>
+        private void DrawSplitter(Rect r)
+        {
+            Event e = Event.current;
+
+            bool hover = e != null && r.Contains(e.mousePosition);
+
+            // 底色：平时淡、悬停和拖动时亮
+            Color fill = _splitterDragging
+                ? new Color(0.35f, 0.6f, 0.95f, 0.9f)
+                : hover
+                    ? new Color(0.5f, 0.62f, 0.78f, 0.7f)
+                    : new Color(0.28f, 0.28f, 0.28f, 0.5f);
+
+            EditorGUI.DrawRect(r, fill);
+
+            // 三条小横线，暗示「可拖动」
+            Color lineColor = new Color(0.75f, 0.78f, 0.82f, hover || _splitterDragging ? 1f : 0.55f);
+            float cx = r.center.x;
+            float cy = r.center.y;
+
+            for (int i = -1; i <= 1; i++)
+            {
+                EditorGUI.DrawRect(new Rect(cx - 14f, cy + i * 2.2f, 28f, 1.2f), lineColor);
+            }
+
+            if (e == null)
+            {
+                return;
+            }
+
+            if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
+            {
+                _splitterDragging = true;
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseDrag && _splitterDragging)
+            {
+                // 鼠标在窗口里的相对高度 → 面板比例
+                float usableTop = r.y;
+                float usableBottom = position.height - 56f;
+                float usable = Mathf.Max(1f, usableBottom - usableTop);
+
+                float fromBottom = usableBottom - e.mousePosition.y;
+                PanelHeightRatio = fromBottom / usable;
+
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseUp && _splitterDragging)
+            {
+                _splitterDragging = false;
+                e.Use();
+                Repaint();
+            }
+        }
+
+        /// <summary>拖动中的状态。</summary>
+        private int _dragSticker = -1;
+        private Vector2 _dragStartNorm;
+        private float _dragStartX;
+        private float _dragStartY;
+
+        /// <summary>正在拖哪个角（0~3）；-1 = 在拖整张。</summary>
+        private int _dragCorner = -1;
+
+        /// <summary>开始拖整张时四角的快照（四角模式下平移用）。</summary>
+        private float[] _dragStartCorners;
+
+        private void RefreshStickerImages()
+        {
+            var names = new System.Collections.Generic.List<string>();
+
+            const string dir = "Assets/Resources/Posters";
+
+            if (Directory.Exists(dir))
+            {
+                foreach (var path in Directory.GetFiles(dir))
+                {
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
+
+                    if (ext == ".jpg" || ext == ".jpeg" || ext == ".png")
+                    {
+                        names.Add("Posters/" + Path.GetFileNameWithoutExtension(path));
+                    }
+                }
+            }
+
+            names.Sort();
+            _stickerImages = names.ToArray();
+        }
+
+        /// <summary>当前机位的贴图数组（不存在就建一个空的）。</summary>
+        private LayoutSticker[] StickersOf(int room)
+        {
+            var r = Layout(room);
+
+            if (r.stickers == null)
+            {
+                r.stickers = new LayoutSticker[0];
+            }
+
+            return r.stickers;
+        }
+
+        // ── 贴图四角（自由四边形）──
+
+        /// <summary>手柄半径（像素）—— 够大好点中。</summary>
+        private const float HandleRadius = 6f;
+
+        /// <summary>这条贴图有没有四角数据（8 个浮点）。</summary>
+        private static bool HasCorners(LayoutSticker st)
+        {
+            return st != null && st.corners != null && st.corners.Length == 8;
+        }
+
+        /// <summary>
+        /// 取这条贴图的四个角，**归一化**坐标（左下原点），顺序：左下、左上、右上、右下。
+        ///
+        /// 没有 corners 数据时按老的正矩形现算一个（带旋转），
+        /// 这样「第一次拖角」时能从当前形状无缝过渡到四边形。
+        /// </summary>
+        private Vector2[] StickerCorners(LayoutSticker st, Rect r)
+        {
+            if (HasCorners(st))
+            {
+                return new[]
+                {
+                    new Vector2(st.corners[0], st.corners[1]),
+                    new Vector2(st.corners[2], st.corners[3]),
+                    new Vector2(st.corners[4], st.corners[5]),
+                    new Vector2(st.corners[6], st.corners[7]),
+                };
+            }
+
+            Texture2D tex = StickerTexture(st.image);
+            float aspect = tex != null ? tex.height / (float)tex.width : 1f;
+
+            // 归一化尺寸（**和运行时完全一致**）：
+            //   宽 = width 比例（相对画面宽）
+            //   高 = 宽 × 原图高宽比，再按「画面宽 / 画面高」折算成相对画面高的比例
+            float hw = st.width * 0.5f;
+            float hh = st.width * aspect * (r.width / Mathf.Max(1f, r.height)) * 0.5f;
+
+            float rad = st.rotation * Mathf.Deg2Rad;
+            float cos = Mathf.Cos(rad);
+            float sin = Mathf.Sin(rad);
+
+            // 本地四角 → 旋转 → 平移到 x/y
+            var local = new[]
+            {
+                new Vector2(-hw, -hh),
+                new Vector2(-hw, hh),
+                new Vector2(hw, hh),
+                new Vector2(hw, -hh),
+            };
+
+            var result = new Vector2[4];
+
+            for (int i = 0; i < 4; i++)
+            {
+                float lx = local[i].x;
+                float ly = local[i].y;
+
+                result[i] = new Vector2(
+                    st.x + lx * cos - ly * sin,
+                    st.y + lx * sin + ly * cos);
+            }
+
+            return result;
+        }
+
+        /// <summary>归一化角 → GUI 坐标（Y 要翻）。</summary>
+        private static Vector2 CornerToGui(Rect r, Vector2 norm)
+        {
+            return new Vector2(r.x + norm.x * r.width, r.y + (1f - norm.y) * r.height);
+        }
+
+        /// <summary>
+        /// 点是否落在四边形内 —— 用**同侧判定**：对每条边，点必须在同一侧，
+        /// 四条边都满足就在里面。
+        ///
+        /// 不能用外接矩形判断：四边形可能倾斜得很厉害，
+        /// 外接框里有大片其实不属于图片的区域，点上去会误选中。
+        /// </summary>
+        private static bool PointInQuad(Vector2[] quad, Vector2 p)
+        {
+            bool hasNeg = false;
+            bool hasPos = false;
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 a = quad[i];
+                Vector2 b = quad[(i + 1) % 4];
+
+                float cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+
+                if (cross < -0.001f) { hasNeg = true; }
+                else if (cross > 0.001f) { hasPos = true; }
+
+                // 同时出现正负 = 不在同一侧
+                if (hasNeg && hasPos)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 把贴图切到「四角模式」—— 用当前形状初始化 corners。
+        /// 之后拖手柄改的就是这个数组。
+        /// </summary>
+        private void EnsureCorners(LayoutSticker st, Rect r)
+        {
+            if (HasCorners(st))
+            {
+                return;
+            }
+
+            var c = StickerCorners(st, r);
+
+            st.corners = new[]
+            {
+                c[0].x, c[0].y,
+                c[1].x, c[1].y,
+                c[2].x, c[2].y,
+                c[3].x, c[3].y,
+            };
+
+            _dirty = true;
+        }
+
+        /// <summary>
+        /// 把贴图画成**任意四边形**。
+        ///
+        /// 编辑器里没有现成的「带 UV 的四边形绘制」，标准做法是
+        /// GL.Begin(QUADS) —— 但它必须在 Repaint 事件里、且要成对
+        /// Push/Pop 矩阵，否则会污染整个编辑器的 IMGUI 状态。
+        ///
+        /// 没有透视时（最常见）退回两次 GUI.DrawTextureWithTexCoords 会拉伸变形，
+        /// 所以这里统一用 GL：它按顶点插值 UV，倾斜得多厉害都正确。
+        /// </summary>
+        /// <summary>
+        /// 把贴图画成**任意四边形** —— 用「横向切片」近似。
+        ///
+        /// 为什么不用 GL：
+        /// GL.Begin 必须配 GL.LoadPixelMatrix，而那个矩阵用的是
+        /// **Screen.width/height（设备像素）**，可 gui 坐标是**编辑器窗口坐标**，
+        /// 两个尺度对不上 —— 画出来会跑到窗口外面（表现就是「图片不显示」）。
+        /// 而且 EditorWindow 里 GL 的裁剪区和 IMGUI 不一致，很容易整块被裁掉。
+        ///
+        /// 所以改成切片：把四边形沿纵向切成 N 条梯形，
+        /// 每条用 GUI.DrawTextureWithTexCoords 画（它支持指定 UV 区域）。
+        /// N 够大时视觉上和真四边形几乎没差别，而且完全走 IMGUI，不会跑位。
+        /// </summary>
+        private static void DrawQuadTexture(Vector2[] gui, Texture tex, Vector2[] uv)
+        {
+            if (tex == null || gui == null || gui.Length != 4 || uv == null)
+            {
+                return;
+            }
+
+            // 竖着切成 N 条**水平切片**。
+            // 每一片：左边取 (gui[1] → gui[0]) 上按 t 插值，右边取 (gui[2] → gui[3])，
+            // 片的高度由这两点的 y 差决定 —— 画出来就是梯形。
+            const int Slices = 64;
+
+            for (int s = 0; s < Slices; s++)
+            {
+                float t0 = s / (float)Slices;
+                float t1 = (s + 1) / (float)Slices;
+
+                // 左边界（从上边左角到下边左角）与右边界，分别按 t 插值
+                Vector2 l0 = Vector2.Lerp(gui[1], gui[0], t0);   // 左边 上
+                Vector2 l1 = Vector2.Lerp(gui[1], gui[0], t1);   // 左边 下
+                Vector2 r0 = Vector2.Lerp(gui[2], gui[3], t0);   // 右边 上
+                Vector2 r1 = Vector2.Lerp(gui[2], gui[3], t1);   // 右边 下
+
+                // 这一片的包围盒（GUI 坐标 y 向下）
+                float minX = Mathf.Min(l0.x, l1.x, r0.x, r1.x);
+                float maxX = Mathf.Max(l0.x, l1.x, r0.x, r1.x);
+                float minY = Mathf.Min(l0.y, l1.y, r0.y, r1.y);
+                float maxY = Mathf.Max(l0.y, l1.y, r0.y, r1.y);
+
+                float w = maxX - minX;
+                float h = maxY - minY;
+
+                if (w < 0.5f || h < 0.5f) { continue; }
+
+                // 用包围盒 + 纹理坐标画。倾斜时用 48 片已经足够平滑，
+                // 每片内部仍按矩形近似 —— 这正是「切片法」的精度来源。
+                var src = new Rect(0f, 1f - t1, 1f, t1 - t0);
+
+                GUI.DrawTextureWithTexCoords(
+                    new Rect(minX, minY, w, h), tex, src, true);
+            }
+        }
+
+        private void DrawStickers(Rect r)
+        {
+            var stickers = StickersOf(_room);
+
+            for (int i = 0; i < stickers.Length; i++)
+            {
+                var st = stickers[i];
+
+                if (st == null || string.IsNullOrEmpty(st.image))
+                {
+                    continue;
+                }
+
+                Texture2D tex = StickerTexture(st.image);
+                bool sel = i == _selSticker;
+
+                // 四个角（归一化）→ GUI 坐标
+                Vector2[] corners = StickerCorners(st, r);
+                var gui = new Vector2[4];
+
+                for (int k = 0; k < 4; k++)
+                {
+                    gui[k] = CornerToGui(r, corners[k]);
+                }
+
+                // 用两段三角形把贴图画成**任意四边形**（不是正矩形）
+                if (tex != null)
+                {
+                    var old = GUI.color;
+                    GUI.color = new Color(1f, 1f, 1f, sel ? 1f : 0.75f * st.alpha);
+
+                    DrawQuadTexture(gui, tex, new[]
+                    {
+                        new Vector2(0f, 0f),   // 左下
+                        new Vector2(0f, 1f),   // 左上
+                        new Vector2(1f, 1f),   // 右上
+                        new Vector2(1f, 0f),   // 右下
+                    });
+
+                    GUI.color = old;
+                }
+                else
+                {
+                    // 贴图缺失：填充一块红，一眼看得出该补哪张
+                    Handles.color = new Color(0.6f, 0.2f, 0.2f, 0.35f);
+                    Handles.DrawAAConvexPolygon(new[]
+                    {
+                        new Vector3(gui[0].x, gui[0].y, 0f),
+                        new Vector3(gui[1].x, gui[1].y, 0f),
+                        new Vector3(gui[2].x, gui[2].y, 0f),
+                        new Vector3(gui[3].x, gui[3].y, 0f),
+                    });
+                }
+
+                // 选中时画四个角的手柄（可拖）
+                if (sel)
+                {
+                    Handles.color = new Color(1f, 0.85f, 0.2f, 1f);
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var p = new Vector3(gui[k].x, gui[k].y, 0f);
+                        Handles.DrawSolidDisc(p, Vector3.forward, HandleRadius);
+                    }
+
+                    // 连边，让四边形轮廓清楚
+                    Handles.color = new Color(1f, 0.85f, 0.2f, 0.65f);
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        Handles.DrawLine(
+                            new Vector3(gui[k].x, gui[k].y, 0f),
+                            new Vector3(gui[(k + 1) % 4].x, gui[(k + 1) % 4].y, 0f));
+                    }
+                }
+                else
+                {
+                    Handles.color = new Color(1f, 1f, 1f, 0.4f);
+                    Handles.DrawAAPolyLine(1f,
+                        new Vector3(gui[0].x, gui[0].y, 0f),
+                        new Vector3(gui[1].x, gui[1].y, 0f),
+                        new Vector3(gui[2].x, gui[2].y, 0f),
+                        new Vector3(gui[3].x, gui[3].y, 0f),
+                        new Vector3(gui[0].x, gui[0].y, 0f));
+                }
+            }
+
+            // ⚠️ **不在绘制阶段处理鼠标事件** —— 这里还在 GUILayout 布局中，
+            // 提前 e.Use() 会让 Begin/End 对不上（Unity 会抛
+            // "Invalid GUILayout state"）。事件统一交给 OnGUI 末尾的
+            // HandleStickerInput（见 DrawStickerPanel 之后那行）。
+
+            // 提示条
+            var style = new GUIStyle(EditorStyles.miniLabel);
+            style.normal.textColor = new Color(0.8f, 0.85f, 0.9f);
+            GUI.Label(new Rect(r.x + 8f, r.yMax + 4f, r.width, 18f),
+                "贴图模式：拖动图片 = 移动；选中后**拖黄色的角** = 拉成任意四边形。"
+                + "  共 " + stickers.Length + " 张",
+                style);
+        }
+
+        /// <summary>贴图模式的鼠标交互：点选 + 拖动。</summary>
+        private void HandleStickerInput(Rect r, LayoutSticker[] stickers)
+        {
+            Event e = Event.current;
+
+            if (e == null)
+            {
+                return;
+            }
+
+            if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
+            {
+                // ① 先看有没有点中「已选中那张」的**角手柄** —— 优先级最高，
+                //    否则拖角会变成拖动整张图。
+                if (_selSticker >= 0 && _selSticker < stickers.Length)
+                {
+                    var sel = stickers[_selSticker];
+
+                    if (sel != null && !string.IsNullOrEmpty(sel.image))
+                    {
+                        Vector2[] corners = StickerCorners(sel, r);
+
+                        for (int k = 0; k < 4; k++)
+                        {
+                            Vector2 handle = CornerToGui(r, corners[k]);
+
+                            if (Vector2.Distance(handle, e.mousePosition) <= HandleRadius + 4f)
+                            {
+                                // 切到四角模式（老的正矩形也能无缝过渡）
+                                EnsureCorners(sel, r);
+
+                                _dragCorner = k;
+                                _dragSticker = _selSticker;
+                                _dragStartNorm = ToNorm(r, e.mousePosition);
+
+                                e.Use();
+                                Repaint();
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // ② 没点中手柄 → 找点中了哪张图（点在四边形内部）
+                int hit = -1;
+
+                for (int i = stickers.Length - 1; i >= 0; i--)
+                {
+                    var st = stickers[i];
+
+                    if (st == null || string.IsNullOrEmpty(st.image))
+                    {
+                        continue;
+                    }
+
+                    Vector2[] corners = StickerCorners(st, r);
+                    var gui = new Vector2[4];
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        gui[k] = CornerToGui(r, corners[k]);
+                    }
+
+                    if (PointInQuad(gui, e.mousePosition))
+                    {
+                        hit = i;
+                        break;
+                    }
+                }
+
+                if (hit >= 0)
+                {
+                    _selSticker = hit;
+                    _dragSticker = hit;
+                    _dragCorner = -1;
+                    _dragStartNorm = ToNorm(r, e.mousePosition);
+                    _dragStartX = stickers[hit].x;
+                    _dragStartY = stickers[hit].y;
+
+                    // 整张拖动时，四角数据也要一起平移 ——
+                    // 记下原始的 corners 副本
+                    _dragStartCorners = HasCorners(stickers[hit])
+                        ? (float[])stickers[hit].corners.Clone()
+                        : null;
+                }
+                else
+                {
+                    _selSticker = -1;
+                    _dragSticker = -1;
+                    _dragCorner = -1;
+                }
+
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseDrag && _dragSticker >= 0
+                     && _dragSticker < stickers.Length)
+            {
+                Vector2 now = ToNorm(r, e.mousePosition);
+                var st = stickers[_dragSticker];
+
+                if (st == null)
+                {
+                    return;
+                }
+
+                if (_dragCorner >= 0)
+                {
+                    // ── 拖某个角 ──
+                    st.corners[_dragCorner * 2] = Mathf.Clamp01(now.x);
+                    st.corners[_dragCorner * 2 + 1] = Mathf.Clamp01(now.y);
+                }
+                else if (_dragStartCorners != null)
+                {
+                    // ── 整张平移（四角模式）──
+                    Vector2 delta = now - _dragStartNorm;
+
+                    for (int k = 0; k < 4; k++)
+                    {
+                        st.corners[k * 2] = Mathf.Clamp01(_dragStartCorners[k * 2] + delta.x);
+                        st.corners[k * 2 + 1] = Mathf.Clamp01(_dragStartCorners[k * 2 + 1] + delta.y);
+                    }
+                }
+                else
+                {
+                    // ── 整张平移（老的正矩形模式）──
+                    Vector2 delta = now - _dragStartNorm;
+                    st.x = Mathf.Clamp01(_dragStartX + delta.x);
+                    st.y = Mathf.Clamp01(_dragStartY + delta.y);
+                }
+
+                // ⚠️ 必须写回 —— LayoutSticker 是**引用类型**，但数组本身
+                // 可能是从 Layout(room).stickers 取的副本；不写回的话
+                // 下一次 OnGUI 重画又会用回旧值，拖动看起来毫无反应。
+                Layout(_room).stickers = stickers;
+
+                _dirty = true;
+                e.Use();
+                Repaint();
+            }
+            else if (e.type == EventType.MouseUp)
+            {
+                _dragSticker = -1;
+                _dragCorner = -1;
+                _dragStartCorners = null;
+            }
+        }
+
+        /// <summary>贴图缓存：Resources 路径 → Texture2D。</summary>
+        private readonly System.Collections.Generic.Dictionary<string, Texture2D> _stickerTexCache =
+            new System.Collections.Generic.Dictionary<string, Texture2D>();
+
+        private Texture2D StickerTexture(string resourcesPath)
+        {
+            if (string.IsNullOrEmpty(resourcesPath))
+            {
+                return null;
+            }
+
+            Texture2D cached;
+            if (_stickerTexCache.TryGetValue(resourcesPath, out cached))
+            {
+                return cached;
+            }
+
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/Resources/" + resourcesPath + ".jpg");
+
+            if (tex == null)
+            {
+                tex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    "Assets/Resources/" + resourcesPath + ".png");
+            }
+
+            _stickerTexCache[resourcesPath] = tex;
+            return tex;
+        }
+
         private void DrawEnemyPoints(Rect r)
         {
             for (int e = 0; e < EnemyNames.Length; e++)
@@ -1118,6 +2106,15 @@ namespace NailongFNAF.EditorTools
         {
             var e = Event.current;
             if (e == null)
+            {
+                return;
+            }
+
+            // ⚠️ **贴图模式自己处理鼠标**（见 DrawStickers → HandleStickerInput）。
+            // 这里的通用输入必须整个跳过 —— 它在 DrawStickers 之前执行，
+            // 会把 MouseDown 先吃掉（e.Use()），贴图的选中/拖动就永远收不到事件，
+            // 表现是「一点就取消选中、也拖不动」。
+            if (_mode == Mode.Stickers)
             {
                 return;
             }
@@ -1818,6 +2815,40 @@ namespace NailongFNAF.EditorTools
             public float bgY;
             public float bgScale = 1f;
             public LayoutPoint[] points;
+
+            /// <summary>贴在这一机位上的插画（墙上海报 / 涂鸦 / 警示牌）。</summary>
+            public LayoutSticker[] stickers;
+        }
+
+        /// <summary>
+        /// 一张插画：归一化坐标（0..1，左下原点）+ 宽度比例 + 旋转 + 透明度。
+        /// 和运行时 PrototypeScene.MonitorSticker 一一对应。
+        /// </summary>
+        [System.Serializable]
+        private class LayoutSticker
+        {
+            /// <summary>Resources 里的路径（不带扩展名），如 "Posters/poster_01"。</summary>
+            public string image;
+
+            public float x = 0.5f;
+            public float y = 0.5f;
+
+            /// <summary>宽度占画面宽度的比例（高度按原图比例算）。</summary>
+            public float width = 0.2f;
+
+            /// <summary>绕自身中心的旋转角（度，逆时针）—— 只在没有 corners 时用。</summary>
+            public float rotation;
+
+            public float alpha = 1f;
+
+            /// <summary>
+            /// **自由四边形**的四个角，归一化（0..1，左下原点），
+            /// 顺序：左下、左上、右上、右下（顺时针）。
+            ///
+            /// 空 / 长度不是 8 = 走老的正矩形模式（x/y/width/rotation）。
+            /// 「贴图」模式里拖四个角手柄就会写进这里。
+            /// </summary>
+            public float[] corners;
         }
 
         [System.Serializable]
