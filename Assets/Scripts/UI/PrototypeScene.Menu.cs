@@ -179,10 +179,10 @@ namespace NailongFNAF.UI
         {
             // 左：牛来（上）+ 噜噜（下）；右：袋鼠（上）+ 奶龙（下）
             // 锚点略超出 0~1 → 只露出半个身子，像是从画面外探进来
-            BuildSilhouette(parent, EnemyId.Niulai,   0.055f, 0.70f, 0.46f, 0.16f);
-            BuildSilhouette(parent, EnemyId.Lulu,     0.035f, 0.26f, 0.40f, 0.13f);
-            BuildSilhouette(parent, EnemyId.Daishu,   0.945f, 0.66f, 0.48f, 0.17f);
-            BuildSilhouette(parent, EnemyId.Nailong,  0.965f, 0.24f, 0.42f, 0.14f);
+            BuildSilhouette(parent, EnemyId.Niulai,   0.055f, 0.70f, 0.46f, 0.30f);
+            BuildSilhouette(parent, EnemyId.Lulu,     0.035f, 0.26f, 0.40f, 0.26f);
+            BuildSilhouette(parent, EnemyId.Daishu,   0.945f, 0.66f, 0.48f, 0.32f);
+            BuildSilhouette(parent, EnemyId.Nailong,  0.965f, 0.24f, 0.42f, 0.28f);
         }
 
         /// <summary>
