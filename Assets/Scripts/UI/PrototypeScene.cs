@@ -1260,8 +1260,16 @@ namespace NailongFNAF.UI
         {
             if (!CanOperate(gm))
             {
-                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
-                _panTarget = 0f;
+                // 断电 / 天亮 / 被抓 —— 玩家已经不能操作，视角由系统接管。
+                //
+                // ⚠️ 断电时**甩到最左边**，不是回正面：奶龙是从**左门**来「收电费」的，
+                // 而断电演出的立绘位置是按左门的屏幕坐标算的（见 ApplyBlackoutCharacter）。
+                // 视角在正面时左门偏航 ~90°、整个在画面外，立绘会被算到屏幕外面去，
+                // 整段演出玩家什么都看不见。转到最左后门心落在画面里，它就在正前方闪。
+                // 转的过程被静默段的黑幕盖着，看不见。
+                //
+                // 天亮 / 被抓还是回正面。
+                _panTarget = gm.HasPowerOut ? -1f : 0f;
             }
             else if (gm.MonitorUp)
             {
@@ -1788,6 +1796,15 @@ namespace NailongFNAF.UI
         private void SetBlackout()
         {
             SetLayer(_bgBase, null, Color.black, 1f);
+
+            // ⚠️ 断电期间房间虽然被黑幕盖住，相机**仍然要跟着 _pan 转**。
+            // 断电演出的奶龙立绘是按「左门的屏幕坐标」摆的（见 ApplyBlackoutCharacter），
+            // 相机停着不动的话，视角甩到最左只是一句空话 —— 立绘的位置也不会跟着变，
+            // 左门偏航 ~90° 仍在画面外，整段演出看不见人。
+            if (_room != null)
+            {
+                _room.SetPan(_pan);
+            }
         }
 
         /// <summary>
