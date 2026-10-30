@@ -1161,6 +1161,15 @@ namespace NailongFNAF.UI
 
             if (gm.HasBeenCaught)
             {
+                // 被贝利亚弄死不走普通结算页（用户 2026-10-30 定）。
+                // 演完怎么收场由 PrototypeScene 那边决定：
+                //   贝利亚之夜 → 关掉游戏；故事模式彩蛋 → 回主菜单。
+                // 这里必须让开，否则结算面板会抢在跳杀 / 红屏前弹出来。
+                if (IsKilledByBelial)
+                {
+                    return;
+                }
+
                 // 先让跳杀 / 断电演出播完，再弹结算面板，别把画面盖没。
                 _caughtHoldTimer += Time.deltaTime;
                 float hold = _hasJumpscare ? JumpscareHoldSeconds : 0.6f;
@@ -1170,6 +1179,33 @@ namespace NailongFNAF.UI
                 }
 
                 ShowLoseEnd();
+            }
+        }
+
+        /// <summary>
+        /// 这一局是不是死在贝利亚手上（贝利亚之夜的本体，或故事模式第 4 / 5 夜的彩蛋）。
+        /// 判据用 <c>Stats.KilledByBelial</c>：那是 <see cref="GameManager"/> 在他
+        /// 真把人弄死时钉下的旗标（擦过 / 两条命躲过去时不会记）。
+        /// </summary>
+        private bool IsKilledByBelial
+        {
+            get
+            {
+                var gm = GameManager.Instance;
+                return gm != null && gm.Stats != null && gm.Stats.KilledByBelial;
+            }
+        }
+
+        /// <summary>
+        /// 死在贝利亚手上、而且是**贝利亚之夜**那一套 —— 演完直接关掉游戏。
+        /// 故事模式彩蛋（第 4 / 5 夜）走的是另一条：演完回主菜单。
+        /// </summary>
+        private static bool BelialDeathExitsGame
+        {
+            get
+            {
+                var gm = GameManager.Instance;
+                return gm != null && gm.BelialMode;
             }
         }
 
@@ -1361,6 +1397,10 @@ namespace NailongFNAF.UI
             _endlessStage = EndlessStartNight;
             _endlessOverdrive = 0f;
 
+            // 告诉它这是第几夜 —— 贝利亚彩蛋只认第 4 / 5 夜（见 BelialCameo）。
+            // ⚠️ 必须在 Restart 之前设好：Restart 会把 Cameo 换成新的实例。
+            gm.SetStoryNight(night, false);
+
             gm.Restart();
             gm.SetNaibao(CreateNaibaoForNight(night));
             ClearJumpscare();
@@ -1408,6 +1448,9 @@ namespace NailongFNAF.UI
             // 没有就是新的一局 —— 顺手把残留的旧档清掉。
             EternalNightSave save;
             bool resume = TryLoadEternalNight(out save);
+
+            // 永夜不算「第几夜」，贝利亚彩蛋不参与（CameoEligible 也会挡，这里是双保险）
+            gm.SetStoryNight(EndlessStartNight, true);
 
             gm.Restart();
             gm.SetNaibao(null);
@@ -2108,6 +2151,9 @@ namespace NailongFNAF.UI
                 _enemyDirector.SetCustomLevels(config);
                 _enemyDirector.SetOverdrive(0f);
             }
+
+            // 自定义夜不属于任何一夜 —— 贝利亚彩蛋关掉（CameoEligible 靠 custom 判断）
+            gm.SetStoryNight(0, true);
 
             gm.Restart();
 

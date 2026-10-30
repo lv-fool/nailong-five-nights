@@ -273,6 +273,18 @@ namespace NailongFNAF.UI
         /// <summary>贝利亚跳杀是否正在播。</summary>
         private bool _belialLungePlaying;
 
+        // ── 贝利亚跳杀的收尾：演完直接退出游戏 ──
+        //
+        // 这是**贝利亚专属**的退场（用户 2026-10-30 定）：他不进结算页 ——
+        // 大头怼上脸、屏幕烧成一片红之后，游戏自己关掉，玩家没有「重试本夜」这个选项。
+        // 别的四个敌人死了照旧回结算面板（见 PrototypeScene.Menu 的 ShowLoseEnd）。
+
+        /// <summary>满屏红之后还留多久才真正退出（秒）—— 让最后一帧红屏被看见。</summary>
+        private const float BelialQuitDelaySeconds = 0.45f;
+
+        /// <summary>退出还剩多少秒。**&lt; 0 表示没在退出**。</summary>
+        private float _belialQuitLeft = -1f;
+
         /// <summary>起始缩放（很小 = 很远）。</summary>
         private const float BelialLungeStartScale = 0.18f;
 
@@ -309,8 +321,13 @@ namespace NailongFNAF.UI
         /// </summary>
         private const string JumpscareSfxPath = "Audio/sfx_jumpscare";
 
-        /// <summary>袋鼠被关着的门挡住时敲门的音效。</summary>
-        private const string KnockSfxPath = "Audio/sfx_knock";
+        /// <summary>
+        /// 袋鼠被关着的门挡住时敲门的音效（2026-10-30 换）。
+        ///
+        /// ⚠️ 素材本身已经**只含 3 下**（原始 mp3 敲了 8 下，截取前 3 下而成，
+        /// 见 docs/04 的说明）。所以这里放一次 = 敲三下，别在外面再循环。
+        /// </summary>
+        private const string KnockSfxPath = "Audio/sfx_knock3";
 
         /// <summary>门口立绘的目标高度（米）。门洞 2.05m，留一点头顶余量。</summary>
         private const float TargetHeightMeters = 1.8f;
@@ -1028,9 +1045,18 @@ namespace NailongFNAF.UI
         private AudioClip _knockSfx;
         private int _lastKnockCount;
 
-        /// <summary>门口那份外卖的拾取按钮（袋鼠走了才亮）。</summary>
-        private Button _deliveryButton;
-        private Text _deliveryLabel;
+        /// <summary>
+        /// 外卖的可点提示（页面右下角那行小字）。
+        /// ⚠️ 原来这里是一颗拾取按钮（`_deliveryButton` / `_deliveryLabel`）——
+        /// 2026-10-30 改成**点门外那张贴图**拾取，按钮删掉了，只留这行字指个路。
+        /// </summary>
+        private Text _deliveryHint;
+
+        /// <summary>外卖袋贴图（Resources 下，不带扩展名）。</summary>
+        private const string DeliveryBagPath = "Art/ui_delivery_bag";
+
+        /// <summary>点外卖时的容错像素 —— 袋子小，框紧一点会很难点。</summary>
+        private const float DeliveryClickPadPx = 14f;
         private AudioClip _jumpscareSfx;
         private Image _blackoutCharacter;
         private Font _font;
@@ -1116,6 +1142,11 @@ namespace NailongFNAF.UI
             {
                 return;
             }
+
+            // ⚠️ 退出倒计时放在**所有 return 之前**：贝利亚可能在选卡面板冻住的
+            // 那一帧把人弄死（timeScale = 0），那种情况下后面的分支全被挡掉，
+            // 倒计时要是排在末尾就永远没人推，游戏卡在一片红里出不去。
+            TickBelialQuit();
 
             // 菜单开着 / 出现结算面板时，冻住这一夜，等玩家选择
             HandleMenu(gm);
@@ -1387,6 +1418,37 @@ namespace NailongFNAF.UI
 
         /// <summary>噪点覆盖层（全屏 RawImage，盖在画面框之上）。</summary>
         private UnityEngine.UI.RawImage _staticOverlay;
+
+        // ── 贝利亚彩蛋的虚影（故事模式第 4 / 5 夜）──────────────────────
+        //
+        // 他只出现在**监控画面里**：一张半透明的黑贝大头压在画面上，
+        // 玩家得在 1.5 秒内把监控放下。详见 BelialCameo 与 GameManager.TickCameo。
+
+        /// <summary>监控画面上的贝利亚虚影。平时隐藏。</summary>
+        private Image _cameoGhost;
+
+        /// <summary>虚影的透明度 —— 让它「像信号里的重影」而不是一张贴图。</summary>
+        private const float CameoGhostAlpha = 0.72f;
+
+        /// <summary>
+        /// 虚影用的贴图（用户 2026-10-30 指定）：跳杀那张头部特写。
+        /// 它是正脸怼镜头的构图，自带透明背景，压到监控上就是一张虚影。
+        /// </summary>
+        private const string CameoGhostSpritePath = "Belial/char_belial_lunge";
+
+        /// <summary>
+        /// 虚影在画面里的目标高度（设计像素，MonitorArea 是 1920×1080）。
+        ///
+        /// 贴图是 1264×1643 的竖版大头（宽高比 0.77），所以高度定在 900 时
+        /// 宽度约 692 —— 整个头都落在画面里，不会被上下切掉，也不会顶到小地图。
+        /// </summary>
+        private const float CameoGhostHeight = 900f;
+
+        /// <summary>虚影的大小 / 位置 / 透明度抖动幅度（越大越像坏掉的信号）。</summary>
+        private const float CameoGhostJitter = 9f;
+
+        /// <summary>上一帧虚影是不是显示着 —— 用来只在「刚出现」时炸一次雪花。</summary>
+        private bool _cameoGhostWasOn;
 
         /// <summary>
         /// 切机位的一瞬把噪点拉满，之后随时间衰减。
@@ -1662,6 +1724,65 @@ namespace NailongFNAF.UI
 
             // 底部监控把手：断电或被抓之后不再显示
             _monitorHandle.gameObject.SetActive(!gm.HasPowerOut && !gm.HasBeenCaught);
+
+            ApplyCameoGhost(gm, monitorUp);
+        }
+
+        /// <summary>
+        /// 贝利亚彩蛋的虚影（故事模式第 4 / 5 夜，见 <see cref="BelialCameo"/>）。
+        ///
+        /// 他**只出现在监控画面里**：玩家升着监控、正好撞上的那一秒半，
+        /// 一张半透明的大头压在画面上，同时还带一点坏信号的抖动。
+        /// 放下监控（或超时）之后立刻消失。
+        /// </summary>
+        private void ApplyCameoGhost(GameManager gm, bool monitorUp)
+        {
+            if (_cameoGhost == null)
+            {
+                return;
+            }
+
+            var cameo = gm.Cameo;
+            bool show = monitorUp && !_hasJumpscare && cameo != null && cameo.OnScreen;
+
+            if (!show)
+            {
+                if (_cameoGhostWasOn)
+                {
+                    _cameoGhost.enabled = false;
+                    _cameoGhostWasOn = false;
+                }
+
+                return;
+            }
+
+            // 刚压上来的那一下先炸一层雪花 ——「信号里混进了别的东西」
+            if (!_cameoGhostWasOn)
+            {
+                _cameoGhostWasOn = true;
+                _cameoGhost.enabled = true;
+                BurstStatic(1f);
+            }
+
+            // 越接近超时抖得越凶：玩家能看出来「时间要没了」。
+            // 1.5 秒 → 0 秒，0 → 1。
+            float urgency = 1f - Mathf.Clamp01(cameo.ReactionLeft / BelialCameo.ReactionSeconds);
+            float amp = CameoGhostJitter * (0.35f + urgency);
+
+            float t = Time.unscaledTime;
+            float jx = (Mathf.PerlinNoise(t * 22f, 0f) - 0.5f) * 2f * amp;
+            float jy = (Mathf.PerlinNoise(0f, t * 22f) - 0.5f) * 2f * amp;
+
+            // 尺寸也跟着抽一口气，像显像管没锁住行同步
+            float breathe = 1f + (Mathf.PerlinNoise(t * 9f, 5f) - 0.5f) * 0.04f * (0.5f + urgency);
+
+            RectTransform rect = _cameoGhost.rectTransform;
+            rect.anchoredPosition = new Vector2(jx, jy);
+            rect.localScale = new Vector3(breathe, breathe, 1f);
+
+            Color color = _cameoGhost.color;
+            color.a = CameoGhostAlpha * (0.82f + 0.18f * Mathf.PerlinNoise(t * 30f, 11f));
+            _cameoGhost.color = color;
         }
 
         private void SetBlackout()
@@ -4461,6 +4582,14 @@ namespace NailongFNAF.UI
             ApplyRedSpread();
             StopJumpscareVideo();
             StopJumpscareSfx();
+            StopBelialLunge();
+
+            // 把待命的退出也取消掉。清屏的地方（重开一夜、回标题、切模式）
+            // 都是「这一局不算了」，要是留着倒计时，玩家明明已经重新开始了，
+            // 两三秒后游戏还是会自己关掉。
+            _belialQuitLeft = -1f;
+            _belialCaughtSeen = false;
+
             _jumpscareOverlay.gameObject.SetActive(false);
         }
 
@@ -4785,19 +4914,20 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 检测贝利亚把玩家弄死的那一刻，触发跳杀。
         ///
-        /// ⚠️ 贝利亚**不在 EnemyId 里**（他是贝利亚之夜专属的遭遇战，
-        /// 走 BelialEncounter 那套独立逻辑），所以接不进 EnemyDirector.Attacked
-        /// 事件，只能在这里轮询「刚死 + 是他干的」这个状态。
-        ///
-        /// GameManager.TickBelialEncounter 里 ConsumeKill() 后调 MarkCaught()，
-        /// 但那个信号是一次性的，这里靠 HasBeenCaught 从 false 变 true 来判断。
+        /// 两个来源都走这里：
+        ///   · **贝利亚之夜**的本体（<see cref="GameManager.BelialEncounter"/>）；
+        ///   · **故事模式第 4 / 5 夜的彩蛋**（<see cref="BelialCameo"/>，监控里那张虚影）。
+        /// 两者都会在弄死人时把 <c>Stats.KilledByBelial</c> 立起来，
+        /// 所以这里只认那个旗标 —— 黑化夜里的牛来 / 袋鼠 / 噜噜不该走这条路。
         /// </summary>
         private void DetectBelialKill(GameManager gm)
         {
             bool caught = gm != null && gm.HasBeenCaught;
-            bool belialMode = gm != null && gm.BelialMode;
 
-            if (caught && belialMode && !_belialCaughtSeen)
+            // ⚠️ 判据是 **Stats.KilledByBelial**，不是「贝利亚之夜 + 死了一次」。
+            bool byBelial = caught && gm.Stats != null && gm.Stats.KilledByBelial;
+
+            if (byBelial && !_belialCaughtSeen)
             {
                 _belialCaughtSeen = true;
 
@@ -4811,6 +4941,7 @@ namespace NailongFNAF.UI
                 _jumpscareOverlay.gameObject.SetActive(true);
                 _jumpscareOverlay.color = Color.black;
 
+                // PlayBelialLunge 同时起退出倒计时 —— 演完怎么收场由 BelialDeathExitsGame 决定
                 PlayBelialLunge();
                 PlayJumpscareSfx();
             }
@@ -4870,9 +5001,23 @@ namespace NailongFNAF.UI
         /// <summary>
         /// 播一次贝利亚跳杀：大头从远到近放大。
         /// 时长和视频跳杀一致（<see cref="JumpscareVideoSeconds"/>），玩家感觉不到差别。
+        ///
+        /// ⚠️ 这里同时**开始收场倒计时**（用户 2026-10-30 定）：贝利亚的跳杀演完就收摊，
+        /// 不给「重试本夜」。收场方式看模式：
+        ///   · 贝利亚之夜 → 关掉游戏；
+        ///   · 故事模式第 4 / 5 夜的彩蛋 → 回主菜单。
+        /// 无论是他真的弄死你（<see cref="DetectBelialKill"/>）还是 F1 面板
+        /// 上那个一键按钮，走的都是同一条路。
+        /// 想只看动画不收场，用编辑器菜单「奶龙 / 16. 预览贝利亚跳杀」。
         /// </summary>
         private void PlayBelialLunge()
         {
+            // ⚠️ 倒计时**先**起，再判图片 —— 素材缺失 / 没建出图层时也要收场，
+            // 不然贝利亚把玩家弄死之后既没有结算页（见 IsKilledByBelial）、
+            // 也不会收摊，屏幕就永远停在黑屏上。
+            // 大头放大 + 红铺满 + 最后留一小口气，然后走人。
+            _belialQuitLeft = JumpscareVideoSeconds + RedSpreadSeconds + BelialQuitDelaySeconds;
+
             if (_belialLungeImage == null)
             {
                 return;
@@ -4952,6 +5097,90 @@ namespace NailongFNAF.UI
             }
         }
 
+        /// <summary>
+        /// 贝利亚跳杀演完 → 整局红屏 → **直接退出游戏**（用户 2026-10-30 定）。
+        ///
+        /// 和别的敌人区别对待：他们死了回结算面板、可以重试；被贝利亚弄死
+        /// 就是这一局到此为止，没有「再来一次」。
+        ///
+        /// ⚠️ 用 <see cref="Time.unscaledDeltaTime"/> —— 这期间 timeScale 可能是 0
+        /// （比如死在选卡面板打开的那一刻），用 scaled 时间会永远退不出去。
+        /// </summary>
+        private void TickBelialQuit()
+        {
+            if (_belialQuitLeft < 0f)
+            {
+                return;
+            }
+
+            _belialQuitLeft -= Time.unscaledDeltaTime;
+
+            // 大头还在放大时保持**纯黑**（用户早先的要求：红要等他收掉才上）；
+            // 收掉之后红从四周往中间推，推到满再留 <see cref="BelialQuitDelaySeconds"/> 就走人。
+            if (!_belialLungePlaying)
+            {
+                _redSpread = Mathf.MoveTowards(
+                    _redSpread, RedSpreadFull,
+                    RedSpreadFull / RedSpreadSeconds * Time.unscaledDeltaTime);
+                ApplyRedSpread();
+            }
+
+            if (_belialQuitLeft > 0f)
+            {
+                return;
+            }
+
+            _belialQuitLeft = -1f;
+            QuitGameAfterBelial();
+        }
+
+        /// <summary>
+        /// 真的收场。**贝利亚之夜**：关掉游戏（编辑器里退出 Play 模式）。
+        /// **故事模式彩蛋**（第 4 / 5 夜，用户 2026-10-30 定）：回主菜单，游戏不关。
+        /// </summary>
+        private static void QuitGameAfterBelial()
+        {
+            PlayerPrefs.Save();
+
+            // 故事模式的彩蛋只是彩蛋 —— 吓完把人送回主菜单，别真把游戏关了。
+            if (!BelialDeathExitsGame)
+            {
+                ReturnToTitleAfterCameo();
+                return;
+            }
+
+            Debug.Log("[奶龙] 贝利亚跳杀结束 —— 退出游戏。");
+
+            // 退出前把 PlayerPrefs 落盘：玩家是被他弄死的那一局，
+            // 但解锁进度 / 成就 / 永夜纪录都不该跟着丢。
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+        }
+
+        /// <summary>
+        /// 彩蛋收场：黑幕遮一下再回主菜单。
+        ///
+        /// ⚠️ 顺序要紧 —— 先 <see cref="ClearJumpscare"/> 把红屏 / 大头 / 待命退出全收掉，
+        /// 再 <c>OpenTitle()</c>；反过来的话 <c>OpenTitle</c> 里那句 ClearJumpscare
+        /// 会在标题页已经露出来之后才把黑幕撤掉，中间闪一下。
+        /// </summary>
+        private static void ReturnToTitleAfterCameo()
+        {
+            Debug.Log("[奶龙] 贝利亚彩蛋收场 —— 回主菜单。");
+
+            var scene = FindObjectOfType<PrototypeScene>();
+            if (scene == null)
+            {
+                return;
+            }
+
+            scene.ClearJumpscare();
+            scene.OpenTitle();
+        }
+
         /// <summary>停掉贝利亚跳杀并把图片收起来。</summary>
         private void StopBelialLunge()
         {
@@ -4985,7 +5214,10 @@ namespace NailongFNAF.UI
             // 红色扩散要等跳杀结束才开始（用户明确要求）。
             // 这里 early-return 就同时停掉了下面的红屏推进
             // （_redSpread 那段在地方法末尾，见 ApplyRedSpread）。
-            if (_belialLungePlaying)
+            //
+            // 退出倒计时待命（_belialQuitLeft >= 0）时也让开：那段时间的红屏
+            // 由 TickBelialQuit 推进，两边都推会把 RedSpreadSeconds 缩短一半。
+            if (_belialLungePlaying || _belialQuitLeft >= 0f)
             {
                 return;
             }
@@ -5593,8 +5825,14 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 袋鼠的敲门声与门口外卖：敲门时放一声；它走了之后按钮才亮，
-        /// 鼠标点一下就把外卖收进来（+2% 电）。
+        /// 袋鼠的敲门声与门口外卖（2026-10-30 改版）。
+        ///
+        /// 外卖现在是**门外地上的一张实体贴图**，不是屏幕上的按钮：
+        ///   · 只有**左门开着**的时候才看得见 —— 门关着它被门板挡着；
+        ///   · 鼠标点那张贴图就算收下（原来那颗拾取按钮已经去掉）；
+        ///   · 画面右下角留一行很小的提示，免得玩家不知道该点地上的袋子。
+        ///
+        /// 敲门音效 `sfx_knock3` 本身只有 3 下（素材已截好），放一次 = 敲三下。
         /// </summary>
         private void UpdateDelivery(GameManager gm)
         {
@@ -5609,33 +5847,116 @@ namespace NailongFNAF.UI
                 PlayKnockSfx();
             }
 
-            bool show = _enemyDirector.Delivery.Available && gm.Operable;
+            ApplyDeliveryBag(gm);
+            HandleDeliveryClick(gm);
+        }
 
-            if (_deliveryButton != null && _deliveryButton.gameObject.activeSelf != show)
+        /// <summary>
+        /// 外卖袋的显隐。判据：**有货 + 左门开着 + 玩家还能动**。
+        ///
+        /// ⚠️ 门关着必须藏起来 —— 袋子摆在门外地上，门一关本该被门板挡住；
+        /// 但 SpriteRenderer 的 sortingOrder 排在门板之上（不然开门时会被走廊贴图盖住），
+        /// 所以只能靠 active 手动收回，图形学不帮我们挡。
+        /// </summary>
+        private void ApplyDeliveryBag(GameManager gm)
+        {
+            if (_deliveryBag == null)
             {
-                _deliveryButton.gameObject.SetActive(show);
+                return;
             }
 
-            if (show && _deliveryLabel != null)
+            bool available = _enemyDirector.Delivery.Available;
+            bool doorOpen = !gm.LeftDoorClosed;
+            bool show = available && doorOpen && gm.Operable;
+
+            if (_deliveryBag.gameObject.activeSelf != show)
             {
-                int seconds = Mathf.Max(0, Mathf.CeilToInt(_enemyDirector.Delivery.RemainingSeconds));
-                _deliveryLabel.text = "门口有份外卖 · " + seconds + " 秒内收下 (+" + Mathf.RoundToInt(_enemyDirector.Delivery.Gain) + " 电)";
+                _deliveryBag.gameObject.SetActive(show);
+            }
+
+            if (_deliveryHint != null)
+            {
+                bool hint = available && gm.Operable && !gm.MonitorUp;
+                if (_deliveryHint.gameObject.activeSelf != hint)
+                {
+                    _deliveryHint.gameObject.SetActive(hint);
+                }
+
+                if (hint)
+                {
+                    int seconds = Mathf.Max(0, Mathf.CeilToInt(_enemyDirector.Delivery.RemainingSeconds));
+                    string text = doorOpen
+                        ? "门外地上有份外卖 · 点它收下 (+" + Mathf.RoundToInt(_enemyDirector.Delivery.Gain)
+                          + " 电) · " + seconds + " 秒"
+                        : "门外好像有东西 · 开门看看 · " + seconds + " 秒";
+
+                    if (_deliveryHint.text != text)
+                    {
+                        _deliveryHint.text = text;
+                    }
+                }
             }
         }
 
-        private void OnDeliveryClicked()
+        /// <summary>
+        /// 点门外那张外卖贴图就算收下。
+        /// 判定照手机那套：鼠标抬起 + 没有点在 UI 上 + 真的落在贴图的屏幕矩形里。
+        /// </summary>
+        private void HandleDeliveryClick(GameManager gm)
         {
-            if (_enemyDirector == null)
+            if (_deliveryBag == null || !_deliveryBag.gameObject.activeSelf)
+            {
+                return;
+            }
+
+            if (gm.MonitorUp || !_enemyDirector.Delivery.Available)
+            {
+                return;
+            }
+
+            if (!Input.GetMouseButtonUp(0))
+            {
+                return;
+            }
+
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                return;
+            }
+
+            Camera cam = _room != null ? _room.Camera : null;
+            if (cam == null)
+            {
+                return;
+            }
+
+            // 用贴图的屏幕包围盒判定：袋子小、形状又不规则，
+            // 逐像素太脆；包围盒够用，而且和「看到哪儿点哪儿」的手感一致。
+            Vector3 center = cam.WorldToScreenPoint(_deliveryBag.transform.position);
+            if (center.z <= 0f)
+            {
+                return;   // 在相机背后
+            }
+
+            // 世界尺寸 → 屏幕像素：用 sprite 的角落点算，透视会自己算进去
+            Bounds bounds = _deliveryBag.bounds;
+            Vector3 c0 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, -bounds.extents.y, 0f));
+            Vector3 c1 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, bounds.extents.y, 0f));
+            Vector3 c2 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, 0f, -bounds.extents.z));
+            Vector3 c3 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, 0f, bounds.extents.z));
+
+            float minX = Mathf.Min(c0.x, c1.x, c2.x, c3.x) - DeliveryClickPadPx;
+            float maxX = Mathf.Max(c0.x, c1.x, c2.x, c3.x) + DeliveryClickPadPx;
+            float minY = Mathf.Min(c0.y, c1.y, c2.y, c3.y) - DeliveryClickPadPx;
+            float maxY = Mathf.Max(c0.y, c1.y, c2.y, c3.y) + DeliveryClickPadPx;
+
+            Vector3 mouse = Input.mousePosition;
+            if (mouse.x < minX || mouse.x > maxX || mouse.y < minY || mouse.y > maxY)
             {
                 return;
             }
 
             _enemyDirector.TryCollectDelivery();
-
-            if (_deliveryButton != null)
-            {
-                _deliveryButton.gameObject.SetActive(false);
-            }
         }
 
         private void PlayKnockSfx()
@@ -6814,6 +7135,25 @@ namespace NailongFNAF.UI
         private static readonly Vector3 DoorWorldCenterRight = new Vector3(2.6f, 1.025f, -1.2f);
 
         /// <summary>
+        /// 外卖袋摆在左门外的地面上（2026-10-30 定）。
+        ///
+        /// 位置：贴着门洞往外侧墙方向放 —— 不能在门板平面上，否则门一关就穿模；
+        /// 也不能太靠里，否则转身看不到。
+        ///
+        /// ⚠️ y 不能按「真的贴地」写 0.1 左右：相机眼高 1.30m，低头看近处地面时
+        /// 画面下沿会把袋子切掉（实测 y=0.22 时点击框跑到 y[-43,116]，一半在屏幕外）。
+        /// 抬到 0.55m 相当于让它立在门边地上的一摞东西上 —— 视觉上仍是「门口地上那份外卖」，
+        /// 但整个袋子都在画面里，点得到。
+        /// </summary>
+        private static readonly Vector3 DeliveryWorldPos = new Vector3(-2.52f, 0.55f, -1.2f);
+
+        /// <summary>外卖袋在门外占多大（米）。约一只外卖袋的大小，比门洞小得多。</summary>
+        private const float DeliveryBagMeters = 0.34f;
+
+        /// <summary>外卖袋的世界物体。只在「有货 + 那扇门开着」时显示。</summary>
+        private SpriteRenderer _deliveryBag;
+
+        /// <summary>
         /// 门洞尺寸（米）—— 走廊画面**正好铺满门洞**，不多露一点。
         /// 名字留着 DoorLight 是历史原因（原来是那块光斑的尺寸），
         /// 现在这块位置放的是走廊贴图。
@@ -6857,6 +7197,28 @@ namespace NailongFNAF.UI
             _enemyFront.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
             _belialLeft.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
             _belialRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
+
+            // 袋鼠留下的外卖袋：放在左门外地面上，开门才看得见（见 ApplyDeliveryBag）
+            _deliveryBag = MakeWorldSprite("DeliveryBag", DeliveryWorldPos, SpriteSortEnemy + 3);
+            _deliveryBag.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+
+            var bagSprite = Resources.Load<Sprite>(DeliveryBagPath);
+            if (bagSprite == null)
+            {
+                // 没贴图就别留一块白方块 —— 整个物体关掉，外卖退化成只有按钮
+                _deliveryBag.gameObject.SetActive(false);
+            }
+            else
+            {
+                _deliveryBag.sprite = bagSprite;
+
+                // localScale 是倍数不是米：按「目标米数 ÷ sprite 自然尺寸」折算
+                float bagH = bagSprite.bounds.size.y;
+                float bagScale = bagH > 0.001f ? DeliveryBagMeters / bagH : 1f;
+                _deliveryBag.transform.localScale = new Vector3(bagScale, bagScale, 1f);
+
+                _deliveryBag.gameObject.SetActive(false);
+            }
 
             if (_doorFaceLeft != null)
             {
@@ -7598,6 +7960,64 @@ namespace NailongFNAF.UI
 
                 _staticOverlay.transform.SetAsLastSibling();
             }
+
+            BuildCameoGhost();
+        }
+
+        /// <summary>
+        /// 贝利亚彩蛋的虚影层：一张半透明的黑贝大头，挂在 <c>MonitorArea</c> 下
+        /// （继承 1920×1080 的等比缩放，和画面框一比一对齐）。
+        /// 平时 <c>enabled = false</c>，由 <see cref="ApplyCameoGhost"/> 每帧决定显隐。
+        /// </summary>
+        private void BuildCameoGhost()
+        {
+            if (_monitorArea == null)
+            {
+                return;
+            }
+
+            var go = new GameObject("BelialCameoGhost", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_monitorArea, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
+
+            _cameoGhost = go.GetComponent<Image>();
+            _cameoGhost.raycastTarget = false;
+
+            // 用**跳杀那张头部特写**（用户 2026-10-30 指定）。
+            //
+            // 这张的好处是它本来就是「正脸怼镜头」的构图，而且自带 43% 透明通道
+            // （原图背景是空的），压到监控画面上天然就是一张虚影 ——
+            // 早先借用门口立绘 char_belial_dark，那张是全身站姿，做虚影既糊又不像。
+            //
+            // 缺失时不留一个白方块：直接整层关掉，彩蛋退化成「只有雪花 + 超时」。
+            var sprite = Resources.Load<Sprite>(CameoGhostSpritePath);
+            if (sprite == null)
+            {
+                go.SetActive(false);
+                return;
+            }
+
+            _cameoGhost.sprite = sprite;
+            _cameoGhost.preserveAspect = true;
+
+            // 按目标高度反算缩放（localScale 是倍数不是米，见 AGENTS.md）
+            float spriteH = sprite.bounds.size.y;
+            float fit = spriteH > 0.001f ? CameoGhostHeight / spriteH : 1f;
+
+            rect.sizeDelta = new Vector2(sprite.bounds.size.x * fit, CameoGhostHeight);
+            rect.localScale = Vector3.one;
+
+            _cameoGhost.color = new Color(1f, 1f, 1f, CameoGhostAlpha);
+            _cameoGhost.enabled = false;
+
+            // 压在噪点层之上 —— 雪花应该在它后面
+            go.transform.SetAsLastSibling();
         }
 
         private void BuildMonitorHandle()
@@ -7711,12 +8131,13 @@ namespace NailongFNAF.UI
                 new Vector2(40f, 150f), new Vector2(760f, 34f));
             _endlessText.gameObject.SetActive(false);
 
-            // 袋鼠留下的外卖（袋鼠走人才出现）：点一下补 2% 电
-            _deliveryButton = MakeButton(hud.transform, "DeliveryButton",
-                "门口有份外卖", new Vector2(0f, 0f), new Vector2(250f, 198f),
-                new Vector2(400f, 68f), OnDeliveryClicked);
-            _deliveryLabel = _deliveryButton.GetComponentInChildren<Text>();
-            _deliveryButton.gameObject.SetActive(false);
+            // 袋鼠留下的外卖：贴图在门外地上（见 ApplyDeliveryBag），
+            // 这里只放一行提示指路 —— 点的是那张贴图，不是按钮。
+            _deliveryHint = MakeText(hud.transform, "DeliveryHint", string.Empty,
+                TextAnchor.LowerLeft, 20, new Color(0.92f, 0.84f, 0.62f));
+            PlaceRect(_deliveryHint.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(40f, 186f), new Vector2(900f, 30f));
+            _deliveryHint.gameObject.SetActive(false);
 
             // 敲门声：单独一条轨
             var knockGo = new GameObject("KnockAudio");
@@ -8152,6 +8573,11 @@ namespace NailongFNAF.UI
             MakeDebugButton(panel.transform, "回故事模式", 840f, -104f, 150f, 34f,
                 DebugLeaveBelial);
 
+            // 故事模式彩蛋（第 4 / 5 夜）：每 5 秒掷一次 0.05%，等不到就拿这颗按钮看。
+            // 点完之后**把监控升起来**才会撞上 —— 彩蛋的触发条件就是「下一次监控」。
+            MakeDebugButton(panel.transform, "贝利亚虚影", 680f, -38f, 150f, 34f,
+                DebugTriggerCameo);
+
             // ── 时间推进（调试）──
             // 永夜要撑十几分钟才看得出分数曲线，贝利亚要两小时才换阶段，
             // 真等不现实，所以按一下往前跳一段。
@@ -8514,6 +8940,21 @@ namespace NailongFNAF.UI
             gm.Restart();
             ClearJumpscare();
             CloseOverlaysForModeSwitch();
+        }
+
+        /// <summary>
+        /// 调试用：立刻把贝利亚彩蛋挂到「下一次监控」上，不用等那 0.05%。
+        /// 点完**升起监控**才会撞上 —— 和真实触发路径完全一致。
+        /// </summary>
+        private void DebugTriggerCameo()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null || gm.Cameo == null)
+            {
+                return;
+            }
+
+            gm.Cameo.DebugArm();
         }
 
         /// <summary>调试用：时间往前跳 2 分钟。</summary>

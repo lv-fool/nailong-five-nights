@@ -52,6 +52,56 @@ namespace NailongFNAF.Core
         /// </summary>
         public BelialEncounter BelialEncounter { get; private set; }
 
+        /// <summary>
+        /// 故事模式的贝利亚彩蛋（2026-10-30 定）：第 4 / 5 夜里，每 5 秒掷一次 0.05% 的骰。
+        /// 掷中之后他会压在**下一次**监控画面上，1.5 秒内不放下监控就动手。
+        /// 和 <see cref="BelialEncounter"/> 完全是两套东西，互不干扰。
+        /// </summary>
+        public BelialCameo Cameo { get; private set; }
+
+        /// <summary>当前故事模式跑的是第几夜（0 起）。彩蛋只认这个值。</summary>
+        public int StoryNightIndex { get; private set; }
+
+        /// <summary>这一局是不是自定义夜 —— 自定义夜不算「第几夜」，彩蛋不参与。</summary>
+        public bool StoryNightIsCustom { get; private set; }
+
+        /// <summary>
+        /// 这一刻贝利亚彩蛋能不能掷骰：故事模式、第 4 或 5 夜、玩家还活着、有电。
+        ///
+        /// ⚠️ 永夜 / 贝利亚之夜不算 —— 那两种模式要么没有「第几夜」，
+        /// 要么本来就全程都是贝利亚，再塞彩蛋只会打架。
+        /// </summary>
+        public bool CameoEligible
+        {
+            get
+            {
+                if (Cameo == null || EndlessMode || BelialMode || StoryNightIsCustom)
+                {
+                    return false;
+                }
+
+                if (!BelialCameo.NightHasCameo(StoryNightIndex))
+                {
+                    return false;
+                }
+
+                return !HasPowerOut && !HasSurvived && !HasBeenCaught;
+            }
+        }
+
+        /// <summary>
+        /// 开局时告诉 GameManager「这一局是第几夜」—— 彩蛋靠它决定参不参与。
+        /// 由菜单 / 调试入口在 <see cref="Restart"/> 之前或之后调都可以。
+        /// </summary>
+        /// <param name="nightIndex">0 起；第 4 夜传 3，第 5 夜传 4。</param>
+        /// <param name="custom">自定义夜传 true —— 它不属于任何一夜，彩蛋关掉。</param>
+        public void SetStoryNight(int nightIndex, bool custom)
+        {
+            StoryNightIndex = nightIndex < 0 ? 0 : nightIndex;
+            StoryNightIsCustom = custom;
+        }
+
+
         /// <summary>敌人还要被冻住多少秒（「褪黑素」整点冻结给的值）。</summary>
         public float EnemyFreezeLeft
         {
@@ -464,6 +514,7 @@ namespace NailongFNAF.Core
 
             TickBelial();
             TickBelialEncounter(dt);
+            TickCameo(dt);
 
             // 彩蛋账本：厨房机位停留计时 + 天亮那一刻的结束时刻
             if (Stats != null)
@@ -652,6 +703,7 @@ namespace NailongFNAF.Core
             Score = EndlessMode ? new EndlessScore(_secondsPerHour) : null;
             Belial = BelialMode ? new BelialNight() : null;
             BelialEncounter = BelialMode ? new BelialEncounter(new SystemRandomSource()) : null;
+            Cameo = new BelialCameo(new SystemRandomSource());
             _belialHours = 0;
             _belialVisitsSeen = 0;
             _enemyFreezeLeft = 0f;
@@ -856,9 +908,18 @@ namespace NailongFNAF.Core
 
             if (BelialEncounter.ConsumeKill())
             {
-                Stats.NoteBelialDeath();
-                MarkBreached(BelialEncounter.Side == BelialSide.Left ? Side.Left : Side.Right);
+                // ⚠️ 顺序要紧：**先** MarkCaught（它会先问过「擦过」「两条命」这些支援，
+                // 可能把这一下抵消掉），确认真的死了再记账。
+                // 反过来的话，明明躲过去了，成就账本里却已经记了一笔「被贝利亚弄死」，
+                // 门口也会被误判成突破（表现层还会照着这个旗标播跳杀 + 退出游戏）。
                 MarkCaught();
+
+                if (HasBeenCaught)
+                {
+                    Stats.NoteBelialDeath();
+                    MarkBreached(BelialEncounter.Side == BelialSide.Left ? Side.Left : Side.Right);
+                }
+
                 return;
             }
 
@@ -875,6 +936,38 @@ namespace NailongFNAF.Core
             if (BelialEncounter.TryFlash(doorOpen, shining))
             {
                 Stats.NoteBelialFlash();
+            }
+        }
+
+        /// <summary>
+        /// 故事模式里的贝利亚彩蛋（2026-10-30 定）。
+        ///
+        /// 每 5 秒掷一次 0.05% 的骰；掷中之后他会压在**下一次**监控画面上，
+        /// 1.5 秒内不放下监控就动手。
+        /// 纯逻辑全在 <see cref="BelialCameo"/> 里，这里只负责
+        /// 「告诉它现在符不符合条件、监控开没开」和「动手了就 MarkCaught」。
+        /// </summary>
+        private void TickCameo(float dt)
+        {
+            if (Cameo == null)
+            {
+                return;
+            }
+
+            Cameo.Tick(dt, CameoEligible, MonitorUp);
+
+            if (!Cameo.ConsumeExpired())
+            {
+                return;
+            }
+
+            // 他动手了：和别的敌人一样走「被抓」，表现层会据 Stats.KilledByBelial
+            // 播贝利亚跳杀（见 PrototypeScene.DetectBelialKill），然后回主菜单。
+            MarkCaught();
+
+            if (HasBeenCaught && Stats != null)
+            {
+                Stats.NoteBelialDeath();
             }
         }
 
@@ -1107,6 +1200,13 @@ namespace NailongFNAF.Core
                 return;
             }
 
+            // 贝利亚的虚影压在屏幕上的那 1.5 秒不许切机位（2026-10-30 定）：
+            // 玩家这一秒半里只有「放下监控」这一个动作是有效的。
+            if (Cameo != null && Cameo.BlocksCameraSwitch)
+            {
+                return;
+            }
+
             CurrentCameraIndex = index;
             NoteAction(PlayerAction.Camera);
 
@@ -1119,6 +1219,12 @@ namespace NailongFNAF.Core
         /// <summary>按机位数量循环切换监控（供「下一个机位」按钮用）。</summary>
         public void CycleCamera(int cameraCount)
         {
+            // 同上：虚影在屏幕上的时候机位锁死
+            if (Cameo != null && Cameo.BlocksCameraSwitch)
+            {
+                return;
+            }
+
             if (cameraCount <= 1)
             {
                 CurrentCameraIndex = 0;
