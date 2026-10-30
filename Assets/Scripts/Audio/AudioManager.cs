@@ -157,6 +157,18 @@ namespace NailongFNAF.Audio
         /// <summary>门音效专属通道（开门要二倍速，需要独立的 pitch）。</summary>
         private AudioSource _doorSource;
 
+        /// <summary>胜利音效专属通道 —— 天亮那一刻不能被别的音效掐断。</summary>
+        private AudioSource _victorySource;
+
+        /// <summary>胜利音效素材（懒加载）。</summary>
+        private AudioClip _victoryClip;
+
+        /// <summary>天亮胜利音效路径（音效 1.78s，配合 1.8s 渐白正好）。</summary>
+        private const string VictoryClipPath = "Audio/sfx_victory";
+
+        /// <summary>胜利音效音量 —— 通关高光时刻，比普通音效响一点。</summary>
+        private const float VictoryVolume = 0.85f;
+
         /// <summary>开灯循环音源。</summary>
         private AudioSource _lightLoopSource;
 
@@ -205,6 +217,7 @@ namespace NailongFNAF.Audio
 
             // 门音效独立通道：开门要二倍速，neng pitch 只影响这一路
             _doorSource = CreateSource("DoorSfx", false, _sfxVolume);
+            _victorySource = CreateSource("VictorySfx", false, VictoryVolume);
 
             _lightLoopSource = CreateSource("LightBuzz", true, 0f);
             _lightBuzz = Resources.Load<AudioClip>(LightBuzzClipPath);
@@ -275,6 +288,34 @@ namespace NailongFNAF.Audio
         private void ScheduleNextDistant()
         {
             _nextDistantAt = Time.time + UnityEngine.Random.Range(DistantMinGap, DistantMaxGap);
+        }
+
+        /// <summary>
+        /// 天亮胜利音效 —— 撑过 6 点那一刻播一次。
+        ///
+        /// 用专属音源而不是共享的 _sfx：通关瞬间可能还有别的音效在响
+        /// （门、脚步、风扇），共享通道会把它掐断。
+        /// </summary>
+        public void PlayVictory()
+        {
+            if (_victorySource == null)
+            {
+                return;
+            }
+
+            if (_victoryClip == null)
+            {
+                _victoryClip = Resources.Load<AudioClip>(VictoryClipPath);
+            }
+
+            if (_victoryClip == null)
+            {
+                return;
+            }
+
+            _victorySource.Stop();
+            _victorySource.clip = _victoryClip;
+            _victorySource.Play();
         }
 
         /// <summary>
