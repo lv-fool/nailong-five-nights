@@ -214,6 +214,17 @@ namespace NailongFNAF.Gameplay
                     p.Alpha = a;
 
                     data.Posters.Add(p);
+
+                    // ⚠️ 这行原本想写 end > imgEnd（防位置倒退），手滑写成了
+                    // end > end —— 恒为 false，所以实际效果就是 i = imgEnd。
+                    //
+                    // 知道是笔误但**不改**：改成 end 反而会跳过某些东西，
+                    // 而且当前逻辑靠一个隐含前提才正确：
+                    //   "image" 在每个对象里只出现一次、且位置在 yaw/height/width/alpha 之前
+                    // 所以下一轮 IndexOf("image", imgEnd) 命中的必然是**下一张**海报。
+                    // 实测多张海报能正确解析，别动。
+                    //
+                    // 编译器会给 CS1718 warning —— 那是合理的，这里用注释说明而不是消除它。
                     i = end > end ? end : imgEnd;
                 }
 
