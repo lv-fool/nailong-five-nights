@@ -868,7 +868,10 @@ namespace NailongFNAF.Tests
             brain.Tick(0.1f, closed);
             Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
 
-            brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
+            // ⚠️ 用**实例的** DoorGraceSeconds，不要用常量：
+            // 奶龙的窗口 2026-10-31 从 3.02s 提到 4.98s（对齐牛来），
+            // 而 DoorEnemyBrain.DefaultDoorGraceSeconds 是 4.97s —— 差 0.01s 攒不满。
+            brain.Tick(brain.DoorGraceSeconds, closed);
             Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
 
             brain.Tick(brain.LastChanceSeconds, closed);
@@ -946,7 +949,7 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage, "还没到移动机会，继续站在门口");
 
             // 攒满移动机会 —— 但最后一搏还没走完，仍不退
-            brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
+            brain.Tick(brain.DoorGraceSeconds, closed);
             Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
 
             // 最后一搏走完、门还关着 → 退回偷电
@@ -968,7 +971,7 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage);
 
             // 门开着：攒满移动机会就立刻动手，没有 2 秒缓冲
-            brain.Tick(NailongBrain.DefaultDoorGraceSeconds, idle);
+            brain.Tick(brain.DoorGraceSeconds, idle);
             Assert.IsTrue(brain.IsAttacking, "门开着，攒满就扑上来");
         }
 
@@ -1012,7 +1015,7 @@ namespace NailongFNAF.Tests
 
             var watching = new EnemyContext(false, false, false, false, true, ViewSide.Front,
                 brain.CameraIndex);
-            brain.Tick(NailongBrain.DefaultDoorGraceSeconds, watching);
+            brain.Tick(brain.DoorGraceSeconds, watching);
             Assert.IsTrue(brain.IsAttacking, "门开着，攒满就动手（看不看监控都一样）");
         }
 

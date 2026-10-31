@@ -36,6 +36,26 @@ namespace NailongFNAF.Gameplay
     /// </summary>
     public sealed class NailongBrain : DoorEnemyBrain
     {
+        /// <summary>
+        /// 奶龙到门口后，门开着撑多久才动手（秒）。
+        ///
+        /// ⚠️ 早先沿用原版弗莱迪的 3.02 秒 —— 但奶龙的压迫感和弗莱迪不一样：
+        /// 它从右门摸过来、玩家还得同时管左门和监控，3 秒根本来不及反应
+        /// （用户 2026-10-31 反馈「直接就死了」）。
+        /// 现在对齐牛来 / 袋鼠那一档（≈5 秒），给一个公平的反应窗口。
+        /// </summary>
+        public const float DefaultDoorWindowSeconds = ChicaDoorWindowSeconds;
+
+        /// <summary>
+        /// **旧名保留**（原版弗莱迪那一档的引用）。
+        ///
+        /// ⚠️ 现在它等于 <see cref="DefaultDoorWindowSeconds"/>（4.98s），
+        /// 不再是原版的 3.02s —— 奶龙已经不用弗莱迪的窗口了。
+        /// 留着只是为了让既有测试 / 外部引用还能编译，语义按新值走。
+        /// 新代码请直接用 <see cref="DefaultDoorWindowSeconds"/>。
+        /// </summary>
+        public const float FreddyDoorWindowSeconds = DefaultDoorWindowSeconds;
+
         /// <summary>活动度 0 时的偷电间隔（秒）。</summary>
         public const float DefaultSlowStealIntervalSeconds = 24f;
 
@@ -140,7 +160,7 @@ namespace NailongFNAF.Gameplay
         public NailongBrain(int activityLevel, IRandomSource rng, int cameraCount)
             : this(activityLevel, rng, cameraCount,
                 DefaultSlowStealIntervalSeconds, DefaultFastStealIntervalSeconds,
-                DefaultStealPercentPerTick, DefaultRevealSeconds, FreddyDoorWindowSeconds)
+                DefaultStealPercentPerTick, DefaultRevealSeconds, DefaultDoorWindowSeconds)
         {
         }
 
@@ -156,7 +176,7 @@ namespace NailongFNAF.Gameplay
         public NailongBrain(int activityLevel, IRandomSource rng, int[] allowedCameras)
             : this(activityLevel, rng, allowedCameras,
                 DefaultSlowStealIntervalSeconds, DefaultFastStealIntervalSeconds,
-                DefaultStealPercentPerTick, DefaultRevealSeconds, FreddyDoorWindowSeconds)
+                DefaultStealPercentPerTick, DefaultRevealSeconds, DefaultDoorWindowSeconds)
         {
         }
 
