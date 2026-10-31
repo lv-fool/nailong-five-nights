@@ -27,11 +27,24 @@ namespace NailongFNAF.UI
         /// <summary>门外有人时，关门提前量（秒）—— 在它动手之前这么多秒关上门。</summary>
         private const float DoorSafetyMargin = 1.2f;
 
-        /// <summary>最低保电：低于这个值就开始省电，不再为了「看」而开灯。</summary>
-        private const float LowPowerThreshold = 25f;
+        /// <summary>
+        /// 最低保电：低于这个值就进「极限省电」模式 —— 除了保命一律不碰。
+        /// </summary>
+        private const float LowPowerThreshold = 40f;
 
-        /// <summary>远程扫监控的间隔（秒）—— 太频繁会漏掉门口。</summary>
-        private const float MonitorSweepInterval = 1.6f;
+        /// <summary>
+        /// 监控抬头的间隔（秒）。
+        ///
+        /// ⚠️ 这个值直接决定省不省电：**监控开着 = 耗电倍率 +1 档**
+        /// （见 GameManager.CountUsageLevel）。基础 9.6 秒/1%，
+        /// 多开一档就是一倍速度。一夜 510 秒，纯基础要 53% ——
+        /// 监控开一半时间就变成 80%，很容易不够用。
+        /// 所以这里是「隔一阵才抬头看一眼」，不是一直挂着。
+        /// </summary>
+        private const float MonitorSweepInterval = 6f;
+
+        /// <summary>抬头之后最多看多久就放下（秒）—— 别赖在监控里。</summary>
+        private const float MonitorLookSeconds = 1.2f;
 
         /// <summary>噜噜还差几下才退场时，才开始闪（提前闪浪费）。</summary>
         private const int LuluFlashThreshold = 4;
@@ -266,8 +279,10 @@ namespace NailongFNAF.UI
                 return true;
             }
 
-            // 门已关：关灯省电（除非电量很足、想看它走没走）
-            if (lightOn && lowPower)
+            // 门已关 → 立刻关灯。
+            // 灯对「挡人」毫无帮助（门才是挡人的），开着纯烧电：
+            // 每多一样开着的设备，耗电倍率就 +1 档。
+            if (lightOn)
             {
                 ToggleLight(side);
             }
@@ -339,47 +354,60 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>抬头扫监控 —— 主要目的是看住奶龙，别让它一直偷电。</summary>
+        /// <summary>
+        /// 监控节奏：**隔一阵抬头看一眼，看完就放下**。
+        ///
+        /// 为什么不能一直挂着：监控开着就是耗电倍率 +1 档
+        /// （GameManager.CountUsageLevel 数「有几样设备开着」）。
+        /// 一直挂着一夜要 80%+ 电，撑不到天亮。
+        ///
+        /// 抬头的唯一目的是「打断奶龙偷电」—— 它偷一次掉 1% 电，
+        /// 而且被看到才停手。所以：到点了 → 抬头 → 跳到它所在机位 → 看一眼 → 立刻放下。
+        /// </summary>
         private void HandleMonitor(float dt)
         {
-            _monitorSweepTimer += dt;
-
             if (!_gm.MonitorUp)
             {
-                // 放下时计时，到点抬头
+                _monitorSweepTimer += dt;
+
                 if (_monitorSweepTimer >= MonitorSweepInterval)
                 {
                     _monitorSweepTimer = 0f;
+                    _lookTimer = 0f;
                     SetMonitor(true);
-                    LastAction = "抬头扫监控";
+                    LastAction = "抬头看监控";
                 }
 
                 return;
             }
 
-            // 已抬头：切到下个机位，找奶龙
-            _monitorSweepTimer += 0f;
+            // ── 已抬头：把看的时间单独计时，到点就放下 ──
+            _lookTimer += dt;
 
             var nailong = _director.GetBrain(EnemyId.Nailong) as NailongBrain;
+
             if (nailong != null && nailong.Mode == NailongMode.Stealing)
             {
-                // 跳到它所在的机位，看一眼让它停手
+                // 跳到它所在的机位 —— 被看到它才停手换位
                 if (_gm.CurrentCameraIndex != nailong.CameraIndex)
                 {
                     _gm.SetCamera(nailong.CameraIndex);
                 }
 
-                LastAction = "看住奶龙 @CAM" + (nailong.CameraIndex + 1);
+                LastAction = "盯住奶龙 CAM" + (nailong.CameraIndex + 1);
             }
-            else
+
+            if (_lookTimer >= MonitorLookSeconds)
             {
-                // 没事就看一圈
-                if (_monitorSweepTimer >= MonitorSweepInterval * 2f)
-                {
-                    _monitorSweepTimer = 0f;
-                    SetMonitor(false);
-                }
+                // 看完立刻放下，省电
+                SetMonitor(false);
+                _lookTimer = 0f;
+                LastAction = "放下监控省电";
             }
         }
+
+        /// <summary>这一轮抬头已经看了多久。</summary>
+        private float _lookTimer;
 
         // ---------------------------------------------------------------
         // 底层操作
