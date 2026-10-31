@@ -193,7 +193,15 @@ namespace NailongFNAF.UI
         /// 手电筒按钮中心离屏幕底边多高。按钮半高 30，所以底边在 172 - 30 = 142，
         /// 高过监控热区（0.10 × 1080 = 108）—— 免得点它的时候顺手把监控收了。
         /// </summary>
-        private const float FlashlightButtonBottom = 172f;
+        // 手电筒按钮的位置 —— **贴在世界的桌面上**，不是钉在屏幕底部。
+        //
+        // 原来是固定屏幕位置（屏幕底正中），结果挡住了桌上的手机 UI（用户反馈）。
+        // 改成和墙上 DOOR / LIGHT 按钮一样的做法：锚一个世界点，每帧投影到画布，
+        // 转头时跟着桌子一起移动。
+        //
+        // 取手机右侧一点：手机在 (0.24, 1.02, 0)，手电放 x=0.62 —— 桌面上、
+        // 手机旁边、镜头朝正前时落在画面右下（不挡手机）。
+        private static readonly Vector3 FlashlightButtonWorld = new Vector3(0.00f, 1.00f, -0.10f);
 
         /// <summary>
         /// 断电时奶龙立绘的高度 = **门洞屏幕高度的多少倍**。
@@ -248,6 +256,41 @@ namespace NailongFNAF.UI
         /// </summary>
         private const float JumpscareVideoSpeed = 3.5f;
 
+        // ── 贝利亚跳杀：大头图从远到近放大 ──
+        //
+        // 他没有视频（那版是失败品），改用一张**头部特写**做程序化放大：
+        // 从很小、很远处开始，一路怼到脸上，过程中还带一点抖动。
+        // 时长和别的跳杀完全一致（JumpscareVideoSeconds），玩家感觉不到差别。
+        //
+        // 素材：Resources/Belial/char_belial_lunge.png（尖冠 + 橙红发光眼的头部特写）
+
+        /// <summary>贝利亚跳杀用的头部特写。</summary>
+        private Image _belialLungeImage;
+
+        /// <summary>贝利亚跳杀的推进时间（秒）。</summary>
+        private float _belialLungeTime;
+
+        /// <summary>贝利亚跳杀是否正在播。</summary>
+        private bool _belialLungePlaying;
+
+        // ── 贝利亚跳杀的收尾：演完直接退出游戏 ──
+        //
+        // 这是**贝利亚专属**的退场（用户 2026-10-30 定）：他不进结算页 ——
+        // 大头怼上脸、屏幕烧成一片红之后，游戏自己关掉，玩家没有「重试本夜」这个选项。
+        // 别的四个敌人死了照旧回结算面板（见 PrototypeScene.Menu 的 ShowLoseEnd）。
+
+        /// <summary>满屏红之后还留多久才真正退出（秒）—— 让最后一帧红屏被看见。</summary>
+        private const float BelialQuitDelaySeconds = 0.45f;
+
+        /// <summary>退出还剩多少秒。**&lt; 0 表示没在退出**。</summary>
+        private float _belialQuitLeft = -1f;
+
+        /// <summary>起始缩放（很小 = 很远）。</summary>
+        private const float BelialLungeStartScale = 0.18f;
+
+        /// <summary>结束缩放（很大 = 怼到脸上）。</summary>
+        private const float BelialLungeEndScale = 1.65f;
+
         /// <summary>
         /// 跳杀视频播多久（秒）= 前半段时长 ÷ 倍速。
         /// 素材 5.16 秒 → 前半段 2.58 秒 → ÷ 3.5 ≈ 0.74 秒。
@@ -261,6 +304,12 @@ namespace NailongFNAF.UI
         /// 四周是纯黑（平均亮度 0.002），所以直接盖一块黑色就抹平了，不用重编码视频。
         /// 这里比实测范围各留一圈余量，防止边缘残留。
         /// </summary>
+        // 水印遮挡块的范围（1920×1080 视频坐标系，左下原点）。
+        //
+        // ⚠️ 试过收紧到 1714,30,188,50 / 1716,35,174,40 等更小的尺寸，
+        // 目的是别让它挡住角色 —— 但都会漏水印。用户决定还是回到这组：
+        // 宁可偶尔切到一点点角色，也要保证水印一定盖住。
+        // 水印实测 x1722~1884 / y41~69，这里四周各留一圈余量（防边缘残留）。
         private static readonly Rect JumpscareWatermarkRect =
             new Rect(1680f, 20f, 240f, 80f);
 
@@ -272,8 +321,13 @@ namespace NailongFNAF.UI
         /// </summary>
         private const string JumpscareSfxPath = "Audio/sfx_jumpscare";
 
-        /// <summary>袋鼠被关着的门挡住时敲门的音效。</summary>
-        private const string KnockSfxPath = "Audio/sfx_knock";
+        /// <summary>
+        /// 袋鼠被关着的门挡住时敲门的音效（2026-10-30 换）。
+        ///
+        /// ⚠️ 素材本身已经**只含 3 下**（原始 mp3 敲了 8 下，截取前 3 下而成，
+        /// 见 docs/04 的说明）。所以这里放一次 = 敲三下，别在外面再循环。
+        /// </summary>
+        private const string KnockSfxPath = "Audio/sfx_knock3";
 
         /// <summary>门口立绘的目标高度（米）。门洞 2.05m，留一点头顶余量。</summary>
         private const float TargetHeightMeters = 1.8f;
@@ -574,7 +628,7 @@ namespace NailongFNAF.UI
         private static readonly Color FlashlightOff = new Color(0.24f, 0.23f, 0.20f);
 
         /// <summary>手电筒照在正前方时，画面整体提亮的强度。</summary>
-        private const float FlashlightGlowAlpha = 0.35f;
+        private const float FlashlightGlowAlpha = 0.52f;
 
         // 按钮底图：填色 + 一圈接近纯白的描边。Image.color 一乘，描边就比底色亮一档
         private static readonly Color ButtonFace = new Color(0.76f, 0.76f, 0.79f);
@@ -636,8 +690,15 @@ namespace NailongFNAF.UI
 
 
         // 门洞外的灯光特效：灯亮时门口亮起一团光（Additive 叠加），灯灭熄灭。
-        private SpriteRenderer _doorLightLeft;
-        private SpriteRenderer _doorLightRight;
+        /// <summary>门洞外的走廊画面（预渲贴图，开灯亮版 / 关灯暗版同一张构图）。</summary>
+        private SpriteRenderer _corridorLeft;
+        private SpriteRenderer _corridorRight;
+
+        /// <summary>走廊的暗版 / 亮版贴图 —— 切灯时换 sprite，不换物体。</summary>
+        private Sprite _corridorLeftDark;
+        private Sprite _corridorLeftLit;
+        private Sprite _corridorRightDark;
+        private Sprite _corridorRightLit;
 
         /// <summary>
         /// 断电时盖全屏的黑幕。平时整层透明，露出后面的 3D 房间（见 OfficeRoom）。
@@ -657,6 +718,13 @@ namespace NailongFNAF.UI
         private CanvasGroup _flashlightGroup;
         private Image _flashlightButton;
         private HoldButton _flashlightHold;
+
+        /// <summary>
+        /// 手电筒「按住」的合并状态（底部按钮 **或** Ctrl 键）。
+        /// 只在状态**变化**时下发 —— 每帧硬调 SetFlashlight 会在
+        /// 「不能操作但键还按着」时反复触发耗电统计。
+        /// </summary>
+        private bool _flashlightHeld;
         private Image _flashlightGlow;
         private float _flashlightGlowAlpha;
         private Image _monitorOverlay;
@@ -672,6 +740,40 @@ namespace NailongFNAF.UI
         /// 「调的比例与监控显示不同」就是这个）。
         /// </summary>
         private RectTransform _monitorArea;
+
+        // ── 进关渐变：从全黑淡出到正常画面 ──
+        //
+        // 进入夜晚时不要"啪"一下切过去，而是一层黑幕盖住 → 淡出。
+        // 时间很短（0.45 秒），只是把突兀的切换糊一下。
+
+        /// <summary>进门黑幕（盖住整个画面，只做淡出）。</summary>
+        private Image _enterFade;
+
+        /// <summary>
+        /// 淡出的总时长（秒）。
+        /// 0.45 太快 —— 玩家还没看清就完了，像没做过场（用户反馈）。
+        /// 1.1 秒足够看清「黑 → 亮」这件事，又不至于等得烦。
+        /// </summary>
+        private const float EnterFadeSeconds = 1.1f;
+
+        /// <summary>剩余淡出时间；<= 0 表示没有在淡出。</summary>
+        private float _enterFadeLeft;
+
+        /// <summary>监控底图用的劣化材质（扫描线 / 噪点 / 色偏 / 暗角）。</summary>
+        private Material _monitorCrtMaterial;
+
+        /// <summary>
+        /// 劣化强度：0 = 原图原样，1 = 正常游玩。
+        /// 想关掉/加重视觉干扰只改这一个数。
+        /// </summary>
+        private const float MonitorCrtStrength = 1f;
+
+        /// <summary>
+        /// 监控小地图的容器 —— **挂在监控层外面**（canvas 直属），
+        /// 摆在画面框右侧的空白里。不开监控也常显，玩家随时能看平面图规划。
+        /// 以前挂在 MonitorArea 里跟着监控一起显隐（2026-10-27 挪出）。
+        /// </summary>
+        private RectTransform _mapOutside;
 
         /// <summary>监控画面的设计分辨率（= mon_*.png 的原尺寸）。</summary>
         public const float MonitorDesignWidth = 1920f;
@@ -713,6 +815,13 @@ namespace NailongFNAF.UI
 
         /// <summary>低分辨率渲染目标。屏幕尺寸变了要重建。</summary>
         private RenderTexture _blurRT;
+
+        /// <summary>
+        /// 模糊 RT 是否已经渲染过至少一帧。
+        /// 首次创建时 RT 内容是未初始化的（白/杂色），必须等相机渲过一帧
+        /// 才把它显示出来 —— 否则第一次开监控会闪白点。
+        /// </summary>
+        private bool _blurReady;
 
         /// <summary>模糊层把画面缩小到 1/6 再拉大 —— 数越大越糊、越便宜。</summary>
         private const int MonitorBlurDownscale = 6;
@@ -767,6 +876,23 @@ namespace NailongFNAF.UI
         private Text _powerText;
         private Image[] _usageBars;
 
+        // ── 偷电小动画：奶龙从电量条上方蹦两下 ──────────────────────────
+
+        /// <summary>蹦跶的小奶龙（用 Steal 那张立绘缩到 62 像素）。</summary>
+        private Image _stealPop;
+
+        /// <summary>这次蹦跶还剩多少秒。</summary>
+        private float _stealPopTimer;
+
+        /// <summary>已经画到第几次偷电（跟 <see cref="GameManager.NailongStealSerial"/> 比）。</summary>
+        private int _stealPopSerial = -1;
+
+        /// <summary>蹦跶总时长 / 弹起高度 / 图标边长 / 静止时贴哪。</summary>
+        private const float StealPopSeconds = 1.0f;
+        private const float StealPopRise = 46f;
+        private const float StealPopSize = 62f;
+        private static readonly Vector2 StealPopAnchor = new Vector2(46f, 150f);
+
         /// <summary>永夜模式专属的那一行 HUD（已撑多久 / 还差多少攒一次补给）。</summary>
         private Text _endlessText;
 
@@ -810,6 +936,25 @@ namespace NailongFNAF.UI
         private Image _naibaoCallPortrait;
         private Text _naibaoCallText;
         private Text _naibaoCallHint;
+
+        /// <summary>字幕条本体 —— 高度要跟着台词行数长（见 <see cref="FitNaibaoCallBar"/>）。</summary>
+        private RectTransform _naibaoCallBarRect;
+
+        /// <summary>字幕条底边（离屏幕下沿），要避开电量读数 / 手电筒 / MONITOR 把手。</summary>
+        private const float NaibaoBarBottom = 206f;
+
+        /// <summary>字幕条最矮多高（一行台词）。</summary>
+        private const float NaibaoBarMinHeight = 96f;
+
+        /// <summary>
+        /// 字幕条最高多高。台词再长也就到这 —— 再高会盖住半个屏幕，
+        /// 而且真正超长的台词本来就该拆句，不是让字幕条无限长。
+        /// </summary>
+        private const float NaibaoBarMaxHeight = 300f;
+
+        /// <summary>字幕条里上下留给「奶包 / 提示」那一行和底部内边距的厚度。</summary>
+        private const float NaibaoBarPadTop = 40f;
+        private const float NaibaoBarPadBottom = 10f;
 
         /// <summary>已经画到第几次通话变化（跟 <see cref="GameManager.NaibaoCallSerial"/> 比）。</summary>
         private int _naibaoCallSerial = -1;
@@ -913,9 +1058,18 @@ namespace NailongFNAF.UI
         private AudioClip _knockSfx;
         private int _lastKnockCount;
 
-        /// <summary>门口那份外卖的拾取按钮（袋鼠走了才亮）。</summary>
-        private Button _deliveryButton;
-        private Text _deliveryLabel;
+        /// <summary>
+        /// 外卖的可点提示（页面右下角那行小字）。
+        /// ⚠️ 原来这里是一颗拾取按钮（`_deliveryButton` / `_deliveryLabel`）——
+        /// 2026-10-30 改成**点门外那张贴图**拾取，按钮删掉了，只留这行字指个路。
+        /// </summary>
+        private Text _deliveryHint;
+
+        /// <summary>外卖袋贴图（Resources 下，不带扩展名）。</summary>
+        private const string DeliveryBagPath = "Art/ui_delivery_bag";
+
+        /// <summary>点外卖时的容错像素 —— 袋子小，框紧一点会很难点。</summary>
+        private const float DeliveryClickPadPx = 14f;
         private AudioClip _jumpscareSfx;
         private Image _blackoutCharacter;
         private Font _font;
@@ -1043,6 +1197,11 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // ⚠️ 退出倒计时放在**所有 return 之前**：贝利亚可能在选卡面板冻住的
+            // 那一帧把人弄死（timeScale = 0），那种情况下后面的分支全被挡掉，
+            // 倒计时要是排在末尾就永远没人推，游戏卡在一片红里出不去。
+            TickBelialQuit();
+
             // 菜单开着 / 出现结算面板时，冻住这一夜，等玩家选择
             HandleMenu(gm);
             SyncDebugToggle();
@@ -1091,6 +1250,7 @@ namespace NailongFNAF.UI
             UpdateJumpscareShake();
             UpdateAudio(gm);
             UpdateJumpscareVideo();
+            UpdateBelialLunge();
         }
 
         private static void EnsureGameManager()
@@ -1393,6 +1553,37 @@ namespace NailongFNAF.UI
         /// <summary>噪点覆盖层（全屏 RawImage，盖在画面框之上）。</summary>
         private UnityEngine.UI.RawImage _staticOverlay;
 
+        // ── 贝利亚彩蛋的虚影（故事模式第 4 / 5 夜）──────────────────────
+        //
+        // 他只出现在**监控画面里**：一张半透明的黑贝大头压在画面上，
+        // 玩家得在 1.5 秒内把监控放下。详见 BelialCameo 与 GameManager.TickCameo。
+
+        /// <summary>监控画面上的贝利亚虚影。平时隐藏。</summary>
+        private Image _cameoGhost;
+
+        /// <summary>虚影的透明度 —— 让它「像信号里的重影」而不是一张贴图。</summary>
+        private const float CameoGhostAlpha = 0.72f;
+
+        /// <summary>
+        /// 虚影用的贴图（用户 2026-10-30 指定）：跳杀那张头部特写。
+        /// 它是正脸怼镜头的构图，自带透明背景，压到监控上就是一张虚影。
+        /// </summary>
+        private const string CameoGhostSpritePath = "Belial/char_belial_lunge";
+
+        /// <summary>
+        /// 虚影在画面里的目标高度（设计像素，MonitorArea 是 1920×1080）。
+        ///
+        /// 贴图是 1264×1643 的竖版大头（宽高比 0.77），所以高度定在 900 时
+        /// 宽度约 692 —— 整个头都落在画面里，不会被上下切掉，也不会顶到小地图。
+        /// </summary>
+        private const float CameoGhostHeight = 900f;
+
+        /// <summary>虚影的大小 / 位置 / 透明度抖动幅度（越大越像坏掉的信号）。</summary>
+        private const float CameoGhostJitter = 9f;
+
+        /// <summary>上一帧虚影是不是显示着 —— 用来只在「刚出现」时炸一次雪花。</summary>
+        private bool _cameoGhostWasOn;
+
         /// <summary>
         /// 切机位的一瞬把噪点拉满，之后随时间衰减。
         /// 平时也可以偶尔来一下（低概率），让玩家不敢盯着发呆。
@@ -1465,6 +1656,13 @@ namespace NailongFNAF.UI
             {
                 HandleMonitorHotspotTouch(gm);
                 return;
+            }
+
+            // M 键快捷开关监控 —— 和鼠标碰屏幕底边等价（同一个 ToggleMonitor，
+            // 所以音效、奶包抢监控那套逻辑都跟着走）
+            if (Input.GetKeyDown(KeyCode.M) && CanOperate(gm))
+            {
+                ToggleMonitor(gm);
             }
 
             float height = Screen.height;
@@ -1583,8 +1781,16 @@ namespace NailongFNAF.UI
                     _audio.PlayCameraSwitch();
                 }
 
-                // 切机位的一瞬：雪花炸满屏，然后衰减平息（0.28 秒）
-                BurstStatic(1f);
+                // 切机位的一瞬：雪花炸满屏，然后衰减平息（0.28 秒）。
+                //
+                // ⚠️ **只在监控已经开着时炸** ——
+                // 第一次打开监控时 ApplyMonitorOverlay 也会走这条路
+                // （机位从上次的值变到当前值），不该算「切机位」，
+                // 否则一开监控就有一片雪花飘过（用户反馈）。
+                if (gm.MonitorUp)
+                {
+                    BurstStatic(1f);
+                }
             }
         }
 
@@ -1715,6 +1921,16 @@ namespace NailongFNAF.UI
 
             UpdateMonitorBlur(monitorUp);
             UpdateStatic();
+            UpdateEnterFade();
+
+            // 监控收起时把「敌人移动签名」作废 —— 否则下次抬起监控，
+            // 上次留下的旧签名和这一帧的新签名不同，会被判成「有人动」，
+            // 一开监控就闪一片雪花（用户反馈「雪花样飘过」）。
+            // （HideMonitorCharacters 里也有一处，但那条路径不是每次都会走。）
+            if (!monitorUp)
+            {
+                _monitorEnemySignatureReady = false;
+            }
 
             _monitorOverlay.gameObject.SetActive(monitorUp || animating);
             _monitorMapGroup.alpha = monitorUp ? 1f : 0f;
@@ -1730,6 +1946,65 @@ namespace NailongFNAF.UI
 
             // 底部监控把手：断电或被抓之后不再显示
             _monitorHandle.gameObject.SetActive(!gm.HasPowerOut && !gm.HasBeenCaught);
+
+            ApplyCameoGhost(gm, monitorUp);
+        }
+
+        /// <summary>
+        /// 贝利亚彩蛋的虚影（故事模式第 4 / 5 夜，见 <see cref="BelialCameo"/>）。
+        ///
+        /// 他**只出现在监控画面里**：玩家升着监控、正好撞上的那一秒半，
+        /// 一张半透明的大头压在画面上，同时还带一点坏信号的抖动。
+        /// 放下监控（或超时）之后立刻消失。
+        /// </summary>
+        private void ApplyCameoGhost(GameManager gm, bool monitorUp)
+        {
+            if (_cameoGhost == null)
+            {
+                return;
+            }
+
+            var cameo = gm.Cameo;
+            bool show = monitorUp && !_hasJumpscare && cameo != null && cameo.OnScreen;
+
+            if (!show)
+            {
+                if (_cameoGhostWasOn)
+                {
+                    _cameoGhost.enabled = false;
+                    _cameoGhostWasOn = false;
+                }
+
+                return;
+            }
+
+            // 刚压上来的那一下先炸一层雪花 ——「信号里混进了别的东西」
+            if (!_cameoGhostWasOn)
+            {
+                _cameoGhostWasOn = true;
+                _cameoGhost.enabled = true;
+                BurstStatic(1f);
+            }
+
+            // 越接近超时抖得越凶：玩家能看出来「时间要没了」。
+            // 1.5 秒 → 0 秒，0 → 1。
+            float urgency = 1f - Mathf.Clamp01(cameo.ReactionLeft / BelialCameo.ReactionSeconds);
+            float amp = CameoGhostJitter * (0.35f + urgency);
+
+            float t = Time.unscaledTime;
+            float jx = (Mathf.PerlinNoise(t * 22f, 0f) - 0.5f) * 2f * amp;
+            float jy = (Mathf.PerlinNoise(0f, t * 22f) - 0.5f) * 2f * amp;
+
+            // 尺寸也跟着抽一口气，像显像管没锁住行同步
+            float breathe = 1f + (Mathf.PerlinNoise(t * 9f, 5f) - 0.5f) * 0.04f * (0.5f + urgency);
+
+            RectTransform rect = _cameoGhost.rectTransform;
+            rect.anchoredPosition = new Vector2(jx, jy);
+            rect.localScale = new Vector3(breathe, breathe, 1f);
+
+            Color color = _cameoGhost.color;
+            color.a = CameoGhostAlpha * (0.82f + 0.18f * Mathf.PerlinNoise(t * 30f, 11f));
+            _cameoGhost.color = color;
         }
 
         private void SetBlackout()
@@ -1823,32 +2098,38 @@ namespace NailongFNAF.UI
 
             ApplyFrontCharacter3D(gm);
             ApplyBelial(gm);
+            DetectBelialKill(gm);
 
-            // 门洞外的灯：灯亮 → 门口亮起一团光（呼吸），灯灭 → 熄灭
-            float breathe = 0.85f + Mathf.Sin(Time.time * 2.4f) * 0.15f;
-            ApplyDoorLight(_doorLightLeft, gm.LeftLightOn, breathe);
-            ApplyDoorLight(_doorLightRight, gm.RightLightOn, breathe);
+            // 门洞外的走廊：开灯换亮版、关灯换暗版（同一构图，只换亮度）。
+            // 照 FNAF 1 —— 开灯是唯一知道门外有什么的办法。
+            ApplyCorridor(_corridorLeft, gm.LeftLightOn, _corridorLeftDark, _corridorLeftLit);
+            ApplyCorridor(_corridorRight, gm.RightLightOn, _corridorRightDark, _corridorRightLit);
 
             // 开灯照到人的上升沿 → 音效 + 边缘红脉冲（门开或关都算）
             UpdateLightReveal(gm);
         }
 
-        private static void ApplyDoorLight(SpriteRenderer light, bool on, float breathe)
+        /// <summary>
+        /// 门洞外的走廊：按灯的状态换 sprite —— 亮版 / 暗版是同一套几何渲的，
+        /// 换的时候只有亮度变，构图不跳。没有淡入淡出，灯是开关不是调光器。
+        /// </summary>
+        private static void ApplyCorridor(SpriteRenderer corridor, bool on,
+            Sprite dark, Sprite lit)
         {
-            if (light == null)
+            if (corridor == null)
             {
                 return;
             }
 
-            light.gameObject.SetActive(on);
+            Sprite want = on ? lit : dark;
+            if (want == null)
+            {
+                corridor.gameObject.SetActive(false);
+                return;
+            }
 
-            Color color = light.color;
-            color.a = on ? 0.55f * breathe : 0f;
-            light.color = color;
-
-            // ⚠️ **不要跟着 breathe 改 scale** —— 光斑要始终正好铺满门框，
-            // 缩放会让它缩进门洞（露出暗边）或溢到门框外的墙上。
-            // 呼吸只作用在亮度上。
+            corridor.sprite = want;
+            corridor.gameObject.SetActive(true);
         }
 
         /// <summary>
@@ -2004,14 +2285,14 @@ namespace NailongFNAF.UI
                 _enemyFront.gameObject.SetActive(false);
             }
 
-            if (_doorLightLeft != null)
+            if (_corridorLeft != null)
             {
-                _doorLightLeft.gameObject.SetActive(false);
+                _corridorLeft.gameObject.SetActive(false);
             }
 
-            if (_doorLightRight != null)
+            if (_corridorRight != null)
             {
-                _doorLightRight.gameObject.SetActive(false);
+                _corridorRight.gameObject.SetActive(false);
             }
         }
 
@@ -2137,6 +2418,39 @@ namespace NailongFNAF.UI
                 _flashlightHold.Release();
             }
 
+            // 位置每帧按世界点投影 —— 转头时手电跟着桌子一起动。
+            // ⚠️ 必须在 _room.SetPan(_pan) 之后调（相机朝向先定），
+            //    和墙上按钮同样的要求；ApplyFlashlight 本身就在那之后。
+            if (TryProjectToCanvas(FlashlightButtonWorld, out Vector2 flashPos))
+            {
+                if (usable && _flashlightButton != null)
+                {
+                    ((RectTransform)_flashlightButton.transform).anchoredPosition = flashPos;
+                }
+
+                // 光斑跟着手电的世界点走 —— 从手电位置往外散，不是从屏幕中心。
+                // 稍微向上偏一点（按钮贴图是竖着的，灯头在图标上方）。
+                if (_flashlightGlow != null)
+                {
+                    // 光斑中心往上抬 —— 手电是往上照的，照的是正门那一片，
+                    // 不是照桌面。120px 让亮斑落在门框附近。
+                    ((RectTransform)_flashlightGlow.transform).anchoredPosition =
+                        flashPos + new Vector2(0f, 300f);
+                }
+            }
+
+            // 按住左/右 Ctrl 等同于按住底部那个按钮 —— 键盘玩家不用去够屏幕底部。
+            // 两个来源取「或」：按钮按着算按着，Ctrl 按着也算按着，都松开才灭。
+            bool mouseHeld = _flashlightHold != null && _flashlightHold.IsHeld;
+            bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool held = usable && (mouseHeld || ctrlHeld);
+
+            if (held != _flashlightHeld)
+            {
+                _flashlightHeld = held;
+                OnFlashlightHold(held);
+            }
+
             bool shiningFront = gm.FlashlightOn && usable && gm.CurrentView == ViewSide.Front;
             float target = shiningFront ? FlashlightGlowAlpha : 0f;
 
@@ -2148,7 +2462,19 @@ namespace NailongFNAF.UI
             _flashlightGlow.color = glow;
             _flashlightGlow.enabled = _flashlightGlowAlpha > 0.001f;
 
-            _flashlightButton.color = gm.FlashlightOn ? FlashlightOn : FlashlightOff;
+            // 图标贴图不做色相染色，只调**亮度**：开着原色、关着压暗 ——
+            // 直接染成 FlashlightOn/Off 那两个暖黄/深灰色会把图标糊成一块。
+            if (_flashlightButton.sprite != null && _flashlightButton.sprite.name == "ui_flashlight")
+            {
+                _flashlightButton.color = gm.FlashlightOn
+                    ? Color.white
+                    : new Color(0.55f, 0.55f, 0.55f, 0.85f);
+            }
+            else
+            {
+                // 没图标时的老逻辑（纯色方块）
+                _flashlightButton.color = gm.FlashlightOn ? FlashlightOn : FlashlightOff;
+            }
         }
 
         private void OnFlashlightHold(bool held)
@@ -2158,6 +2484,9 @@ namespace NailongFNAF.UI
             {
                 return;
             }
+
+            // 按钮直接回调进来时也记上，免得 ApplyFlashlight 下一帧又下发一遍（音效会响两次）
+            _flashlightHeld = held;
 
             gm.SetFlashlight(held);
 
@@ -3477,6 +3806,99 @@ namespace NailongFNAF.UI
             {
                 _monitorArea.anchoredPosition = Vector2.zero;
             }
+
+            UpdateMapOutside();
+        }
+
+        /// <summary>
+        /// 把小地图摆到**画面框右侧之外**（黑壳右侧的空白里）。
+        ///
+        /// 每帧跟着黑壳走：黑壳右沿 + 边距 = 地图左沿；垂直方向与画面框居中对齐。
+        /// 放不下（窗口太窄，右侧空白 < 地图宽 + 边距）时**退回叠在画面框内**
+        /// 右下角的老位置 —— 宁可重叠也不能出屏幕。
+        ///
+        /// 显示与否（_monitorMapGroup.alpha）仍由监控开关管，这里只管摆位。
+        /// </summary>
+        private void UpdateMapOutside()
+        {
+            if (_mapOutside == null || _monitorBezel == null)
+            {
+                return;
+            }
+
+            var cs = new Vector3[4];
+            _monitorBezel.GetWorldCorners(cs);
+
+            // 世界坐标 → canvas 本地（Overlay canvas 的世界坐标 ≈ 屏幕像素，
+            // 但要转进 canvas 的本地系才能直接当 anchoredPosition 用）
+            RectTransform canvasRt = _canvas.transform as RectTransform;
+            Vector2 mapSize = new Vector2(MapPanelWidth, MapPanelHeight);
+
+            // 摆位规则：**右沿贴屏幕右边（留 8px），左沿最多压住黑壳 120px**。
+            //
+            // 为什么允许压壳：右侧空白只有约 290px，严格不压壳时地图只能缩到
+            // 0.52（用户反馈太小）。地图底色是 0.60 半透明暗玻璃（MapPanelFill），
+            // 压住一小条黑壳视觉上完全可接受，换来大得多的可读性。
+            const float RightGap = 8f;          // 右沿离屏幕边
+            // 允许压住黑壳的宽度：200 会把 CAM 4A/4B/6/7 那一片盖得太狠，
+            // 120 是「明显变大」和「不挡画面」的折中（约壳宽的 12%）。
+            const float OverlapBezel = 120f;
+
+            // 挂外时地图可以比原始设计尺寸更大（框外空间有限，用户要求更大可读性）
+            const float MaxOutsideScale = 1.5f;
+
+            float rightEdge = Screen.width - RightGap;
+            float leftLimit = cs[2].x - OverlapBezel;
+            float availW = rightEdge - leftLimit;
+
+            // ⚠️ **量纲要统一**：availW 是屏幕像素，而 mapSize 是设计像素；
+            // Canvas 的 scaleFactor（约 0.69）会让「设计像素 → 屏幕像素」打折。
+            // 漏掉它的话算出的 scale 会明显偏小（踩过：算出 0.81，实际只占 338px）。
+            float canvasScale = _canvas.scaleFactor > 0.001f ? _canvas.scaleFactor : 1f;
+
+            // 按可用总宽自适应缩放（等比，最小 0.35 保底可读）
+            float outsideScale = Mathf.Clamp(
+                availW / (mapSize.x * canvasScale), 0.35f, MaxOutsideScale);
+
+            // 放不下（窗口窄到连 35% 都塞不进）→ 退回老位置（同样按屏幕像素比）
+            if (availW < mapSize.x * canvasScale * 0.35f)
+            {
+                _mapOutside.SetParent(_monitorArea, false);
+                _mapOutside.anchorMin = new Vector2(1f, 0f);
+                _mapOutside.anchorMax = new Vector2(1f, 0f);
+                _mapOutside.pivot = new Vector2(1f, 0f);
+                _mapOutside.anchoredPosition = new Vector2(
+                    -MapPanelMargin, MapPanelBottomOffset);
+                _mapOutside.localScale = Vector3.one;
+                return;
+            }
+
+            // 挂外时保持 canvas 直属（可能上一帧退回过 Area 里）
+            if (_mapOutside.parent != _canvas.transform)
+            {
+                _mapOutside.SetParent(_canvas.transform, false);
+            }
+
+            _mapOutside.localScale = new Vector3(outsideScale, outsideScale, 1f);
+
+            float scaledH = mapSize.y * outsideScale;
+
+            // 垂直：与黑壳居中对齐（黑壳范围可能比屏幕矮）
+            float bezelH = cs[1].y - cs[0].y;
+            float yCenter = cs[0].y + bezelH * 0.5f;
+
+            // pivot = 右沿中点：anchoredPosition 直接就是「右沿中点」的本地坐标
+            Vector2 localRight;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRt,
+                new Vector2(rightEdge, yCenter),
+                null,
+                out localRight);
+
+            _mapOutside.anchorMin = new Vector2(0.5f, 0.5f);
+            _mapOutside.anchorMax = new Vector2(0.5f, 0.5f);
+            _mapOutside.pivot = new Vector2(1f, 0.5f);
+            _mapOutside.anchoredPosition = localRight;
         }
 
         /// <summary>
@@ -3489,6 +3911,65 @@ namespace NailongFNAF.UI
         ///
         /// 只在监控升起时开；降下时立刻关掉相机、隐藏图片，一分钱不花。
         /// </summary>
+        /// <summary>
+        /// 造进关黑幕。放在 canvas 最后（最上层），平时完全透明。
+        /// </summary>
+        private void BuildEnterFade()
+        {
+            _enterFade = MakeFullScreenImage("EnterFade", new Color(0f, 0f, 0f, 0f), false);
+            _enterFade.transform.SetAsLastSibling();
+            _enterFade.raycastTarget = false;
+        }
+
+        /// <summary>
+        /// 触发一次「从全黑淡出」。进关卡时调 —— 黑幕瞬间拉满，然后 0.45 秒淡出。
+        /// </summary>
+        private void PlayEnterFade()
+        {
+            if (_enterFade == null)
+            {
+                return;
+            }
+
+            _enterFadeLeft = EnterFadeSeconds;
+
+            var c = _enterFade.color;
+            c.a = 1f;
+            _enterFade.color = c;
+            _enterFade.enabled = true;
+        }
+
+        /// <summary>每帧推进淡出。</summary>
+        private void UpdateEnterFade()
+        {
+            if (_enterFade == null || _enterFadeLeft <= 0f)
+            {
+                return;
+            }
+
+            _enterFadeLeft -= Time.unscaledDeltaTime;
+
+            if (_enterFadeLeft <= 0f)
+            {
+                _enterFadeLeft = 0f;
+
+                var done = _enterFade.color;
+                done.a = 0f;
+                _enterFade.color = done;
+                _enterFade.enabled = false;
+                return;
+            }
+
+            // 缓出：开头淡得快，尾段更柔、更长 —— 像眼睛逐渐适应黑暗。
+            // 三次曲线比二次的"尾巴"更长，视觉上更从容。
+            float t = _enterFadeLeft / EnterFadeSeconds;
+            float a = t * t * t;
+
+            var c = _enterFade.color;
+            c.a = Mathf.Clamp01(a);
+            _enterFade.color = c;
+        }
+
         private void UpdateMonitorBlur(bool on)
         {
             if (_monitorBlurImage == null)
@@ -3507,6 +3988,10 @@ namespace NailongFNAF.UI
                 {
                     _blurCam.enabled = false;
                 }
+
+                // 关掉后 RT 里还是上次那帧旧画面（可能是上一个机位 / 旧窗口尺寸）。
+                // 下次打开要先让相机重新渲一帧，否则会闪出**上一次的画面**。
+                _blurReady = false;
 
                 return;
             }
@@ -3537,6 +4022,18 @@ namespace NailongFNAF.UI
                 _blurRT = new RenderTexture(w, h, 16, RenderTextureFormat.Default);
                 _blurRT.filterMode = FilterMode.Bilinear;
                 _blurRT.Create();
+
+                // ⚠️ 新建的 RT 内容是**未初始化的**（通常一片白/杂色）。
+                // 相机要等到本帧渲染结束才往里画，而 RawImage 一旦拿到它
+                // 就会立刻显示 —— 于是「第一次打开监控」会闪一下白点/白块。
+                // 先手动清成黑色，首帧就是黑的，不会闪。
+                var prev = RenderTexture.active;
+                RenderTexture.active = _blurRT;
+                GL.Clear(false, true, Color.black);
+                RenderTexture.active = prev;
+
+                // 这一帧先别显示模糊层，等相机真的渲过一帧再说
+                _blurReady = false;
             }
 
             if (_blurCam == null)
@@ -3563,6 +4060,21 @@ namespace NailongFNAF.UI
             }
 
             _monitorBlurImage.texture = _blurRT;
+
+            // 首帧不显示：RT 虽然已经清成黑色，但相机还没往里画，
+            // 这一帧显示出来就是「一块纯黑压在监控画面上」——
+            // 屏幕上像是闪了一下黑块。等下一帧再开。
+            if (!_blurReady)
+            {
+                _blurReady = true;
+
+                if (_monitorBlurImage.enabled)
+                {
+                    _monitorBlurImage.enabled = false;
+                }
+
+                return;
+            }
 
             if (!_monitorBlurImage.enabled)
             {
@@ -4131,16 +4643,77 @@ namespace NailongFNAF.UI
             bool leftDead = gm.IsSideDisabled(Side.Left);
             bool rightDead = gm.IsSideDisabled(Side.Right);
 
-            _doorLeftButton.color = leftDead ? Disabled : (gm.LeftDoorClosed ? DoorOn : DoorOff);
-            _doorRightButton.color = rightDead ? Disabled : (gm.RightDoorClosed ? DoorOn : DoorOff);
-            _lightLeftButton.color = leftDead ? Disabled : (gm.LeftLightOn ? LightOn : LightOff);
-            _lightRightButton.color = rightDead ? Disabled : (gm.RightLightOn ? LightOn : LightOff);
+            // 贴图按钮只调**亮度**，不染色 —— 红/绿已经画在贴图里了，
+            // 再乘 DoorOn/DoorOff 那种颜色会把整块糊成一片。
+            //   · 断开（On） ：原色，看起来「按下去、亮着」
+            //   · 闲置（Off）：压暗，看起来「没通电」
+            //   · 失效       ：更暗 + 偏灰
+            SetWallButtonState(_doorLeftButton, leftDead ? 2 : (gm.LeftDoorClosed ? 1 : 0), DoorOn, DoorOff);
+            SetWallButtonState(_doorRightButton, rightDead ? 2 : (gm.RightDoorClosed ? 1 : 0), DoorOn, DoorOff);
+            SetWallButtonState(_lightLeftButton, leftDead ? 2 : (gm.LeftLightOn ? 1 : 0), LightOn, LightOff);
+            SetWallButtonState(_lightRightButton, rightDead ? 2 : (gm.RightLightOn ? 1 : 0), LightOn, LightOff);
 
             // LIGHT 光晕：灯亮 → 亮绿呼吸（径向渐变淡入淡出），灯灭 → 熄灭。
             // 呼吸只动 alpha 和 scale，不动颜色。
             float breathe = 0.82f + Mathf.Sin(Time.time * 2.4f) * 0.18f;
             ApplyLightGlow(_lightLeftGlow, gm.LeftLightOn && !leftDead, breathe);
             ApplyLightGlow(_lightRightGlow, gm.RightLightOn && !rightDead, breathe);
+
+            // 开灯电音：**任意一侧亮着就响**。
+            // ⚠️ 必须在这里汇总，不能挂到 OnLightLeft / OnLightRight 上各调一次 ——
+            // 那样左右会互相覆盖，关掉一侧时另一侧还亮着，声音却断了。
+            if (_audio != null)
+            {
+                bool anyLightOn = (gm.LeftLightOn && !leftDead) || (gm.RightLightOn && !rightDead);
+                _audio.SetLightBuzz(anyLightOn);
+            }
+        }
+
+        /// <summary>
+        /// 设置墙面按钮的视觉状态。
+        ///
+        /// 有贴图时只调亮度（红/绿画在贴图里）；没贴图时退回老的染色逻辑。
+        ///
+        /// <paramref name="state"/>：0 = 闲置、1 = 激活（按下/亮着）、2 = 失效。
+        /// </summary>
+        private static void SetWallButtonState(Image image, int state,
+            Color onColor, Color offColor)
+        {
+            if (image == null)
+            {
+                return;
+            }
+
+            bool hasTexture = image.sprite != null
+                && (image.sprite.name == "ui_wall_red" || image.sprite.name == "ui_wall_green");
+
+            if (!hasTexture)
+            {
+                // 老逻辑：纯色染色
+                image.color = state == 2 ? Disabled : (state == 1 ? onColor : offColor);
+                return;
+            }
+
+            switch (state)
+            {
+                case 1:
+                    // 激活：原色（贴图本身的高光就够亮）
+                    image.color = Color.white;
+                    break;
+
+                case 2:
+                    // 失效：又暗又灰
+                    image.color = new Color(0.25f, 0.25f, 0.25f, 0.75f);
+                    break;
+
+                default:
+                    // 闲置：略微压暗，但保留颜色倾向。
+                    // ⚠️ 别压太狠 —— 贴图本身颜色就浓（红 198/绿 150），
+                    // 0.62 会暗到几乎看不出是红是绿（踩过）。0.82 既能
+                    // 和「激活」拉开差别，又不失真。
+                    image.color = new Color(0.82f, 0.82f, 0.82f, 1f);
+                    break;
+            }
         }
 
         private static void ApplyLightGlow(Image glow, bool on, float breathe)
@@ -4231,6 +4804,14 @@ namespace NailongFNAF.UI
             ApplyRedSpread();
             StopJumpscareVideo();
             StopJumpscareSfx();
+            StopBelialLunge();
+
+            // 把待命的退出也取消掉。清屏的地方（重开一夜、回标题、切模式）
+            // 都是「这一局不算了」，要是留着倒计时，玩家明明已经重新开始了，
+            // 两三秒后游戏还是会自己关掉。
+            _belialQuitLeft = -1f;
+            _belialCaughtSeen = false;
+
             _jumpscareOverlay.gameObject.SetActive(false);
         }
 
@@ -4328,6 +4909,43 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>视频层 + VideoPlayer 只建一次，之后反复用。</summary>
+        /// <summary>
+        /// 造跳杀音效 / 奶包配音的音频源。**幂等**，重复调用安全。
+        ///
+        /// ⚠️ 这个方法必须独立于 <see cref="EnsureJumpscareVideo"/> ——
+        /// 早先这两条音频源是写在视频初始化里的，而贝利亚走**图片跳杀**
+        /// （PlayBelialLunge 不碰 VideoPlayer），于是第一次跳杀如果是贝利亚，
+        /// 音频源压根没建，整场跳杀没有声音。四个带视频的敌人反而正常。
+        /// </summary>
+        private void EnsureJumpscareAudio()
+        {
+            if (_jumpscareAudio == null)
+            {
+                // 跳杀音效：单独一条轨，别占环境音 / 音效的 source
+                var audioGo = new GameObject("JumpscareAudio");
+                audioGo.transform.SetParent(transform, false);
+                var audio = audioGo.AddComponent<AudioSource>();
+                audio.playOnAwake = false;
+                audio.loop = false;
+                audio.spatialBlend = 0f;
+                audio.volume = 0.9f;
+                _jumpscareAudio = audio;
+            }
+
+            if (_voiceSource == null)
+            {
+                // 奶包配音：再单独一条，别和跳杀抢同一路
+                var voiceGo = new GameObject("NaibaoVoice");
+                voiceGo.transform.SetParent(transform, false);
+                var voice = voiceGo.AddComponent<AudioSource>();
+                voice.playOnAwake = false;
+                voice.loop = false;
+                voice.spatialBlend = 0f;
+                voice.volume = 1f;
+                _voiceSource = voice;
+            }
+        }
+
         private void EnsureJumpscareVideo()
         {
             if (_jumpscareVideo != null)
@@ -4381,25 +4999,10 @@ namespace NailongFNAF.UI
             _jumpscareWatermarkMask = mask;
             maskGo.SetActive(false);
 
-            // 跳杀音效：单独一条轨，别占环境音 / 音效的 source
-            var audioGo = new GameObject("JumpscareAudio");
-            audioGo.transform.SetParent(transform, false);
-            var audio = audioGo.AddComponent<AudioSource>();
-            audio.playOnAwake = false;
-            audio.loop = false;
-            audio.spatialBlend = 0f;
-            audio.volume = 0.9f;
-            _jumpscareAudio = audio;
+            // 跳杀音效 / 奶包配音的音频源 —— 抽成独立方法，
+            // 因为**贝利亚走图片跳杀、不经过这里**（见 EnsureJumpscareAudio 注释）
+            EnsureJumpscareAudio();
 
-            // 奶包配音：再单独一条，别和跳杀抢同一路（跳杀要打断一切，配音只在旁边说话）
-            var voiceGo = new GameObject("NaibaoVoice");
-            voiceGo.transform.SetParent(transform, false);
-            var voice = voiceGo.AddComponent<AudioSource>();
-            voice.playOnAwake = false;
-            voice.loop = false;
-            voice.spatialBlend = 0f;
-            voice.volume = 1f;
-            _voiceSource = voice;
 
             var player = gameObject.AddComponent<VideoPlayer>();
             player.playOnAwake = false;
@@ -4473,6 +5076,9 @@ namespace NailongFNAF.UI
         /// </summary>
         private void PlayJumpscareSfx()
         {
+            // 音频源可能还没建（贝利亚跳杀不经过视频初始化）→ 这里补建
+            EnsureJumpscareAudio();
+
             if (_jumpscareAudio == null)
             {
                 return;
@@ -4527,6 +5133,311 @@ namespace NailongFNAF.UI
             _jumpscareVideoTarget = null;
         }
 
+        /// <summary>
+        /// 调试用：直接播一次贝利亚跳杀（不依赖任何游戏状态）。
+        /// 编辑器菜单和自检都走这个。
+        /// </summary>
+        private void DebugPlayBelialLunge()
+        {
+            _hasJumpscare = true;
+            _jumpscareTime = 0f;
+
+            // 纯黑开场（_redSpread = 0 时 shader 输出全黑）
+            _redSpread = 0f;
+            ApplyRedSpread();
+
+            if (_jumpscareOverlay != null)
+            {
+                _jumpscareOverlay.gameObject.SetActive(true);
+                _jumpscareOverlay.color = Color.black;
+            }
+
+            PlayBelialLunge();
+            PlayJumpscareSfx();
+        }
+
+        /// <summary>
+        /// 检测贝利亚把玩家弄死的那一刻，触发跳杀。
+        ///
+        /// 两个来源都走这里：
+        ///   · **贝利亚之夜**的本体（<see cref="GameManager.BelialEncounter"/>）；
+        ///   · **故事模式第 4 / 5 夜的彩蛋**（<see cref="BelialCameo"/>，监控里那张虚影）。
+        /// 两者都会在弄死人时把 <c>Stats.KilledByBelial</c> 立起来，
+        /// 所以这里只认那个旗标 —— 黑化夜里的牛来 / 袋鼠 / 噜噜不该走这条路。
+        /// </summary>
+        private void DetectBelialKill(GameManager gm)
+        {
+            bool caught = gm != null && gm.HasBeenCaught;
+
+            // ⚠️ 判据是 **Stats.KilledByBelial**，不是「贝利亚之夜 + 死了一次」。
+            bool byBelial = caught && gm.Stats != null && gm.Stats.KilledByBelial;
+
+            if (byBelial && !_belialCaughtSeen)
+            {
+                _belialCaughtSeen = true;
+
+                // 走和普通跳杀一样的开场：黑幕 + 红扩散
+                _hasJumpscare = true;
+                _jumpscareEnemy = EnemyId.Nailong;   // 占位（贝利亚不在枚举里）
+                _jumpscareTime = 0f;
+                _redSpread = 0f;
+                ApplyRedSpread();
+
+                _jumpscareOverlay.gameObject.SetActive(true);
+                _jumpscareOverlay.color = Color.black;
+
+                // PlayBelialLunge 同时起退出倒计时 —— 演完怎么收场由 BelialDeathExitsGame 决定
+                PlayBelialLunge();
+                PlayJumpscareSfx();
+            }
+            else if (!caught)
+            {
+                _belialCaughtSeen = false;
+            }
+        }
+
+        /// <summary>贝利亚是否已经把玩家弄死（防重复触发）。</summary>
+        private bool _belialCaughtSeen;
+
+        /// <summary>
+        /// 贝利亚跳杀的图片层：一张头部特写，平时隐藏。
+        /// </summary>
+        private void BuildBelialLungeLayer()
+        {
+            // ⚠️ 挂在 **canvas 根**、且排在 JumpscareOverlay 之后 ——
+            // 挂在 overlay 下面的话会被那层的红色扩散盖住（那层是 RedSpread 材质，
+            // 跳杀中会整片变红，把贝利亚的大头糊掉）。
+            var go = new GameObject("BelialLunge", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            // 排到跳杀 overlay 之后 = 盖在它上面
+            if (_jumpscareOverlay != null)
+            {
+                go.transform.SetSiblingIndex(_jumpscareOverlay.transform.GetSiblingIndex() + 1);
+            }
+            else
+            {
+                go.transform.SetAsLastSibling();
+            }
+            
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(1000f, 1300f);
+
+            _belialLungeImage = go.GetComponent<Image>();
+
+            var sprite = Resources.Load<Sprite>("Belial/char_belial_lunge");
+            if (sprite != null)
+            {
+                _belialLungeImage.sprite = sprite;
+                _belialLungeImage.preserveAspect = true;
+            }
+
+            _belialLungeImage.color = Color.white;
+            _belialLungeImage.raycastTarget = false;
+
+            go.SetActive(false);
+        }
+
+        /// <summary>
+        /// 播一次贝利亚跳杀：大头从远到近放大。
+        /// 时长和视频跳杀一致（<see cref="JumpscareVideoSeconds"/>），玩家感觉不到差别。
+        ///
+        /// ⚠️ 这里同时**开始收场倒计时**（用户 2026-10-30 定）：贝利亚的跳杀演完就收摊，
+        /// 不给「重试本夜」。收场方式看模式：
+        ///   · 贝利亚之夜 → 关掉游戏；
+        ///   · 故事模式第 4 / 5 夜的彩蛋 → 回主菜单。
+        /// 无论是他真的弄死你（<see cref="DetectBelialKill"/>）还是 F1 面板
+        /// 上那个一键按钮，走的都是同一条路。
+        /// 想只看动画不收场，用编辑器菜单「奶龙 / 16. 预览贝利亚跳杀」。
+        /// </summary>
+        private void PlayBelialLunge()
+        {
+            // ⚠️ 倒计时**先**起，再判图片 —— 素材缺失 / 没建出图层时也要收场，
+            // 不然贝利亚把玩家弄死之后既没有结算页（见 IsKilledByBelial）、
+            // 也不会收摊，屏幕就永远停在黑屏上。
+            // 大头放大 + 红铺满 + 最后留一小口气，然后走人。
+            _belialQuitLeft = JumpscareVideoSeconds + RedSpreadSeconds + BelialQuitDelaySeconds;
+
+            if (_belialLungeImage == null)
+            {
+                return;
+            }
+
+            _belialLungePlaying = true;
+            _belialLungeTime = 0f;
+
+            _belialLungeImage.gameObject.SetActive(true);
+            _belialLungeImage.color = Color.white;
+
+            ApplyBelialLungeFrame(0f);
+        }
+
+        /// <summary>
+        /// 按进度 <paramref name="t"/>（0~1）摆一帧。
+        ///
+        /// 缩放走**三次方**：开头慢（看起来还在远处）、后段猛冲（压迫感），
+        /// 而不是线性匀速 —— 匀速看着像 PPT 放大。
+        /// 另外叠一点不规则抖动，模拟镜头被撞。
+        /// </summary>
+        private void ApplyBelialLungeFrame(float t)
+        {
+            if (_belialLungeImage == null)
+            {
+                return;
+            }
+
+            float clamped = Mathf.Clamp01(t);
+
+            // 三次方缓入：0 → 0，1 → 1，但中段爬得很慢
+            float eased = clamped * clamped * clamped;
+
+            float scale = Mathf.Lerp(BelialLungeStartScale, BelialLungeEndScale, eased);
+            _belialLungeImage.rectTransform.localScale = new Vector3(scale, scale, 1f);
+
+            // 抖动：越接近结尾越猛（幅度随 t 增大）
+            float shakeAmp = Mathf.Lerp(2f, 30f, clamped);
+            float sx = (Mathf.PerlinNoise(Time.time * 18f, 0f) - 0.5f) * 2f * shakeAmp;
+            float sy = (Mathf.PerlinNoise(0f, Time.time * 18f) - 0.5f) * 2f * shakeAmp;
+            _belialLungeImage.rectTransform.anchoredPosition = new Vector2(sx, sy);
+
+            // 最后 12% 时间淡出，接上结算页不至于硬切。
+            //
+            // ⚠️ alpha 要**每帧都写**，不能只在 t > 0.88 时写 ——
+            // 否则淡出留下的 0.00 会一直保留，下一轮从头播时整张图是透明的
+            // （踩过：跳杀只剩一片红，看不到贝利亚）。
+            float alpha = 1f;
+            if (clamped > 0.88f)
+            {
+                alpha = Mathf.InverseLerp(1f, 0.88f, clamped);
+                alpha = Mathf.Clamp01(alpha);
+            }
+
+            var col = _belialLungeImage.color;
+            col.a = alpha;
+            _belialLungeImage.color = col;
+        }
+
+        /// <summary>每帧推进贝利亚跳杀。</summary>
+        private void UpdateBelialLunge()
+        {
+            if (!_belialLungePlaying || _belialLungeImage == null)
+            {
+                return;
+            }
+
+            _belialLungeTime += Time.unscaledDeltaTime;
+
+            float t = _belialLungeTime / JumpscareVideoSeconds;
+            ApplyBelialLungeFrame(t);
+
+            if (t >= 1f)
+            {
+                _belialLungePlaying = false;
+                _belialLungeImage.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// 贝利亚跳杀演完 → 整局红屏 → **直接退出游戏**（用户 2026-10-30 定）。
+        ///
+        /// 和别的敌人区别对待：他们死了回结算面板、可以重试；被贝利亚弄死
+        /// 就是这一局到此为止，没有「再来一次」。
+        ///
+        /// ⚠️ 用 <see cref="Time.unscaledDeltaTime"/> —— 这期间 timeScale 可能是 0
+        /// （比如死在选卡面板打开的那一刻），用 scaled 时间会永远退不出去。
+        /// </summary>
+        private void TickBelialQuit()
+        {
+            if (_belialQuitLeft < 0f)
+            {
+                return;
+            }
+
+            _belialQuitLeft -= Time.unscaledDeltaTime;
+
+            // 大头还在放大时保持**纯黑**（用户早先的要求：红要等他收掉才上）；
+            // 收掉之后红从四周往中间推，推到满再留 <see cref="BelialQuitDelaySeconds"/> 就走人。
+            if (!_belialLungePlaying)
+            {
+                _redSpread = Mathf.MoveTowards(
+                    _redSpread, RedSpreadFull,
+                    RedSpreadFull / RedSpreadSeconds * Time.unscaledDeltaTime);
+                ApplyRedSpread();
+            }
+
+            if (_belialQuitLeft > 0f)
+            {
+                return;
+            }
+
+            _belialQuitLeft = -1f;
+            QuitGameAfterBelial();
+        }
+
+        /// <summary>
+        /// 真的收场。**贝利亚之夜**：关掉游戏（编辑器里退出 Play 模式）。
+        /// **故事模式彩蛋**（第 4 / 5 夜，用户 2026-10-30 定）：回主菜单，游戏不关。
+        /// </summary>
+        private static void QuitGameAfterBelial()
+        {
+            PlayerPrefs.Save();
+
+            // 故事模式的彩蛋只是彩蛋 —— 吓完把人送回主菜单，别真把游戏关了。
+            if (!BelialDeathExitsGame)
+            {
+                ReturnToTitleAfterCameo();
+                return;
+            }
+
+            Debug.Log("[奶龙] 贝利亚跳杀结束 —— 退出游戏。");
+
+            // 退出前把 PlayerPrefs 落盘：玩家是被他弄死的那一局，
+            // 但解锁进度 / 成就 / 永夜纪录都不该跟着丢。
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+        }
+
+        /// <summary>
+        /// 彩蛋收场：黑幕遮一下再回主菜单。
+        ///
+        /// ⚠️ 顺序要紧 —— 先 <see cref="ClearJumpscare"/> 把红屏 / 大头 / 待命退出全收掉，
+        /// 再 <c>OpenTitle()</c>；反过来的话 <c>OpenTitle</c> 里那句 ClearJumpscare
+        /// 会在标题页已经露出来之后才把黑幕撤掉，中间闪一下。
+        /// </summary>
+        private static void ReturnToTitleAfterCameo()
+        {
+            Debug.Log("[奶龙] 贝利亚彩蛋收场 —— 回主菜单。");
+
+            var scene = FindObjectOfType<PrototypeScene>();
+            if (scene == null)
+            {
+                return;
+            }
+
+            scene.ClearJumpscare();
+            scene.OpenTitle();
+        }
+
+        /// <summary>停掉贝利亚跳杀并把图片收起来。</summary>
+        private void StopBelialLunge()
+        {
+            _belialLungePlaying = false;
+            _belialLungeTime = 0f;
+
+            if (_belialLungeImage != null)
+            {
+                _belialLungeImage.gameObject.SetActive(false);
+            }
+        }
+
         /// <summary>跳杀：先是「冲脸」快速放大，然后一直抖。</summary>
         private void UpdateJumpscareShake()
         {
@@ -4540,6 +5451,18 @@ namespace NailongFNAF.UI
 
             // 视频在放的时候不再抖静态图 —— 让视频自己动（计时在 Update 里）
             if (_jumpscareVideoPlaying)
+            {
+                return;
+            }
+
+            // 贝利亚的大头放大期间也一样：**此时必须是纯黑背景**，
+            // 红色扩散要等跳杀结束才开始（用户明确要求）。
+            // 这里 early-return 就同时停掉了下面的红屏推进
+            // （_redSpread 那段在地方法末尾，见 ApplyRedSpread）。
+            //
+            // 退出倒计时待命（_belialQuitLeft >= 0）时也让开：那段时间的红屏
+            // 由 TickBelialQuit 推进，两边都推会把 RedSpreadSeconds 缩短一半。
+            if (_belialLungePlaying || _belialQuitLeft >= 0f)
             {
                 return;
             }
@@ -5147,8 +6070,14 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 袋鼠的敲门声与门口外卖：敲门时放一声；它走了之后按钮才亮，
-        /// 鼠标点一下就把外卖收进来（+2% 电）。
+        /// 袋鼠的敲门声与门口外卖（2026-10-30 改版）。
+        ///
+        /// 外卖现在是**门外地上的一张实体贴图**，不是屏幕上的按钮：
+        ///   · 只有**左门开着**的时候才看得见 —— 门关着它被门板挡着；
+        ///   · 鼠标点那张贴图就算收下（原来那颗拾取按钮已经去掉）；
+        ///   · 画面右下角留一行很小的提示，免得玩家不知道该点地上的袋子。
+        ///
+        /// 敲门音效 `sfx_knock3` 本身只有 3 下（素材已截好），放一次 = 敲三下。
         /// </summary>
         private void UpdateDelivery(GameManager gm)
         {
@@ -5163,33 +6092,116 @@ namespace NailongFNAF.UI
                 PlayKnockSfx();
             }
 
-            bool show = _enemyDirector.Delivery.Available && gm.Operable;
+            ApplyDeliveryBag(gm);
+            HandleDeliveryClick(gm);
+        }
 
-            if (_deliveryButton != null && _deliveryButton.gameObject.activeSelf != show)
+        /// <summary>
+        /// 外卖袋的显隐。判据：**有货 + 左门开着 + 玩家还能动**。
+        ///
+        /// ⚠️ 门关着必须藏起来 —— 袋子摆在门外地上，门一关本该被门板挡住；
+        /// 但 SpriteRenderer 的 sortingOrder 排在门板之上（不然开门时会被走廊贴图盖住），
+        /// 所以只能靠 active 手动收回，图形学不帮我们挡。
+        /// </summary>
+        private void ApplyDeliveryBag(GameManager gm)
+        {
+            if (_deliveryBag == null)
             {
-                _deliveryButton.gameObject.SetActive(show);
+                return;
             }
 
-            if (show && _deliveryLabel != null)
+            bool available = _enemyDirector.Delivery.Available;
+            bool doorOpen = !gm.LeftDoorClosed;
+            bool show = available && doorOpen && gm.Operable;
+
+            if (_deliveryBag.gameObject.activeSelf != show)
             {
-                int seconds = Mathf.Max(0, Mathf.CeilToInt(_enemyDirector.Delivery.RemainingSeconds));
-                _deliveryLabel.text = "门口有份外卖 · " + seconds + " 秒内收下 (+" + Mathf.RoundToInt(_enemyDirector.Delivery.Gain) + " 电)";
+                _deliveryBag.gameObject.SetActive(show);
+            }
+
+            if (_deliveryHint != null)
+            {
+                bool hint = available && gm.Operable && !gm.MonitorUp;
+                if (_deliveryHint.gameObject.activeSelf != hint)
+                {
+                    _deliveryHint.gameObject.SetActive(hint);
+                }
+
+                if (hint)
+                {
+                    int seconds = Mathf.Max(0, Mathf.CeilToInt(_enemyDirector.Delivery.RemainingSeconds));
+                    string text = doorOpen
+                        ? "门外地上有份外卖 · 点它收下 (+" + Mathf.RoundToInt(_enemyDirector.Delivery.Gain)
+                          + " 电) · " + seconds + " 秒"
+                        : "门外好像有东西 · 开门看看 · " + seconds + " 秒";
+
+                    if (_deliveryHint.text != text)
+                    {
+                        _deliveryHint.text = text;
+                    }
+                }
             }
         }
 
-        private void OnDeliveryClicked()
+        /// <summary>
+        /// 点门外那张外卖贴图就算收下。
+        /// 判定照手机那套：鼠标抬起 + 没有点在 UI 上 + 真的落在贴图的屏幕矩形里。
+        /// </summary>
+        private void HandleDeliveryClick(GameManager gm)
         {
-            if (_enemyDirector == null)
+            if (_deliveryBag == null || !_deliveryBag.gameObject.activeSelf)
+            {
+                return;
+            }
+
+            if (gm.MonitorUp || !_enemyDirector.Delivery.Available)
+            {
+                return;
+            }
+
+            if (!Input.GetMouseButtonUp(0))
+            {
+                return;
+            }
+
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                return;
+            }
+
+            Camera cam = _room != null ? _room.Camera : null;
+            if (cam == null)
+            {
+                return;
+            }
+
+            // 用贴图的屏幕包围盒判定：袋子小、形状又不规则，
+            // 逐像素太脆；包围盒够用，而且和「看到哪儿点哪儿」的手感一致。
+            Vector3 center = cam.WorldToScreenPoint(_deliveryBag.transform.position);
+            if (center.z <= 0f)
+            {
+                return;   // 在相机背后
+            }
+
+            // 世界尺寸 → 屏幕像素：用 sprite 的角落点算，透视会自己算进去
+            Bounds bounds = _deliveryBag.bounds;
+            Vector3 c0 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, -bounds.extents.y, 0f));
+            Vector3 c1 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, bounds.extents.y, 0f));
+            Vector3 c2 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, 0f, -bounds.extents.z));
+            Vector3 c3 = cam.WorldToScreenPoint(bounds.center + new Vector3(0f, 0f, bounds.extents.z));
+
+            float minX = Mathf.Min(c0.x, c1.x, c2.x, c3.x) - DeliveryClickPadPx;
+            float maxX = Mathf.Max(c0.x, c1.x, c2.x, c3.x) + DeliveryClickPadPx;
+            float minY = Mathf.Min(c0.y, c1.y, c2.y, c3.y) - DeliveryClickPadPx;
+            float maxY = Mathf.Max(c0.y, c1.y, c2.y, c3.y) + DeliveryClickPadPx;
+
+            Vector3 mouse = Input.mousePosition;
+            if (mouse.x < minX || mouse.x > maxX || mouse.y < minY || mouse.y > maxY)
             {
                 return;
             }
 
             _enemyDirector.TryCollectDelivery();
-
-            if (_deliveryButton != null)
-            {
-                _deliveryButton.gameObject.SetActive(false);
-            }
         }
 
         private void PlayKnockSfx()
@@ -5341,6 +6353,7 @@ namespace NailongFNAF.UI
             _clockText.text = FormatHour(gm.EndlessMode ? gm.Clock.HourOfNight : gm.Clock.CurrentHour);
             _powerText.text = "Power left: " + Mathf.CeilToInt(gm.Power.Level) + "%";
             UpdateUsageBars(gm.Power.UsageLevel);
+            UpdateStealPop(gm);
             UpdateEndlessHud(gm);
             UpdateNaibao(gm);
             UpdateNaibaoCall(gm);
@@ -5361,6 +6374,67 @@ namespace NailongFNAF.UI
 
             // 边缘红脉冲的动画推进（跟帧走，不受 timeScale 影响）
             UpdateRevealPulse();
+        }
+
+        /// <summary>
+        /// 奶龙偷电成功时，电量条上方蹦一个小奶龙。
+        ///
+        /// 只认 <see cref="GameManager.NailongStealSerial"/> 的变化 —— 偷一次蹦一次，
+        /// 平时整层关掉不占渲染。弹两下、淡出，一共 1 秒。
+        /// </summary>
+        private void UpdateStealPop(GameManager gm)
+        {
+            if (_stealPop == null)
+            {
+                return;
+            }
+
+            // ⚠️ 第一次进来只同步、不播。
+            // `_stealPopSerial` 初值是 -1，直接比的话第一帧就是「0 != -1」——
+            // 一开局白蹦一下，看着像刚被偷了电。同理 serial 变小（重开后归零）
+            // 也只同步，不播。
+            if (_stealPopSerial < 0 || gm.NailongStealSerial < _stealPopSerial)
+            {
+                _stealPopSerial = gm.NailongStealSerial;
+                _stealPopTimer = 0f;
+                _stealPop.enabled = false;
+                return;
+            }
+
+            if (gm.NailongStealSerial != _stealPopSerial)
+            {
+                _stealPopSerial = gm.NailongStealSerial;
+                _stealPopTimer = StealPopSeconds;
+                _stealPop.enabled = true;
+            }
+
+            if (_stealPopTimer <= 0f)
+            {
+                if (_stealPop.enabled)
+                {
+                    _stealPop.enabled = false;
+                }
+
+                return;
+            }
+
+            _stealPopTimer -= Time.deltaTime;
+            float k = Mathf.Clamp01(1f - _stealPopTimer / StealPopSeconds);
+
+            // |sin| 让落回原位那一下是「贴地」，而不是穿到电量字底下去；
+            // 乘 (1-k) 让第二下比第一下矮，像真的越弹越没劲
+            float bounce = Mathf.Abs(Mathf.Sin(k * Mathf.PI * 2.2f))
+                * (1f - k) * StealPopRise;
+
+            _stealPop.rectTransform.anchoredPosition =
+                StealPopAnchor + new Vector2(0f, bounce);
+
+            // 最后四分之一淡出
+            Color c = _stealPop.color;
+            c.a = k < 0.75f ? 1f : Mathf.Clamp01(1f - (k - 0.75f) / 0.25f);
+            _stealPop.color = c;
+
+            _stealPop.enabled = true;
         }
 
         /// <summary>
@@ -5563,6 +6637,7 @@ namespace NailongFNAF.UI
             }
 
             _naibaoCallText.text = line.Text;
+            FitNaibaoCallBar();
             // 提示里直接把操作写出来 —— 玩家不知道怎么继续就等于卡死。
             // 触屏没有键盘：条子右侧本来就有「继续 / 挂断」两个按钮，提示跟着指过去。
             _naibaoCallHint.text = (Application.isMobilePlatform
@@ -5572,6 +6647,31 @@ namespace NailongFNAF.UI
 
             // 每翻一页念一次；没有配音时 PlayVoice 自己会安静地返回 0
             PlayVoice(line.Id);
+        }
+
+        /// <summary>
+        /// 让字幕条长到刚好放下这句台词 —— 行数多了条子变高，少了缩回一行。
+        ///
+        /// 只调**顶边**（offsetMax.y），底边钉在 <see cref="NaibaoBarBottom"/>：
+        /// 往上长才不会压到左下角的电量读数、手电筒和 MONITOR 把手。
+        /// </summary>
+        private void FitNaibaoCallBar()
+        {
+            if (_naibaoCallBarRect == null || _naibaoCallText == null)
+            {
+                return;
+            }
+
+            // preferredHeight 是按当前 rect 宽度排完版需要多高 —— Wrap 已经开着，
+            // 这里拿到的就是折好行之后的高度，不是单行高度
+            float need = _naibaoCallText.preferredHeight
+                + NaibaoBarPadTop + NaibaoBarPadBottom;
+
+            float height = Mathf.Clamp(need, NaibaoBarMinHeight, NaibaoBarMaxHeight);
+
+            Vector2 max = _naibaoCallBarRect.offsetMax;
+            max.y = NaibaoBarBottom + height;
+            _naibaoCallBarRect.offsetMax = max;
         }
 
         /// <summary>
@@ -6237,6 +7337,10 @@ namespace NailongFNAF.UI
             BuildHud();
             BuildDebugLayer();
             BuildJumpscareLayer();
+            BuildBelialLungeLayer();
+
+            // 进关黑幕：最后建 = 最上层，盖得住跳杀层和监控层
+            BuildEnterFade();
         }
 
         private Canvas GetOrCreateCanvas()
@@ -6286,10 +7390,28 @@ namespace NailongFNAF.UI
         private static readonly Vector3 DoorWorldCenterRight = new Vector3(2.6f, 1.025f, -1.2f);
 
         /// <summary>
-        /// 门灯光斑的尺寸（米）—— **正好是门洞大小**。
-        /// 光只落在门框里，不会在门框外的墙上留一块亮斑。
-        /// 光斑贴图本身是「上亮下暗」的渐变（见 <see cref="MakeDoorLightSprite"/>），
-        /// 所以虽然光心在门框正中，亮部是偏上的，像门外的灯从上面照进来。
+        /// 外卖袋摆在左门外的地面上（2026-10-30 定）。
+        ///
+        /// 位置：贴着门洞往外侧墙方向放 —— 不能在门板平面上，否则门一关就穿模；
+        /// 也不能太靠里，否则转身看不到。
+        ///
+        /// ⚠️ y 不能按「真的贴地」写 0.1 左右：相机眼高 1.30m，低头看近处地面时
+        /// 画面下沿会把袋子切掉（实测 y=0.22 时点击框跑到 y[-43,116]，一半在屏幕外）。
+        /// 抬到 0.55m 相当于让它立在门边地上的一摞东西上 —— 视觉上仍是「门口地上那份外卖」，
+        /// 但整个袋子都在画面里，点得到。
+        /// </summary>
+        private static readonly Vector3 DeliveryWorldPos = new Vector3(-2.52f, 0.55f, -1.2f);
+
+        /// <summary>外卖袋在门外占多大（米）。约一只外卖袋的大小，比门洞小得多。</summary>
+        private const float DeliveryBagMeters = 0.34f;
+
+        /// <summary>外卖袋的世界物体。只在「有货 + 那扇门开着」时显示。</summary>
+        private SpriteRenderer _deliveryBag;
+
+        /// <summary>
+        /// 门洞尺寸（米）—— 走廊画面**正好铺满门洞**，不多露一点。
+        /// 名字留着 DoorLight 是历史原因（原来是那块光斑的尺寸），
+        /// 现在这块位置放的是走廊贴图。
         /// </summary>
         private const float DoorLightWidth = 1.2f;
         private const float DoorLightHeight = 2.05f;
@@ -6308,9 +7430,14 @@ namespace NailongFNAF.UI
             _belialRight = MakeWorldSprite("BelialRight", DoorWorldCenterRight, SpriteSortEnemy + 2);
 
 
-            // 门洞外的灯光：Additive 叠加的径向光斑，亮灯时门口像真的亮了。
-            _doorLightLeft = MakeDoorLight("DoorLightLeft", DoorWorldCenterLeft, SpriteSortDoor - 1);
-            _doorLightRight = MakeDoorLight("DoorLightRight", DoorWorldCenterRight, SpriteSortDoor - 1);
+            // 门洞外的走廊：一张预渲的贴图，开灯亮、关灯暗 —— 同一张构图两种亮度，
+            // 切灯时不会「换了一张画」。排序在门板**之下**，门一关自然被挡住。
+            _corridorLeft = MakeCorridor("CorridorLeft", DoorWorldCenterLeft,
+                SpriteSortDoor - 1, "Corridor/corridor_left",
+                out _corridorLeftDark, out _corridorLeftLit);
+            _corridorRight = MakeCorridor("CorridorRight", DoorWorldCenterRight,
+                SpriteSortDoor - 1, "Corridor/corridor_right",
+                out _corridorRightDark, out _corridorRightLit);
 
             // ⚠️ SpriteRenderer 默认平面是 XY（法线朝 +z）。门板 / 门敌站在**侧墙**
             // （x=±2.6 平面），必须绕 Y 转 ±90° 让平面朝房间中心 ——
@@ -6325,6 +7452,28 @@ namespace NailongFNAF.UI
             _enemyFront.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
             _belialLeft.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
             _belialRight.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
+
+            // 袋鼠留下的外卖袋：放在左门外地面上，开门才看得见（见 ApplyDeliveryBag）
+            _deliveryBag = MakeWorldSprite("DeliveryBag", DeliveryWorldPos, SpriteSortEnemy + 3);
+            _deliveryBag.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+
+            var bagSprite = Resources.Load<Sprite>(DeliveryBagPath);
+            if (bagSprite == null)
+            {
+                // 没贴图就别留一块白方块 —— 整个物体关掉，外卖退化成只有按钮
+                _deliveryBag.gameObject.SetActive(false);
+            }
+            else
+            {
+                _deliveryBag.sprite = bagSprite;
+
+                // localScale 是倍数不是米：按「目标米数 ÷ sprite 自然尺寸」折算
+                float bagH = bagSprite.bounds.size.y;
+                float bagScale = bagH > 0.001f ? DeliveryBagMeters / bagH : 1f;
+                _deliveryBag.transform.localScale = new Vector3(bagScale, bagScale, 1f);
+
+                _deliveryBag.gameObject.SetActive(false);
+            }
 
             if (_doorFaceLeft != null)
             {
@@ -6386,32 +7535,32 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 门口那盏灯：**上亮下暗**的渐变光斑，Additive 叠加（只加亮不遮黑），
-        /// 灯亮时门框里像真的被门外的灯照亮了。默认隐藏，
-        /// 由 <see cref="ApplyWorldObjects"/> 按灯状态点亮。
-        /// 和门板一样在侧墙平面（绕 Y 转 ±90° 朝房间中心）。
+        /// 门洞外的走廊：两张预渲贴图（见 tools/render_corridor.py），
+        /// **同一套几何、同一个机位**，只有灯开没开 —— 切灯时换 sprite，
+        /// 画面不会「换一张」。
         ///
-        /// 光斑**正好和门洞一样大**（见 <see cref="DoorLightWidth"/>）——
-        /// 光只落在门框里，不会在门框外的墙上留一块亮斑。
+        /// 为什么关灯也要有一版：只做亮版的话，关灯时门洞里露出来的是
+        /// 全景图上画的那条走廊（另一个机位、另一种透视），一开灯就跳成贴图 ——
+        /// 绿子报过「开灯前后贴图不一致」，就是这里。
         /// </summary>
-        private static SpriteRenderer MakeDoorLight(string name, Vector3 pivotPoint,
-            int sortingOrder)
+        private static SpriteRenderer MakeCorridor(string name, Vector3 pivotPoint,
+            int sortingOrder, string resourcePath, out Sprite dark, out Sprite lit)
         {
             var sr = MakeWorldSprite(name, pivotPoint, sortingOrder);
 
-            sr.sprite = MakeDoorLightSprite();
-            sr.color = new Color(0.35f, 0.55f, 0.30f, 0f);   // 绿光，alpha 0 = 关
+            lit = Resources.Load<Sprite>(resourcePath);
+            dark = Resources.Load<Sprite>(resourcePath + "_dark");
 
-            // Additive：纯加亮，不产生「遮黑」的边
-            var mat = new Material(Shader.Find("Sprites/Default"));
-            if (mat != null)
+            // 两张都缺就直接不显示 —— 别让门洞里出现一块白板
+            Sprite art = lit != null ? lit : dark;
+            if (art == null)
             {
-                // Sprites/Default 没有加法混合，用内置的加亮混合参数
-                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
-                mat.SetInt("_ZWrite", 0);
-                sr.sharedMaterial = mat;
+                sr.gameObject.SetActive(false);
+                return sr;
             }
+
+            sr.sprite = art;
+            sr.color = Color.white;
 
             // 和门板/门敌一样：侧墙平面朝房间中心
             sr.transform.rotation = pivotPoint.x > 0f
@@ -6419,11 +7568,10 @@ namespace NailongFNAF.UI
                 : Quaternion.Euler(0f, 90f, 0f);
 
             // ⚠️ localScale 是乘在 sprite **自然尺寸**（像素 ÷ PPU）上的，不是米。
-            // 直接写 1.2 / 2.05 会得到 1.54 × 5.25 米的光斑，溢出到门框外 ——
             // 按「目标米数 ÷ 自然尺寸」折算才正好铺满门洞。
             sr.transform.localScale = new Vector3(
-                DoorLightWidth / sr.sprite.bounds.size.x,
-                DoorLightHeight / sr.sprite.bounds.size.y, 1f);
+                DoorLightWidth / art.bounds.size.x,
+                DoorLightHeight / art.bounds.size.y, 1f);
 
             sr.gameObject.SetActive(false);
             return sr;
@@ -6439,31 +7587,102 @@ namespace NailongFNAF.UI
         /// 手电筒的光 —— 盖在画面之上的一层提亮，中心亮、往外渐隐，
         /// 像一束光打在正前方。只在「亮着 + 朝正前方」时淡入。
         /// </summary>
+        /// <summary>
+        /// 手电筒的光斑尺寸（画布逻辑像素）。
+        ///
+        /// ⚠️ 原来这里是**全屏铺满**的径向渐变 —— 光是"从屏幕中心发散"，
+        /// 和桌面上的手电筒位置对不上（用户反馈「手电筒光的位置也固定」）。
+        /// 现在改成一块跟着手电世界点走的光斑，从手电的位置往外散。
+        /// </summary>
+        private static readonly Vector2 FlashlightGlowSize = new Vector2(1500f, 1250f);
+
         private void BuildFlashlightGlow()
         {
-            _flashlightGlow = MakeFullScreenImage("FlashlightGlow",
-                new Color(1f, 0.97f, 0.86f, 0f));
+            // 不用 MakeFullScreenImage（那个会 StretchToParent 铺满整个画布）
+            var go = new GameObject("FlashlightGlow", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = FlashlightGlowSize;
+
+            _flashlightGlow = go.GetComponent<Image>();
 
             // 纯色铺满只会整体发灰，换成径向光斑
             _flashlightGlow.sprite = MakeRadialSprite();
+            _flashlightGlow.color = new Color(1f, 0.97f, 0.86f, 0f);
+            _flashlightGlow.raycastTarget = false;
 
             _flashlightGlow.enabled = false;
             _flashlightGlowAlpha = 0f;
         }
 
         /// <summary>手电筒按钮：按住才亮，松手就灭。</summary>
+        /// <summary>手电筒按钮的贴图路径（Resources 下，不带扩展名）。</summary>
+        private const string FlashlightIconPath = "Art/ui_flashlight";
+
+        /// <summary>
+        /// 手电筒按钮的显示尺寸（画布逻辑像素）。比例照原图 1262×1182，
+        /// 配合 preserveAspect 不会拉变形。
+        /// </summary>
+        // 旋转 134° 后手电筒在框里「变细」，尺寸给大一点才醒目
+        private static readonly Vector2 FlashlightButtonSize = new Vector2(196f, 184f);
+
+        /// <summary>
+        /// 图标的旋转角（度，正 = 逆时针）。
+        ///
+        /// 原图里手电筒是**斜着**的（灯头左下、筒身右上，轴线约 +44°），
+        /// 要「正对着往上」（灯头朝上、筒身竖直向下）得顺时针转约 134°。
+        /// </summary>
+        private const float FlashlightIconRotation = -134f;
+
         private void BuildFlashlightButton()
         {
             _flashlightGroup = MakeGroup("FlashlightGroup");
 
-            var button = MakeButton(_flashlightGroup.transform, "FlashlightButton", "FLASHLIGHT",
-                new Vector2(0.5f, 0f), new Vector2(0f, FlashlightButtonBottom),
-                new Vector2(240f, 64f), null);
+            // 自己拼按钮而不是走 MakeButton：那个会套圆角胶囊底 + 居中文字，
+            // 而这里要的是**一张图**（手电筒图标，PNG 自带透明通道）。
+            var go = new GameObject("FlashlightButton",
+                typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(_flashlightGroup.transform, false);
 
-            _flashlightButton = button.GetComponent<Image>();
-            _flashlightButton.color = FlashlightOff;
+            // 锚点钉在画布中心 —— 具体位置每帧由 ApplyFlashlight 按世界点投影摆过去
+            PlaceRect(go.GetComponent<RectTransform>(),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero,
+                FlashlightButtonSize);
 
-            _flashlightHold = button.gameObject.AddComponent<HoldButton>();
+            _flashlightButton = go.GetComponent<Image>();
+
+            // 图标素材优先；缺了就退回纯色方块（至少还能点，不会没按钮）
+            var icon = Resources.Load<Sprite>(FlashlightIconPath);
+
+            if (icon != null)
+            {
+                _flashlightButton.sprite = icon;
+                _flashlightButton.preserveAspect = true;
+                _flashlightButton.color = Color.white;
+
+                // 原图是斜的，转成「灯头朝上」—— 只转视觉，按钮命中区仍是矩形框
+                go.GetComponent<RectTransform>().localRotation =
+                    Quaternion.Euler(0f, 0f, FlashlightIconRotation);
+            }
+            else
+            {
+                _flashlightButton.sprite = GetButtonSprite();
+                _flashlightButton.type = Image.Type.Sliced;
+                _flashlightButton.color = FlashlightOff;
+            }
+
+            _flashlightButton.raycastTarget = true;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = _flashlightButton;
+
+            _flashlightHold = go.AddComponent<HoldButton>();
             _flashlightHold.HoldChanged = OnFlashlightHold;
 
             _flashlightGroup.alpha = 1f;
@@ -6474,8 +7693,29 @@ namespace NailongFNAF.UI
 
 
 
-        /// <summary>墙上 DOOR / LIGHT 按钮的尺寸（画布逻辑像素）。</summary>
-        private static readonly Vector2 WallButtonSize = new Vector2(190f, 62f);
+        // ── 墙面按钮面板（照 FNAF 1 原版参考图）──
+        //
+        // 原版是一块深色金属竖板，里面上下两个**方形**按钮，
+        // 文字（DOOR / LIGHT）印在按钮**下方**，不是压在按钮上。
+        //
+        // 尺寸（画布逻辑像素）：面板 132×209（照贴图 360×570 比例），
+        // 方按钮 92×55，文字行高 22。
+
+        /// <summary>
+        /// 整块面板的尺寸。
+        /// ⚠️ 别做大 —— 面板是**贴墙**的竖板，太宽会压到门框上（踩过）。
+        /// </summary>
+        private static readonly Vector2 WallPanelSize = new Vector2(104f, 165f);
+
+        /// <summary>面板里方形按钮的尺寸。</summary>
+        private static readonly Vector2 WallButtonSize = new Vector2(74f, 44f);
+
+        /// <summary>按钮上沿在面板里的相对高度（0=底 1=顶）。</summary>
+        private const float WallDoorButtonY = 0.655f;
+        private const float WallLightButtonY = 0.335f;
+
+        /// <summary>文字行相对面板的高度。</summary>
+        private const float WallLabelYOffset = -0.088f;
 
         /// <summary>LIGHT 按钮的光晕尺寸（画布逻辑像素）—— 比按钮大一圈。</summary>
         private static readonly Vector2 LightGlowSize = new Vector2(240f, 92f);
@@ -6483,10 +7723,13 @@ namespace NailongFNAF.UI
         // 墙上按钮锚的**世界点**（米）。在侧墙上、门框**外侧**一点：
         // 门洞 z ∈ [-1.80, -0.60]，按钮取 z = -1.976（门框外沿 -1.80 再往外 0.18m），
         // 世界偏航角约 ±106.6°。高度按「门在上、灯在下」取 1.55 / 1.05。
-        private static readonly Vector3 DoorButtonWorldRight = new Vector3(2.6f, 1.55f, -1.976f);
-        private static readonly Vector3 LightButtonWorldRight = new Vector3(2.6f, 1.05f, -1.976f);
-        private static readonly Vector3 DoorButtonWorldLeft = new Vector3(-2.6f, 1.55f, -1.976f);
-        private static readonly Vector3 LightButtonWorldLeft = new Vector3(-2.6f, 1.05f, -1.976f);
+        // ⚠️ z 从 -1.976 再往「离门更远」推到 -2.10 ——
+        // 面板是竖板，比原来的小胶囊宽，贴着 -1.976 会压到门框边。
+        // 推到 -2.10（离门框 0.30m）就不挡了。
+        private static readonly Vector3 DoorButtonWorldRight = new Vector3(2.6f, 1.55f, -2.10f);
+        private static readonly Vector3 LightButtonWorldRight = new Vector3(2.6f, 1.05f, -2.10f);
+        private static readonly Vector3 DoorButtonWorldLeft = new Vector3(-2.6f, 1.55f, -2.10f);
+        private static readonly Vector3 LightButtonWorldLeft = new Vector3(-2.6f, 1.05f, -2.10f);
 
         /// <summary>
         /// 两侧墙上的门 / 灯按钮：门在上、灯在下，与官方一致。
@@ -6506,14 +7749,114 @@ namespace NailongFNAF.UI
         private void BuildWallButtons()
         {
             _leftWallGroup = MakeGroup("WallLeft");
-            _doorLeftButton = MakeWallButton(_leftWallGroup.transform, "DoorLeft", "DOOR", OnDoorLeft);
-            _lightLeftButton = MakeWallButton(_leftWallGroup.transform, "LightLeft", "LIGHT", OnLightLeft);
-            _lightLeftGlow = MakeLightGlow(_lightLeftButton.transform);
+            BuildWallPanel(_leftWallGroup.transform, "DoorLeft", "LightLeft",
+                OnDoorLeft, OnLightLeft,
+                out _doorLeftButton, out _lightLeftButton, out _lightLeftGlow);
 
             _rightWallGroup = MakeGroup("WallRight");
-            _doorRightButton = MakeWallButton(_rightWallGroup.transform, "DoorRight", "DOOR", OnDoorRight);
-            _lightRightButton = MakeWallButton(_rightWallGroup.transform, "LightRight", "LIGHT", OnLightRight);
-            _lightRightGlow = MakeLightGlow(_lightRightButton.transform);
+            BuildWallPanel(_rightWallGroup.transform, "DoorRight", "LightRight",
+                OnDoorRight, OnLightRight,
+                out _doorRightButton, out _lightRightButton, out _lightRightGlow);
+        }
+
+        /// <summary>
+        /// 造一整块墙面控制面板 —— 照 FNAF 1 原版：
+        /// 深色金属竖板，里面**上红下绿两个方形按钮**，文字印在按钮下方。
+        ///
+        /// 贴图缺失时逐个退回老样式（圆角胶囊 + 文字），保证按钮永远可点。
+        /// </summary>
+        private void BuildWallPanel(Transform parent, string doorName, string lightName,
+            UnityEngine.Events.UnityAction onDoor, UnityEngine.Events.UnityAction onLight,
+            out Image doorButton, out Image lightButton, out Image lightGlow)
+        {
+            // ── 面板底图 ──
+            var panelGo = new GameObject("Panel", typeof(RectTransform), typeof(Image));
+            panelGo.transform.SetParent(parent, false);
+
+            PlaceRect(panelGo.GetComponent<RectTransform>(),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, WallPanelSize);
+
+            var panelImage = panelGo.GetComponent<Image>();
+            var panelSprite = Resources.Load<Sprite>(WallPanelPath);
+
+            if (panelSprite != null)
+            {
+                panelImage.sprite = panelSprite;
+                panelImage.color = Color.white;
+            }
+            else
+            {
+                // 没面板贴图：透明底，只留按钮（不至于整块消失）
+                panelImage.color = new Color(0.10f, 0.10f, 0.11f, 0.92f);
+            }
+
+            panelImage.raycastTarget = false;
+
+            // ── 上：门（红）──
+            doorButton = MakeWallSquare(panelGo.transform, doorName, "DOOR", false,
+                WallDoorButtonY, onDoor);
+
+            // ── 下：灯（绿）+ 光晕 ──
+            lightButton = MakeWallSquare(panelGo.transform, lightName, "LIGHT", true,
+                WallLightButtonY, onLight);
+
+            lightGlow = MakeLightGlow(lightButton.transform);
+        }
+
+        /// <summary>
+        /// 面板里的一个方形按钮 + 它下方的文字标签。
+        /// </summary>
+        private Image MakeWallSquare(Transform panel, string name, string label,
+            bool isLight, float anchorY, UnityEngine.Events.UnityAction onClick)
+        {
+            string path = isLight ? WallButtonLightPath : WallButtonDoorPath;
+            var sprite = Resources.Load<Sprite>(path);
+
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(panel, false);
+
+            PlaceRect(go.GetComponent<RectTransform>(),
+                new Vector2(0.5f, anchorY), new Vector2(0.5f, 0.5f),
+                Vector2.zero, WallButtonSize);
+
+            var image = go.GetComponent<Image>();
+
+            if (sprite != null)
+            {
+                image.sprite = sprite;
+                image.color = Color.white;
+            }
+            else
+            {
+                // 兜底：老样式的纯色块
+                image.sprite = GetButtonSprite();
+                image.type = Image.Type.Sliced;
+                image.color = isLight ? LightOff : DoorOff;
+            }
+
+            image.raycastTarget = true;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            SetMenuButtonColors(button);
+
+            if (onClick != null)
+            {
+                button.onClick.AddListener(onClick);
+            }
+
+            // 文字在**按钮下方**（照原版），不是压在按钮面上
+            var labelText = MakeLabel(panel, label, 17,
+                new Color(0.93f, 0.93f, 0.90f),
+                new Vector2(0.5f, anchorY + WallLabelYOffset),
+                new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(WallPanelSize.x, 22f));
+
+            labelText.alignment = TextAnchor.MiddleCenter;
+            labelText.raycastTarget = false;
+
+            return image;
         }
 
         /// <summary>
@@ -6695,6 +8038,25 @@ namespace NailongFNAF.UI
             _monitorFrame.transform.SetParent(_monitorArea, false);
             StretchToParent(_monitorFrame.rectTransform);
 
+            // 2.1) **劣质 CRT 效果** —— 扫描线 / 颗粒噪点 / 青绿色偏 / 暗角 / 行抖动。
+            //      挂在这个 shader 上而不是烤进贴图：这样才能让噪点"动"起来，
+            //      静态图看不出劣质感。编辑器里调点位时把 _Strength 设 0 即可关掉。
+            //
+            // ⚠️ 材质从 Resources 拿模板，不要只靠 Shader.Find ——
+            // 这个 shader 没有别的资源引用它，打包会被当"没人用"剔除
+            // （和 MonitorCharacter 一个坑，见那边注释）。
+            var crtTemplate = Resources.Load<Material>("MonitorCRTMaterial");
+            var crtShader = crtTemplate != null
+                ? crtTemplate.shader
+                : Shader.Find("NailongFNAF/MonitorCRT");
+
+            if (crtShader != null)
+            {
+                _monitorCrtMaterial = new Material(crtShader);
+                _monitorCrtMaterial.SetFloat("_Strength", MonitorCrtStrength);
+                _monitorFrame.material = _monitorCrtMaterial;
+            }
+
             // 2.5) 贴图层：墙上海报 / 涂鸦 / 警示牌 —— **在底图之上、敌人之下**。
             //      跟着底图那层一起，但不参与它的缩放（贴图自己有归一化坐标）。
             var stickerGo = new GameObject("MonitorStickers", typeof(RectTransform));
@@ -6781,9 +8143,16 @@ namespace NailongFNAF.UI
                 maskGo.SetActive(false);
             }
 
-            // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点
+            // 小地图 —— 整张 FNAF 1 官方平面图，只有我们用得到的 3 间可点。
+            //
+            // ⚠️ **挂在 canvas 直属**（不挂 MonitorArea）：位置挪到画面框
+            // **外面**的右侧空白 —— 不再叠在监控画面上。仍要开监控才显示
+            // （显隐由 _monitorMapGroup.alpha 管，和以前一致）。
+            // 每帧按黑壳位置重新定位，见 UpdateMapOutside()。
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
-            map.transform.SetParent(_monitorArea, false);
+            map.transform.SetParent(_canvas.transform, false);
+
+            _mapOutside = map.GetComponent<RectTransform>();
 
             var mapRect = map.GetComponent<RectTransform>();
             PlaceRect(mapRect, new Vector2(1f, 0f), new Vector2(1f, 0f),
@@ -6862,6 +8231,64 @@ namespace NailongFNAF.UI
 
                 _staticOverlay.transform.SetAsLastSibling();
             }
+
+            BuildCameoGhost();
+        }
+
+        /// <summary>
+        /// 贝利亚彩蛋的虚影层：一张半透明的黑贝大头，挂在 <c>MonitorArea</c> 下
+        /// （继承 1920×1080 的等比缩放，和画面框一比一对齐）。
+        /// 平时 <c>enabled = false</c>，由 <see cref="ApplyCameoGhost"/> 每帧决定显隐。
+        /// </summary>
+        private void BuildCameoGhost()
+        {
+            if (_monitorArea == null)
+            {
+                return;
+            }
+
+            var go = new GameObject("BelialCameoGhost", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(_monitorArea, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(MonitorDesignWidth, MonitorDesignHeight);
+
+            _cameoGhost = go.GetComponent<Image>();
+            _cameoGhost.raycastTarget = false;
+
+            // 用**跳杀那张头部特写**（用户 2026-10-30 指定）。
+            //
+            // 这张的好处是它本来就是「正脸怼镜头」的构图，而且自带 43% 透明通道
+            // （原图背景是空的），压到监控画面上天然就是一张虚影 ——
+            // 早先借用门口立绘 char_belial_dark，那张是全身站姿，做虚影既糊又不像。
+            //
+            // 缺失时不留一个白方块：直接整层关掉，彩蛋退化成「只有雪花 + 超时」。
+            var sprite = Resources.Load<Sprite>(CameoGhostSpritePath);
+            if (sprite == null)
+            {
+                go.SetActive(false);
+                return;
+            }
+
+            _cameoGhost.sprite = sprite;
+            _cameoGhost.preserveAspect = true;
+
+            // 按目标高度反算缩放（localScale 是倍数不是米，见 AGENTS.md）
+            float spriteH = sprite.bounds.size.y;
+            float fit = spriteH > 0.001f ? CameoGhostHeight / spriteH : 1f;
+
+            rect.sizeDelta = new Vector2(sprite.bounds.size.x * fit, CameoGhostHeight);
+            rect.localScale = Vector3.one;
+
+            _cameoGhost.color = new Color(1f, 1f, 1f, CameoGhostAlpha);
+            _cameoGhost.enabled = false;
+
+            // 压在噪点层之上 —— 雪花应该在它后面
+            go.transform.SetAsLastSibling();
         }
 
         private void BuildMonitorHandle()
@@ -6934,6 +8361,23 @@ namespace NailongFNAF.UI
             PlaceRect(_powerText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(40f, 104f), new Vector2(420f, 40f));
 
+            // 偷电小动画：奶龙从电量条上方蹦两下（见 UpdateStealPop）。
+            // 贴在电量字左边、往上弹 —— 手电筒在屏幕正中，不会撞上。
+            var popGo = new GameObject("StealPop", typeof(RectTransform), typeof(Image));
+            popGo.transform.SetParent(powerGroup.transform, false);
+
+            _stealPop = popGo.GetComponent<Image>();
+
+            CharacterArt nailongArt = FindCharacter(EnemyId.Nailong);
+            _stealPop.sprite = nailongArt != null
+                ? nailongArt.Get(CharacterPose.Steal)
+                : null;
+            _stealPop.preserveAspect = true;
+            _stealPop.raycastTarget = false;
+            _stealPop.enabled = false;
+            PlaceRect(_stealPop.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                StealPopAnchor, new Vector2(StealPopSize, StealPopSize));
+
             var usageLabel = MakeText(powerGroup.transform, "UsageLabel", "Usage:",
                 TextAnchor.LowerLeft, 24, new Color(0.80f, 0.80f, 0.80f));
             PlaceRect(usageLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
@@ -6958,12 +8402,13 @@ namespace NailongFNAF.UI
                 new Vector2(40f, 150f), new Vector2(760f, 34f));
             _endlessText.gameObject.SetActive(false);
 
-            // 袋鼠留下的外卖（袋鼠走人才出现）：点一下补 2% 电
-            _deliveryButton = MakeButton(hud.transform, "DeliveryButton",
-                "门口有份外卖", new Vector2(0f, 0f), new Vector2(250f, 198f),
-                new Vector2(400f, 68f), OnDeliveryClicked);
-            _deliveryLabel = _deliveryButton.GetComponentInChildren<Text>();
-            _deliveryButton.gameObject.SetActive(false);
+            // 袋鼠留下的外卖：贴图在门外地上（见 ApplyDeliveryBag），
+            // 这里只放一行提示指路 —— 点的是那张贴图，不是按钮。
+            _deliveryHint = MakeText(hud.transform, "DeliveryHint", string.Empty,
+                TextAnchor.LowerLeft, 20, new Color(0.92f, 0.84f, 0.62f));
+            PlaceRect(_deliveryHint.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(40f, 186f), new Vector2(900f, 30f));
+            _deliveryHint.gameObject.SetActive(false);
 
             // 敲门声：单独一条轨
             var knockGo = new GameObject("KnockAudio");
@@ -7046,6 +8491,8 @@ namespace NailongFNAF.UI
             _naibaoLine = MakeText(box.transform, "NaibaoText", string.Empty,
                 TextAnchor.UpperLeft, 26, new Color(0.94f, 0.94f, 0.94f));
             _naibaoLine.horizontalOverflow = HorizontalWrapMode.Wrap;
+            // 桌面这张卡是定高的，长台词宁可溢出也别裁 —— 裁掉等于台词丢了
+            _naibaoLine.verticalOverflow = VerticalWrapMode.Overflow;
             PlaceRect(_naibaoLine.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(20f, -48f), new Vector2(660f, 144f));
 
@@ -7109,11 +8556,13 @@ namespace NailongFNAF.UI
                 typeof(RectTransform), typeof(Image));
             bar.transform.SetParent(root.transform, false);
             var barRect = bar.GetComponent<RectTransform>();
-            barRect.anchorMin = new Vector2(0.19f, 0f);
-            barRect.anchorMax = new Vector2(0.81f, 0f);
+            // 宽度从 62% 提到 72% —— 长台词能少折一行，而且左右两边本来就空着
+            barRect.anchorMin = new Vector2(0.14f, 0f);
+            barRect.anchorMax = new Vector2(0.86f, 0f);
             barRect.pivot = new Vector2(0.5f, 0f);
-            barRect.offsetMin = new Vector2(0f, 206f);
-            barRect.offsetMax = new Vector2(0f, 302f);
+            barRect.offsetMin = new Vector2(0f, NaibaoBarBottom);
+            barRect.offsetMax = new Vector2(0f, NaibaoBarBottom + NaibaoBarMinHeight);
+            _naibaoCallBarRect = barRect;
 
             var barImage = bar.GetComponent<Image>();
             barImage.sprite = _buttonSprite;
@@ -7144,17 +8593,19 @@ namespace NailongFNAF.UI
                 new Vector2(168f, -14f), new Vector2(460f, 24f));
 
             _naibaoCallText = MakeText(bar.transform, "Line", string.Empty,
-                TextAnchor.MiddleLeft, 25, new Color(0.96f, 0.96f, 0.96f));
+                TextAnchor.MiddleLeft, 23, new Color(0.96f, 0.96f, 0.96f));
+            // ⚠️ 两个都不能省：Wrap 负责折行，Overflow 负责「折完还放不下时别裁掉」。
+            // 以前是 Truncate —— 长台词直接被切，绿子报「豆包台词太长会丢失」。
             _naibaoCallText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            _naibaoCallText.verticalOverflow = VerticalWrapMode.Truncate;
+            _naibaoCallText.verticalOverflow = VerticalWrapMode.Overflow;
             // 台词占满条子的剩余宽度：**铺开**（anchorMin/Max 拉伸），不是定尺寸 ——
             // 条子宽度本身跟着窗口走，写死宽度在别的分辨率下会漏字
             var lineRect = _naibaoCallText.rectTransform;
             lineRect.anchorMin = new Vector2(0f, 0f);
             lineRect.anchorMax = new Vector2(1f, 1f);
             lineRect.pivot = new Vector2(0.5f, 0.5f);
-            lineRect.offsetMin = new Vector2(108f, 10f);
-            lineRect.offsetMax = new Vector2(-186f, -40f);
+            lineRect.offsetMin = new Vector2(108f, NaibaoBarPadBottom);
+            lineRect.offsetMax = new Vector2(-186f, -NaibaoBarPadTop);
 
             var next = MakeButton(bar.transform, "Next", "继续",
                 new Vector2(1f, 0.5f), new Vector2(-22f, 22f), new Vector2(132f, 36f),
@@ -7357,6 +8808,35 @@ namespace NailongFNAF.UI
                 t.raycastTarget = false;
             }
 
+            // ── 贝利亚跳杀（单独一个按钮）──
+            //
+            // 他不在 EnemyId 里（是遭遇战，走 BelialEncounter 那套），
+            // 所以不能塞进上面那个循环，单独接一个。
+            {
+                var btnGo = new GameObject("JumpBtnBelial",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                btnGo.transform.SetParent(panel.transform, false);
+
+                var btnRect = (RectTransform)btnGo.transform;
+                PlaceRect(btnRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(80f + 4 * 118f, 24f), new Vector2(110f, 40f));
+
+                var img = btnGo.GetComponent<Image>();
+                img.sprite = _buttonSprite;
+                // 深紫黑：和上面四个红色的区分开，一眼看出不是普通敌人
+                img.color = new Color(0.20f, 0.10f, 0.26f, 0.95f);
+
+                var btn = btnGo.GetComponent<Button>();
+                btn.targetGraphic = img;
+                btn.onClick.AddListener(DebugPlayBelialLunge);
+
+                Text t = MakeLabel(btnGo.transform, "贝利亚", 17,
+                    new Color(1f, 0.72f, 0.45f),
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                    Vector2.zero, new Vector2(110f, 40f));
+                t.raycastTarget = false;
+            }
+
             // ── 电量一键设定 ──
             Text powerLabel = MakeLabel(panel.transform, "电量：", 18,
                 new Color(0.65f, 0.85f, 0.65f),
@@ -7443,6 +8923,11 @@ namespace NailongFNAF.UI
                 DebugEnterBelial);
             MakeDebugButton(panel.transform, "回故事模式", 840f, -104f, 150f, 34f,
                 DebugLeaveBelial);
+
+            // 故事模式彩蛋（第 4 / 5 夜）：每 5 秒掷一次 0.05%，等不到就拿这颗按钮看。
+            // 点完之后**把监控升起来**才会撞上 —— 彩蛋的触发条件就是「下一次监控」。
+            MakeDebugButton(panel.transform, "贝利亚虚影", 680f, -38f, 150f, 34f,
+                DebugTriggerCameo);
 
             // ── 时间推进（调试）──
             // 永夜要撑十几分钟才看得出分数曲线，贝利亚要两小时才换阶段，
@@ -7808,6 +9293,21 @@ namespace NailongFNAF.UI
             CloseOverlaysForModeSwitch();
         }
 
+        /// <summary>
+        /// 调试用：立刻把贝利亚彩蛋挂到「下一次监控」上，不用等那 0.05%。
+        /// 点完**升起监控**才会撞上 —— 和真实触发路径完全一致。
+        /// </summary>
+        private void DebugTriggerCameo()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null || gm.Cameo == null)
+            {
+                return;
+            }
+
+            gm.Cameo.DebugArm();
+        }
+
         /// <summary>调试用：时间往前跳 2 分钟。</summary>
         private void DebugAdvanceTwoMinutes()
         {
@@ -7963,7 +9463,8 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.LeftDoorClosed != before)
             {
-                _audio.PlayDoor(gm.LeftDoorClosed);
+                // 该侧已被突破 → 门灯都废了，退回默认机械音（见 AudioManager.PlayDoor）
+                _audio.PlayDoor(gm.LeftDoorClosed, gm.IsSideDisabled(Side.Left));
             }
         }
 
@@ -7975,7 +9476,7 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.RightDoorClosed != before)
             {
-                _audio.PlayDoor(gm.RightDoorClosed);
+                _audio.PlayDoor(gm.RightDoorClosed, gm.IsSideDisabled(Side.Right));
             }
         }
 
@@ -7987,7 +9488,7 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.LeftLightOn != before)
             {
-                _audio.PlayLight(gm.LeftLightOn);
+                _audio.PlayLight(gm.LeftLightOn, gm.IsSideDisabled(Side.Left));
             }
         }
 
@@ -7999,7 +9500,7 @@ namespace NailongFNAF.UI
 
             if (_audio != null && gm.RightLightOn != before)
             {
-                _audio.PlayLight(gm.RightLightOn);
+                _audio.PlayLight(gm.RightLightOn, gm.IsSideDisabled(Side.Right));
             }
         }
 
@@ -8033,14 +9534,12 @@ namespace NailongFNAF.UI
         /// 墙上按钮。位置**不在建的时候定** —— 锚点钉在画布中心，之后每帧由
         /// <see cref="ApplyWallButtons"/> 按世界点投影摆过去。
         /// </summary>
-        private Image MakeWallButton(Transform parent, string name, string label,
-            UnityEngine.Events.UnityAction onClick)
-        {
-            var button = MakeButton(parent, name, label, new Vector2(0.5f, 0.5f), Vector2.zero,
-                WallButtonSize, onClick);
+        /// <summary>墙面面板与方按钮的贴图路径（Resources 下，不带扩展名）。</summary>
+        private const string WallPanelPath = "Art/ui_wall_panel";
+        private const string WallButtonDoorPath = "Art/ui_wall_red";
+        private const string WallButtonLightPath = "Art/ui_wall_green";
 
-            return button.GetComponent<Image>();
-        }
+        // （旧的 MakeWallButton 已被 MakeWallSquare 取代 —— 新版按原版参考图拆成「面板 + 方按钮 + 下方文字」）
 
         /// <summary>
         /// 把一个固定世界点投到 ScreenSpaceOverlay 画布上的本地坐标。
@@ -8095,30 +9594,40 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // ⚠️ 现在门 / 灯按钮是**面板的子物体**（照原版一块竖板），
+            // 所以摆的是**面板**，不是按钮本身 —— 分别摆按钮会让它们
+            // 脱离面板各飞一边（踩过）。
             Vector2 doorPos;
             Vector2 lightPos;
             bool okDoor = TryProjectToCanvas(doorWorld, out doorPos) && InsideCanvas(doorPos);
             bool okLight = TryProjectToCanvas(lightWorld, out lightPos) && InsideCanvas(lightPos);
 
-            PlaceWallButton(doorButton, okDoor, doorPos);
-            PlaceWallButton(lightButton, okLight, lightPos);
-
             bool any = okDoor || okLight;
             group.alpha = any ? 1f : 0f;
             group.blocksRaycasts = any;
-        }
 
-        private void PlaceWallButton(Image button, bool visible, Vector2 canvasLocal)
-        {
-            if (button == null)
+            var panel = doorButton != null
+                ? doorButton.transform.parent as RectTransform
+                : null;
+
+            if (panel == null)
             {
                 return;
             }
 
-            button.gameObject.SetActive(visible);
-            if (visible)
+            // 面板中心对准「门按钮世界点」和「灯按钮世界点」的**中点** ——
+            // 那两个点本来就是按门/灯高度取的，中点正好是面板该在的位置。
+            if (okDoor && okLight)
             {
-                ((RectTransform)button.transform).anchoredPosition = canvasLocal;
+                panel.anchoredPosition = (doorPos + lightPos) * 0.5f;
+            }
+            else if (okDoor)
+            {
+                panel.anchoredPosition = doorPos;
+            }
+            else if (okLight)
+            {
+                panel.anchoredPosition = lightPos;
             }
         }
 
@@ -8516,59 +10025,6 @@ namespace NailongFNAF.UI
             texture.Apply();
 
             return Sprite.Create(texture, new Rect(0f, 0f, size, size),
-                new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
-        }
-
-        /// <summary>
-        /// 门灯的光斑：**上亮下暗的垂直渐变**（不是径向）。
-        /// 贴上去正好和门洞一样大，光只落在门框里。
-        ///
-        /// 为什么不用径向：径向的光心在正中，看着像门洞里悬了个发光球；
-        /// 垂直渐变让亮部偏上，像门外的灯从上方照进来。
-        /// 顶部和两侧都做了柔化，免得出现硬边。
-        /// </summary>
-        private static Sprite MakeDoorLightSprite()
-        {
-            const int w = 128, h = 256;
-
-            var texture = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            texture.name = "prototype_door_light";
-            texture.wrapMode = TextureWrapMode.Clamp;
-            texture.filterMode = FilterMode.Bilinear;
-
-            var pixels = new Color32[w * h];
-
-            for (int y = 0; y < h; y++)
-            {
-                // 纹理 y 向上：v = 0 是底、1 是顶
-                float v = y / (float)(h - 1);
-
-                float vert;
-                if (v <= 0.82f)
-                {
-                    vert = v / 0.82f;
-                    vert *= vert;                       // 往上加速变亮，亮部更靠上
-                }
-                else
-                {
-                    vert = 1f - (v - 0.82f) / 0.18f;    // 顶部 18% 收掉，别顶出一条硬边
-                }
-
-                for (int x = 0; x < w; x++)
-                {
-                    float u = x / (float)(w - 1) * 2f - 1f;
-                    float side = Mathf.Clamp01(1f - Mathf.Abs(u));
-                    side *= side;                       // 两侧收得快一点
-
-                    float alpha = Mathf.Clamp01(vert) * side;
-                    pixels[y * w + x] = new Color32(255, 247, 219, (byte)(alpha * 255f));
-                }
-            }
-
-            texture.SetPixels32(pixels);
-            texture.Apply();
-
-            return Sprite.Create(texture, new Rect(0f, 0f, w, h),
                 new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
         }
 

@@ -688,6 +688,8 @@ namespace NailongFNAF.Gameplay
             if (drain > 0f)
             {
                 game.Power.DrainAmount(drain);
+                // 让 UI 知道「刚被偷了一下」—— 电量条上会蹦一个小奶龙
+                game.NoteNailongSteal();
             }
 
             // 「和奶龙对上眼」：它从没被看到变成被看到的次数（彩蛋成就用）

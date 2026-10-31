@@ -78,6 +78,16 @@ namespace NailongFNAF.UI
 
         // 成就界面：计数 + 每行的名称 / 描述（顺序照 AchievementCatalog.All）
         private readonly Text[] _nightFragmentTexts = new Text[NightCount];
+
+        /// <summary>
+        /// 选夜界面的「第 N 夜」按钮，下标 = 夜序号。
+        ///
+        /// ⚠️ 以前刷新时用 <c>GetComponentsInChildren&lt;Button&gt;()</c> +
+        /// <c>label.text.Contains("夜")</c> 现查现配 —— 那个 <c>index</c> 同时充当
+        /// 夜序号和按钮下标，一旦有一次没命中，后面所有夜就永久错位到同一个按钮上。
+        /// 建按钮时存进数组，别再靠文本猜。
+        /// </summary>
+        private readonly Button[] _nightButtons = new Button[NightCount];
         private Text _achvFragmentText;
         private Text _achvCountText;
         private readonly Text[] _achvLineTexts = new Text[AchievementCatalog.All.Length];
@@ -158,9 +168,138 @@ namespace NailongFNAF.UI
             OpenTitle();
         }
 
+        /// <summary>
+        /// 标题页雪花背景的不透明度。
+        /// 0.10 太淡看不出来，0.25 会盖过剪影；0.14 是能看出在动、又不抢戏的位置。
+        /// </summary>
+        private const float TitleStaticAlpha = 0.14f;
+
+        /// <summary>
+        /// 标题页两侧的敌人剪影 —— 左右各两只，从画面边缘探出来。
+        ///
+        /// 用各角色的 _stare（直视）图，压成**近黑剪影**：看得见轮廓和一点点体积，
+        /// 但看不出表情，比直接放彩图更有压迫感（也是 FNAF 标题页的老套路）。
+        /// 它们比标题层更靠下，光线暗淡地「围着」中间的菜单。
+        /// </summary>
+        private void BuildTitleSilhouettes(Transform parent)
+        {
+            // 左：牛来（上）+ 噜噜（下）；右：袋鼠（上）+ 奶龙（下）
+            // 锚点略超出 0~1 → 只露出半个身子，像是从画面外探进来
+            // 四个位置都错开 —— x 不摆在同一竖线上、y 也拉开，再加不同旋转，
+            // 免得像排队。特意让右侧两只一高一低一内一外（原来袋鼠和奶龙
+            // 都挤在 x≈0.95，撞到一起了）。
+            BuildSilhouette(parent, EnemyId.Niulai,   0.045f, 0.74f, 0.48f, 0.30f, -7f);
+            BuildSilhouette(parent, EnemyId.Lulu,     0.115f, 0.19f, 0.38f, 0.26f,  6f);
+            BuildSilhouette(parent, EnemyId.Daishu,   0.985f, 0.80f, 0.44f, 0.32f,  9f);
+            BuildSilhouette(parent, EnemyId.Nailong,  0.895f, 0.16f, 0.38f, 0.28f, -7f);
+        }
+
+        /// <summary>
+        /// 摆一个剪影。<paramref name="anchorX"/> 超出 0~1 就是「露出部分身体」。
+        /// </summary>
+        private void BuildSilhouette(Transform parent, EnemyId id, float anchorX,
+            float anchorY, float heightFraction, float alpha, float rotationZ = 0f)
+        {
+            // 角色图不是 Resources 素材，是场景里序列化到 _characters 的 CharacterArt。
+            // 没有 Stare 就退 Idle —— 一张都没有就不画（不报错，静默跳过）。
+            CharacterArt art = FindCharacter(id);
+            Sprite sprite = art != null
+                ? (art.Stare != null ? art.Stare : art.Idle)
+                : null;
+
+            if (sprite == null)
+            {
+                return;
+            }
+
+            var go = new GameObject("Silhouette_" + id,
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+
+            var rect = go.GetComponent<RectTransform>();
+
+            // 用父级（标题层，铺满画布）的实时尺寸算，窗口怎么变都不会错位。
+            // 高度 = 画布高的 heightFraction，宽度按图片原始比例跟着走 —— 不会拉变形。
+            var parentRect = parent as RectTransform;
+            Vector2 canvasSize = parentRect != null ? parentRect.rect.size : new Vector2(1920f, 1080f);
+
+            if (canvasSize.x < 1f || canvasSize.y < 1f)
+            {
+                canvasSize = new Vector2(1920f, 1080f);
+            }
+
+            float h = canvasSize.y * heightFraction;
+            float aspect = sprite.rect.height > 0.001f
+                ? sprite.rect.width / sprite.rect.height
+                : 1f;
+            float w = h * aspect;
+
+            rect.anchorMin = new Vector2(anchorX, anchorY);
+            rect.anchorMax = new Vector2(anchorX, anchorY);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(w, h);
+
+            // 轻微倾斜 —— 全直立看着像排队，歪一点才有「探头偷看」的感觉
+            rect.localRotation = Quaternion.Euler(0f, 0f, rotationZ);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+
+            // 剪影：不是纯黑，留一点冷灰蓝 —— 纯黑在纯黑背景上看不见。
+            // 亮度靠 alpha 控制（0.22~0.28），比背景 (#050508) 明显但依然暗。
+            image.color = new Color(0.22f, 0.24f, 0.30f, alpha);
+            image.raycastTarget = false;
+        }
+
+        /// <summary>
+        /// 标题页的「没信号的监视器」背景 —— 一层低强度雪花噪点 + 横向扫描线。
+        ///
+        /// 复用监控画面那个 MonitorStatic shader（程序化、不需要贴图），
+        /// 但强度压得很低（alpha≈0.14）：它是背景，不能抢按钮和剪影的注意力。
+        /// 好处是**画面会动** —— 纯静态的深色底看着太空、太死。
+        /// </summary>
+        private void BuildTitleStatic(Transform parent)
+        {
+            var go = new GameObject("TitleStatic",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
+            go.transform.SetParent(parent, false);
+
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            var raw = go.GetComponent<RawImage>();
+            raw.raycastTarget = false;
+
+            var shader = Shader.Find("NailongFNAF/MonitorStatic");
+            if (shader == null)
+            {
+                // shader 缺失就整层不要（标题页照常能用，只是没有动态背景）
+                go.SetActive(false);
+                return;
+            }
+
+            var mat = new Material(shader);
+            raw.material = mat;
+            raw.texture = Texture2D.whiteTexture;
+
+            // ⚠️ 强度走**顶点色 alpha**（shader 里读 IN.color.a），
+            // 不是 material.SetFloat —— 后者读得到但渲染时是 0（在监控那边踩过）。
+            raw.color = new Color(1f, 1f, 1f, TitleStaticAlpha);
+        }
+
         private void BuildTitleView()
         {
             _titleView = MakeFullScreenPanel("TitleView", new Color(0f, 0f, 0f, 0f), _menuRoot.transform);
+
+            // 背景：动态雪花屏（最底层）
+            BuildTitleStatic(_titleView.transform);
+
+            BuildTitleSilhouettes(_titleView.transform);
 
             MakeLabel(_titleView.transform, "奶龙的五夜后宫", 72, new Color(0.95f, 0.85f, 0.3f),
                 new Vector2(0.5f, 0.82f), new Vector2(0.5f, 0.82f), new Vector2(0f, 0f), new Vector2(1100f, 120f));
@@ -300,10 +439,18 @@ namespace NailongFNAF.UI
                 bool unlocked = i <= UnlockedNight;
                 string label = NightName(i);
 
+                // ⚠️ 监听器**无条件绑定**，解锁与否只交给 interactable 管 ——
+                // Button.onClick 在 interactable == false 时本来就不会触发，安全。
+                //
+                // 以前是「没解锁就传 null」，而 BuildMenu 只在 Awake() 里跑一次：
+                // 那一刻还锁着的夜**永远没有监听器**，之后通关解锁时
+                // RefreshLevelButtons 只把 interactable 打开，点下去毫无反应 ——
+                // 玩家必须重启游戏才恢复（2026-10-27 定位）。
                 var btn = MakeMenuButton(_levelView.transform, label, Vector2.zero,
                     new Vector2(0.5f + x, y),
-                    unlocked ? (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)) : null);
+                    (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)));
                 btn.interactable = unlocked;
+                _nightButtons[i] = btn;
 
                 // 独立于开局按钮：已解锁的夜晚可在局外慢慢读，不打断防守。
                 Text fragment = MakeLabel(_levelView.transform, unlocked ? StoryFragments.Night(i) : "……", 28,
@@ -1074,6 +1221,15 @@ namespace NailongFNAF.UI
 
             if (gm.HasBeenCaught)
             {
+                // 被贝利亚弄死不走普通结算页（用户 2026-10-30 定）。
+                // 演完怎么收场由 PrototypeScene 那边决定：
+                //   贝利亚之夜 → 关掉游戏；故事模式彩蛋 → 回主菜单。
+                // 这里必须让开，否则结算面板会抢在跳杀 / 红屏前弹出来。
+                if (IsKilledByBelial)
+                {
+                    return;
+                }
+
                 // 先让跳杀 / 断电演出播完，再弹结算面板，别把画面盖没。
                 _caughtHoldTimer += Time.deltaTime;
                 float hold = _hasJumpscare ? JumpscareHoldSeconds : 0.6f;
@@ -1083,6 +1239,33 @@ namespace NailongFNAF.UI
                 }
 
                 ShowLoseEnd();
+            }
+        }
+
+        /// <summary>
+        /// 这一局是不是死在贝利亚手上（贝利亚之夜的本体，或故事模式第 4 / 5 夜的彩蛋）。
+        /// 判据用 <c>Stats.KilledByBelial</c>：那是 <see cref="GameManager"/> 在他
+        /// 真把人弄死时钉下的旗标（擦过 / 两条命躲过去时不会记）。
+        /// </summary>
+        private bool IsKilledByBelial
+        {
+            get
+            {
+                var gm = GameManager.Instance;
+                return gm != null && gm.Stats != null && gm.Stats.KilledByBelial;
+            }
+        }
+
+        /// <summary>
+        /// 死在贝利亚手上、而且是**贝利亚之夜**那一套 —— 演完直接关掉游戏。
+        /// 故事模式彩蛋（第 4 / 5 夜）走的是另一条：演完回主菜单。
+        /// </summary>
+        private static bool BelialDeathExitsGame
+        {
+            get
+            {
+                var gm = GameManager.Instance;
+                return gm != null && gm.BelialMode;
             }
         }
 
@@ -1219,31 +1402,37 @@ namespace NailongFNAF.UI
             get { return PlayerPrefs.GetInt(CustomUnlockedKey, 0) == 1; }
         }
 
+        /// <summary>
+        /// 刷新选夜界面：文字、解锁态。
+        ///
+        /// ⚠️ **只改 interactable 和文字，绝不动 onClick** ——
+        /// 监听器在 BuildMenu 里无条件绑好了（那时可能还没解锁）。
+        /// 这个方法是「解锁后回标题」时唯一会跑的刷新路径，
+        /// 以前它只开 interactable、不补监听器，于是刚解锁的夜点不动。
+        /// </summary>
         private void RefreshLevelButtons()
         {
             for (int i = 0; i < NightCount; i++)
             {
-                if (_nightFragmentTexts[i] != null)
-                    _nightFragmentTexts[i].text = i <= UnlockedNight ? StoryFragments.Night(i) : "……";
-            }
+                bool unlocked = i <= UnlockedNight;
 
-            var buttons = _levelView.GetComponentsInChildren<Button>(true);
-            int index = 0;
-            for (int i = 0; i < NightCount; i++)
-            {
-                // 顺序里跳过末尾的「返回」按钮，只改夜晚按钮
-                if (index >= buttons.Length)
+                if (_nightFragmentTexts[i] != null)
                 {
-                    break;
+                    _nightFragmentTexts[i].text = unlocked ? StoryFragments.Night(i) : "……";
                 }
 
-                var label = buttons[index].GetComponentInChildren<Text>();
-                if (label != null && label.text.Contains("夜"))
+                Button btn = _nightButtons[i];
+                if (btn == null)
                 {
-                    bool unlocked = i <= UnlockedNight;
-                    buttons[index].interactable = unlocked;
+                    continue;
+                }
+
+                btn.interactable = unlocked;
+
+                var label = btn.GetComponentInChildren<Text>();
+                if (label != null)
+                {
                     label.text = NightName(i);
-                    index++;
                 }
             }
         }
@@ -1268,6 +1457,10 @@ namespace NailongFNAF.UI
             _endlessStage = EndlessStartNight;
             _endlessOverdrive = 0f;
 
+            // 告诉它这是第几夜 —— 贝利亚彩蛋只认第 4 / 5 夜（见 BelialCameo）。
+            // ⚠️ 必须在 Restart 之前设好：Restart 会把 Cameo 换成新的实例。
+            gm.SetStoryNight(night, false);
+
             gm.Restart();
             gm.SetNaibao(CreateNaibaoForNight(night));
             ClearJumpscare();
@@ -1277,6 +1470,9 @@ namespace NailongFNAF.UI
             _endShown = false;
             _caughtHoldTimer = 0f;
             ResetDawn();
+
+            // 进关不要"啪"一下切过去：一层黑幕盖住再淡出
+            PlayEnterFade();
         }
 
         /// <summary>
@@ -1313,6 +1509,9 @@ namespace NailongFNAF.UI
             EternalNightSave save;
             bool resume = TryLoadEternalNight(out save);
 
+            // 永夜不算「第几夜」，贝利亚彩蛋不参与（CameoEligible 也会挡，这里是双保险）
+            gm.SetStoryNight(EndlessStartNight, true);
+
             gm.Restart();
             gm.SetNaibao(null);
             if (resume)
@@ -1334,6 +1533,7 @@ namespace NailongFNAF.UI
             _endShown = false;
             _caughtHoldTimer = 0f;
             ResetDawn();
+            PlayEnterFade();
         }
 
         /// <summary>
@@ -1485,8 +1685,12 @@ namespace NailongFNAF.UI
                     ? "你撑过了所有夜晚 —— 奶龙也拿你没办法。" + achievementLine
                     : (unlockedNext ? "已解锁 " + NightName(current + 1) : "天亮了，你活下来了。") + achievementLine);
 
-            _endPrimaryLabel.text = custom ? "再来一局" : (wasLast ? "返回标题" : "下一夜");
-            _endPrimaryButton.interactable = custom || !wasLast;
+            // 第 5 夜通关：主按钮的功能（回标题）和面板底部固定的「返回标题」
+            // 完全重复，会同时出现两个「返回标题」（2026-10-27）。
+            // 整夜通关的主按钮只剩「下一夜」，最后一夜直接把按钮收起来。
+            bool showPrimary = custom || !wasLast;
+            _endPrimaryLabel.text = custom ? "再来一局" : "下一夜";
+            _endPrimaryButton.gameObject.SetActive(showPrimary);
 
             // 通关没有「谁说了句话」，清掉上一局残留的台词
             if (_endQuoteText != null)
@@ -1666,6 +1870,8 @@ namespace NailongFNAF.UI
                 ? "自定义夜 失败 —— 再来一次。"
                 : NightName(current) + " 失败 —— 再来一次。") + CheckLoseAchievements(gm);
             _endPrimaryLabel.text = custom ? "重试" : "重试本夜";
+            // 上一局可能是第 5 夜通关（主按钮被隐藏），这里必须重新显示
+            _endPrimaryButton.gameObject.SetActive(true);
             _endPrimaryButton.interactable = true;
 
             // 跳杀完，那只敌人说一句话。
@@ -1725,6 +1931,7 @@ namespace NailongFNAF.UI
                 + achievementLine;
 
             _endPrimaryLabel.text = "再来一局";
+            _endPrimaryButton.gameObject.SetActive(true);
             _endPrimaryButton.interactable = true;
 
             // 永夜模式死法多半是被抓，台词照旧；没抓到就没台词
@@ -1978,12 +2185,6 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            if (wasLast)
-            {
-                OpenTitle();
-                return;
-            }
-
             OnNightClicked(current + 1);
         }
 
@@ -2011,6 +2212,9 @@ namespace NailongFNAF.UI
                 _enemyDirector.SetOverdrive(0f);
             }
 
+            // 自定义夜不属于任何一夜 —— 贝利亚彩蛋关掉（CameoEligible 靠 custom 判断）
+            gm.SetStoryNight(0, true);
+
             gm.Restart();
 
             // 自定义夜没有「第几夜」的概念，默认她已经过了引导期
@@ -2021,6 +2225,7 @@ namespace NailongFNAF.UI
             _menuRoot.SetActive(false);
             _menuOpen = false;
             _endShown = false;
+            PlayEnterFade();
             _caughtHoldTimer = 0f;
             ResetDawn();
         }
