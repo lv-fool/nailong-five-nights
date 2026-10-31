@@ -2121,13 +2121,17 @@ namespace NailongFNAF.UI
             foreach (var brain in _enemyDirector.Brains)
             {
                 var door = brain as DoorEnemyBrain;
-                if (door == null || door.Side != side || door.IsAttacking)
+                if (door == null || door.Side != side)
                 {
                     continue;
                 }
 
-                // 站到门口 = Stage 到顶（门类敌人配了机位路径，MaxStage 不再是固定的 2）
-                if (door.Stage >= door.MaxStage)
+                // 正在扑上来的**也要显示**（用户 2026-10-31 定）：
+                // 早先这里遇到 IsAttacking 就跳过，结果「门开着 + 攒满移动机会」
+                // 那一帧立绘立刻被隐藏，玩家开灯什么都看不到、下一帧就跳杀 ——
+                // 变成靠信息缺失杀人。现在它扑的瞬间仍站着可见。
+                // 站到门口 = Stage 到顶；正在攻击时 Stage 也是到顶的。
+                if (door.Stage >= door.MaxStage || door.IsAttacking)
                 {
                     id = door.Id;
                     return true;
