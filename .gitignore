@@ -99,3 +99,8 @@ __pycache__/
 
 # MemSearch 记忆插件的本地索引
 /.memsearch/
+
+# 贝利亚跳杀视频：那版是失败品，他的跳杀走图片（char_belial_lunge.png），视频不参与
+# 3.4 MB、代码从不加载，且放错在 Assets/Video/ 而真实跳杀视频在 StreamingAssets/
+/Assets/Video/Jumpscares/*.mp4
+/Assets/Video/Jumpscares/*.mp4.meta

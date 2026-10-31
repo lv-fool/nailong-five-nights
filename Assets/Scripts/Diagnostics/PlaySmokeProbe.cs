@@ -151,7 +151,7 @@ namespace NailongFNAF.Diagnostics
                 _step = 10;
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "OnStartClicked", null);
-                Invoke(scene, "OnNightClicked", new object[] { 0 });
+                ClickNightButton(0, "切回普通夜1");
                 Debug.Log("SMOKE: 已切到普通夜晚 1");
             }
             else if (_step == 10 && elapsed > 14.0f)
@@ -279,7 +279,7 @@ namespace NailongFNAF.Diagnostics
                 // 第 1 夜：奶包只引导。引导第一句要 18 秒才到，探针直接把她推快一点。
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "OpenTitle", null);
-                Invoke(scene, "OnNightClicked", new object[] { 0 });
+                ClickNightButton(0, "奶包引导夜1");
                 ForceNaibaoOffline(20f);
                 Debug.Log("SMOKE: 第 1 夜已开局");
             }
@@ -296,7 +296,7 @@ namespace NailongFNAF.Diagnostics
                 // 第 2 夜：改手欠。直接把她的计时推到第一次出手之后。
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "OpenTitle", null);
-                Invoke(scene, "OnNightClicked", new object[] { 1 });
+                ClickNightButton(1, "奶包手欠夜2");
                 ForceNaibaoOffline(31f);
                 Debug.Log("SMOKE: 第 2 夜已开局");
             }
@@ -344,7 +344,7 @@ namespace NailongFNAF.Diagnostics
 
                 object scene = Instance("NailongFNAF.UI.PrototypeScene");
                 Invoke(scene, "OpenTitle", null);
-                Invoke(scene, "OnNightClicked", new object[] { 0 });
+                ClickNightButton(0, "手机重开夜1");
 
                 Debug.Log("SMOKE: 第 1 夜重开，手机摆到正前方");
             }
@@ -592,7 +592,115 @@ namespace NailongFNAF.Diagnostics
             {
                 // 截图是异步落盘的，多等一帧再退出，不然最后一张会丢
                 _step = 44;
+
+                // 退出前最后一项：选夜界面的解锁推进（回归检查，见方法注释）
+                VerifyNightProgression();
+
                 Finish();
+            }
+        }
+
+        /// <summary>
+        /// 走**真实按钮路径**进夜：射选夜界面的「第 N 夜」按钮。
+        ///
+        /// ⚠️ 别再用 <c>Invoke(scene, "OnNightClicked", ...)</c> 绕过按钮 ——
+        /// 那正好绕开了「解锁后按钮没监听器」这个 bug（2026-10-27 踩过：
+        /// 测试全绿，玩家却点不动下一夜）。
+        /// <c>onClick.Invoke()</c> 会真的走 UnityEvent：没绑监听器就什么都不发生，
+        /// 正好能被这里的断言抓到。
+        /// </summary>
+        private void ClickNightButton(int night, string tag)
+        {
+            object scene = FindScene();
+
+            if (scene == null)
+            {
+                _errors.Add(tag + ": 找不到 PrototypeScene");
+                return;
+            }
+
+            var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+            var field = scene.GetType().GetField("_nightButtons", flags);
+            var buttons = field != null ? field.GetValue(scene) as UnityEngine.UI.Button[] : null;
+
+            if (buttons == null || night < 0 || night >= buttons.Length)
+            {
+                _errors.Add(tag + ": _nightButtons 取不到或越界(" + night + ")");
+                return;
+            }
+
+            if (buttons[night] == null)
+            {
+                _errors.Add(tag + ": 第 " + (night + 1) + " 夜按钮为空");
+                return;
+            }
+
+            buttons[night].onClick.Invoke();
+
+            Debug.Log("SMOKE: 点第 " + (night + 1) + " 夜按钮（tag=" + tag + "）");
+        }
+
+        /// <summary>
+        /// 回归检查：**解锁 → 回标题 → 点下一夜**。
+        ///
+        /// 2026-10-27 修过一个 bug：BuildMenu 只在 Awake() 里跑一次，
+        /// 那一刻还锁着的夜**永远没绑监听器**；通关解锁后 RefreshLevelButtons
+        /// 只把 interactable 打开，按钮看着正常、点下去毫无反应 ——
+        /// 玩家必须重启游戏才能进下一夜。
+        ///
+        /// 这里走真实按钮（onClick.Invoke），再核对 NightIndex。
+        /// 监听器缺失时 onClick 什么都不做，这条断言就会报错。
+        /// </summary>
+        private void VerifyNightProgression()
+        {
+            const int TargetNight = 1;   // 第 2 夜（下标 1）
+
+            object scene = FindScene();
+
+            if (scene == null)
+            {
+                _errors.Add("解锁推进: 找不到 PrototypeScene");
+                return;
+            }
+
+            // 存档写回 —— 别把玩家真实进度改坏
+            int saved = PlayerPrefs.GetInt(PrototypeScene.UnlockKey, 0);
+
+            try
+            {
+                // 推到「第 2 夜已解锁」，再回标题刷新界面：
+                // 这就是玩家通关第 1 夜之后走的那条路。
+                PlayerPrefs.SetInt(PrototypeScene.UnlockKey, TargetNight);
+                PlayerPrefs.Save();
+
+                Invoke(scene, "OpenTitle", null);
+                Invoke(scene, "OnStartClicked", null);
+
+                ClickNightButton(TargetNight, "解锁推进");
+
+                object director = Instance("NailongFNAF.Gameplay.EnemyDirector");
+                object nightIndex = director != null ? Get(director, "NightIndex") : null;
+
+                if (!(nightIndex is int actual))
+                {
+                    _errors.Add("解锁推进: 取不到 NightIndex");
+                }
+                else if (actual != TargetNight)
+                {
+                    _errors.Add("解锁推进: 点第 " + (TargetNight + 1) + " 夜后 NightIndex=" +
+                                actual + "（期望 " + TargetNight +
+                                "）—— 选夜按钮很可能又没绑监听器");
+                }
+                else
+                {
+                    Debug.Log("SMOKE: 解锁推进 OK —— 点第 " + (TargetNight + 1) +
+                              " 夜 → NightIndex=" + actual);
+                }
+            }
+            finally
+            {
+                PlayerPrefs.SetInt(PrototypeScene.UnlockKey, saved);
+                PlayerPrefs.Save();
             }
         }
 

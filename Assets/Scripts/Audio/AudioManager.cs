@@ -87,6 +87,36 @@ namespace NailongFNAF.Audio
         /// <summary>提示音的 Resources 路径（不带扩展名）。</summary>
         private const string LightRevealClipPath = "Audio/sfx_light_reveal_once";
 
+        /// <summary>开灯电音素材路径（Resources 下，不带扩展名）。</summary>
+        private const string LightBuzzClipPath = "Audio/amb_light_buzz";
+
+        /// <summary>
+        /// 门 / 灯**被破坏后**点按钮时用的「默认音效」。
+        ///
+        /// 用 sfx_power_out（断电那个机械闷响）—— 它本来就在项目里、
+        /// 干涩短促，很适合表达「按了但没反应」，也不必新增素材。
+        /// </summary>
+        private AudioClip DefaultDoorClip
+        {
+            get
+            {
+                if (_defaultDoorClip == null)
+                {
+                    _defaultDoorClip = Resources.Load<AudioClip>("Audio/sfx_power_out");
+                }
+
+                return _defaultDoorClip;
+            }
+        }
+
+        private AudioClip _defaultDoorClip;
+
+        // 开关门音效 —— 来自用户给的「关门.mp3」，一段音频里两个波：
+        //   第一波（前）= 开门，第二波（后）= 关门，之后是无声音的尾巴，已切掉。
+        // 切好的两个 wav 放在 Resources/Door/ 下。
+        private const string DoorOpenClipPath = "Door/sfx_door_open";
+        private const string DoorCloseClipPath = "Door/sfx_door_close";
+
         [Header("断电音乐（音乐盒，单独一条轨）")]
         [SerializeField] private AudioClip _powerOutMusic;
 
@@ -115,6 +145,33 @@ namespace NailongFNAF.Audio
         /// <summary>牛叫专用通道 —— 它需要单独设 pitch，不能和别的音效共用。</summary>
         private AudioSource _mooSource;
 
+        // ── 开灯电音 ──
+        //
+        // 灯亮着的时候要持续响，关灯立刻停 —— 所以是**循环音源**，
+        // 不能走 PlayOneShot（那个只响一次）。
+        //
+        // 素材是程序生成的 50Hz 交流嗡鸣 + 8kHz 镇流器啸叫 + 电流沙沙，
+        // 4 秒、首尾淡入淡出，循环无接缝。和常驻底噪（amb_electric_hum）
+        // 是两回事 —— 那个一直在响，这个只在开灯时加进来。
+
+        /// <summary>门音效专属通道（开门要二倍速，需要独立的 pitch）。</summary>
+        private AudioSource _doorSource;
+
+        /// <summary>开灯循环音源。</summary>
+        private AudioSource _lightLoopSource;
+
+        /// <summary>开灯电音的素材。</summary>
+        private AudioClip _lightBuzz;
+
+        /// <summary>开灯电音的音量（比底噪明显，但不盖过语音和音效）。</summary>
+        private const float LightBuzzVolume = 0.34f;
+
+        /// <summary>开灯电音的淡入 / 淡出时长（秒）—— 硬切会"啪"一声。</summary>
+        private const float LightBuzzFadeSeconds = 0.22f;
+
+        /// <summary>当前电音通道的目标音量（0 = 关灯）。</summary>
+        private float _lightBuzzTarget;
+
         private void Awake()
         {
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
@@ -128,6 +185,35 @@ namespace NailongFNAF.Audio
             _music = CreateSource("PowerOutMusic", false, _musicVolume);
             _footstepSource = CreateSource("Footstep", false, _sfxVolume);
             _mooSource = CreateSource("Moo", false, _sfxVolume);
+
+            // 开关门音效：**优先用 Resources 里的新素材**。
+            //
+            // ⚠️ 不能写成「场景没绑才兜底」—— Main.unity 里绑的是旧的
+            // sfx_door_open.ogg / sfx_door_close.ogg 的 GUID，那样永远走不到新素材。
+            // 换素材时这里不动场景也能生效。
+            var newOpen = Resources.Load<AudioClip>(DoorOpenClipPath);
+            if (newOpen != null)
+            {
+                _sfxDoorOpen = newOpen;
+            }
+
+            var newClose = Resources.Load<AudioClip>(DoorCloseClipPath);
+            if (newClose != null)
+            {
+                _sfxDoorClose = newClose;
+            }
+
+            // 门音效独立通道：开门要二倍速，neng pitch 只影响这一路
+            _doorSource = CreateSource("DoorSfx", false, _sfxVolume);
+
+            _lightLoopSource = CreateSource("LightBuzz", true, 0f);
+            _lightBuzz = Resources.Load<AudioClip>(LightBuzzClipPath);
+
+            if (_lightBuzz != null)
+            {
+                _lightLoopSource.clip = _lightBuzz;
+                _lightLoopSource.Play();   // 一直"播"着，音量 0 → 开灯时推上去
+            }
 
             PlayLoop(_ambientA, _ambFan);
             PlayLoop(_ambientB, _ambHum);
@@ -168,6 +254,9 @@ namespace NailongFNAF.Audio
         /// </summary>
         private void Update()
         {
+            // 电音淡入淡出必须最先跑 —— 下面几处 return 会把它跳过
+            UpdateLightBuzz();
+
             if (_ambDistant == null || _ambientC == null)
             {
                 return;
@@ -188,13 +277,82 @@ namespace NailongFNAF.Audio
             _nextDistantAt = Time.time + UnityEngine.Random.Range(DistantMinGap, DistantMaxGap);
         }
 
-        public void PlayDoor(bool closed)
+        /// <summary>
+        /// 开关门的音效。
+        ///
+        /// <paramref name="disabled"/> = 这一侧已经被突破（门和灯都废了）。
+        /// 那时按钮按下去没有实际作用，但**还是要有反馈**，
+        /// 所以退回默认的机械音（<see cref="DefaultDoorClip"/>），
+        /// 而不是新录的那两段「很像真的开了/关了」的素材 ——
+        /// 明确告诉玩家「这扇门现在不归你管了」。
+        /// </summary>
+        public void PlayDoor(bool closed, bool disabled = false)
         {
-            Play(closed ? _sfxDoorClose : _sfxDoorOpen);
+            if (disabled)
+            {
+                Play(DefaultDoorClip);
+                return;
+            }
+
+            if (closed)
+            {
+                PlayDoorClip(_sfxDoorClose, 1f);
+            }
+            else
+            {
+                // 开门用二倍速（见 DoorOpenPitch）
+                PlayDoorClip(_sfxDoorOpen, DoorOpenPitch);
+            }
         }
 
-        public void PlayLight(bool on)
+        /// <summary>
+        /// 开关「开灯电音」的循环。
+        ///
+        /// ⚠️ 由调用方**汇总**后再传**（任意一侧亮着就 on）**，不要每侧各调一次 ——
+        /// 左右灯是分开调用的，各调一次会互相覆盖（开左灯 → on，开右灯 → 又 on，
+        /// 关左灯 → off，但右灯还亮着，声音就断了）。
+        /// </summary>
+        public void SetLightBuzz(bool on)
         {
+            _lightBuzzTarget = on ? LightBuzzVolume : 0f;
+        }
+
+        /// <summary>每帧推进电音的淡入淡出。</summary>
+        private void UpdateLightBuzz()
+        {
+            if (_lightLoopSource == null || _lightBuzz == null)
+            {
+                return;
+            }
+
+            float current = _lightLoopSource.volume;
+
+            if (Mathf.Approximately(current, _lightBuzzTarget))
+            {
+                return;
+            }
+
+            float speed = LightBuzzVolume / Mathf.Max(0.01f, LightBuzzFadeSeconds);
+
+            _lightLoopSource.volume = Mathf.MoveTowards(
+                current, _lightBuzzTarget, speed * Time.unscaledDeltaTime);
+        }
+
+        /// <summary>
+        /// 开关灯的音效。
+        ///
+        /// <paramref name="disabled"/> = 这一侧已经被突破（门和灯都废了）。
+        /// 和 <see cref="PlayDoor"/> 一样退回默认机械音 ——
+        /// 按下去没反应，但有反馈，玩家能立刻明白「这侧不归我管了」。
+        /// </summary>
+        public void PlayLight(bool on, bool disabled = false)
+        {
+            if (disabled)
+            {
+                Play(DefaultDoorClip);
+                return;
+            }
+
             Play(on ? _sfxLightOn : _sfxLightOff);
         }
 
@@ -341,6 +499,12 @@ namespace NailongFNAF.Audio
             get { return _powerOutMusic != null ? _powerOutMusic.length : 0f; }
         }
 
+        /// <summary>
+        /// 开门音效的播放速度倍数（1 = 原速，2 = 二倍速）。
+        /// 用 pitch 而不是重采样素材：素材保持原样，这个数随时能改。
+        /// </summary>
+        private const float DoorOpenPitch = 2f;
+
         private void Play(AudioClip clip)
         {
             if (clip == null || _sfx == null)
@@ -349,6 +513,24 @@ namespace NailongFNAF.Audio
             }
 
             _sfx.PlayOneShot(clip, _sfxVolume);
+        }
+
+        /// <summary>
+        /// 用门音效专属通道播放，可带音高。
+        ///
+        /// ⚠️ 为什么不用 <c>_sfx</c> 临时改 pitch：那是共享通道，
+        /// 改 pitch 会连带影响同一帧播的其他音效（脚步 / 开关灯 / 提示音）。
+        /// 单独开一条通道，pitch 只作用在门声上，互不干扰。
+        /// </summary>
+        private void PlayDoorClip(AudioClip clip, float pitch)
+        {
+            if (clip == null || _doorSource == null)
+            {
+                return;
+            }
+
+            _doorSource.pitch = pitch;
+            _doorSource.PlayOneShot(clip, _sfxVolume);
         }
 
         /// <summary>由编辑器菜单调用，一次性注入全部素材。</summary>
