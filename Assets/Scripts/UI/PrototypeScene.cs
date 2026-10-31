@@ -8606,6 +8606,110 @@ namespace NailongFNAF.UI
                 DebugAdvanceTwoMinutes);
             MakeDebugButton(panel.transform, "+2 小时", 840f, -146f, 150f, 34f,
                 DebugAdvanceTwoHours);
+
+            // ── 自动通关 AI ──
+            // 挂在场景里的 AutoPlayer，点一下让它自己打；再点一下交还控制权。
+            // 状态文案单独一行，能看见它现在在干什么。
+            Text aiLabel = MakeLabel(panel.transform, "AI：", 17,
+                new Color(0.65f, 0.95f, 0.75f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(620f, -188f), new Vector2(52f, 34f));
+            aiLabel.alignment = TextAnchor.MiddleLeft;
+
+            MakeDebugButton(panel.transform, "开始自动打", 680f, -188f, 150f, 34f,
+                DebugToggleAutoPlayer);
+
+            // MakeDebugButton 不返回引用，自己从子物体里捞回来（改文案要用）
+            var aiBtnGo = panel.transform.Find("DebugBtn_" + panel.transform.childCount);
+            foreach (var b in panel.GetComponentsInChildren<Button>(true))
+            {
+                var lbl = b.GetComponentInChildren<Text>();
+                if (lbl != null && lbl.text == "开始自动打")
+                {
+                    _debugAiButton = b;
+                    break;
+                }
+            }
+
+            _debugAiText = MakeLabel(panel.transform, string.Empty, 16,
+                new Color(0.8f, 0.9f, 0.8f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(840f, -188f), new Vector2(360f, 34f));
+            _debugAiText.alignment = TextAnchor.MiddleLeft;
+        }
+
+        /// <summary>自动通关 AI 的宿主（懒创建）。</summary>
+        private AutoPlayer _autoPlayer;
+
+        /// <summary>调试面板上的 AI 开关按钮。</summary>
+        private Button _debugAiButton;
+
+        /// <summary>调试面板上的 AI 状态文字。</summary>
+        private Text _debugAiText;
+
+        /// <summary>
+        /// 调试面板：一键开关自动通关 AI。
+        ///
+        /// AI 本体在 <see cref="AutoPlayer"/>，这里只负责建 / 停和显示状态。
+        /// </summary>
+        private void DebugToggleAutoPlayer()
+        {
+            if (_autoPlayer != null)
+            {
+                // 已经在跑 → 停下，交还控制权
+                _autoPlayer.Stop();
+                Destroy(_autoPlayer.gameObject);
+                _autoPlayer = null;
+
+                if (_debugAiButton != null)
+                {
+                    var label = _debugAiButton.GetComponentInChildren<Text>();
+                    if (label != null)
+                    {
+                        label.text = "开始自动打";
+                    }
+                }
+
+                return;
+            }
+
+            var go = new GameObject("AutoPlayerHost");
+            _autoPlayer = go.AddComponent<AutoPlayer>();
+            _autoPlayer.Begin();
+
+            if (_debugAiButton != null)
+            {
+                var label = _debugAiButton.GetComponentInChildren<Text>();
+                if (label != null)
+                {
+                    label.text = "停止 AI";
+                }
+            }
+        }
+
+        /// <summary>每帧把 AI 在干什么显示到调试面板上。</summary>
+        private void UpdateDebugAiText()
+        {
+            if (_debugAiText == null)
+            {
+                return;
+            }
+
+            if (_autoPlayer == null)
+            {
+                if (_debugAiText.text.Length > 0)
+                {
+                    _debugAiText.text = string.Empty;
+                }
+
+                return;
+            }
+
+            string action = _autoPlayer.LastAction;
+            if (_debugAiText.text != action)
+            {
+                _debugAiText.text = action;
+            }
         }
 
         /// <summary>
