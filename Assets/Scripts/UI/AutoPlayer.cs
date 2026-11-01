@@ -163,6 +163,9 @@ namespace NailongFNAF.UI
 
             bool lowPower = _gm.Power.Level < LowPowerThreshold;
 
+            // ── 0. 压制奶包（优先级最高，她动手会直接坑人）──
+            HandleNaibao(dt);
+
             // ── 1. 侧门 ──
             bool leftThreat = HandleSide(Side.Left, lowPower);
             bool rightThreat = HandleSide(Side.Right, lowPower);
@@ -194,6 +197,60 @@ namespace NailongFNAF.UI
                 // 有威胁时一定放下监控（否则看不见门口，也放不下门）
                 SetMonitor(false);
                 _monitorSweepTimer = 0f;
+            }
+        }
+
+        /// <summary>通话压制的冷却计时。</summary>
+        private float _naibaoCooldown;
+
+        /// <summary>两通电话之间的间隔（秒）。比她最短的 38 秒略短，保证压得住。</summary>
+        private const float NaibaoCallIntervalSeconds = 34f;
+
+        /// <summary>通话期间推进台词的间隔。</summary>
+        private float _naibaoAdvanceTimer;
+
+        /// <summary>
+        /// 压制奶包 —— 她要 30 秒后开始动手，之后每 38~72 秒一次。
+        ///
+        /// **通话期间她不动手**（NaibaoDirector.Tick 里 _talking 就直接 return），
+        /// 而且接通时会立刻撒手（抢走的监控还回来、偷加的那一档也熄掉）。
+        /// 所以压制手段就是：算准节奏打电话。
+        ///
+        /// 代价：通话中整条线路多走一格电（CountUsageLevel 里 NaibaoTalking +1）。
+        /// 所以不能一直打 —— 打完赶紧把话推完挂掉。
+        /// </summary>
+        private void HandleNaibao(float dt)
+        {
+            if (_gm.Naibao == null)
+            {
+                return;
+            }
+
+            _naibaoCooldown -= dt;
+
+            if (!_gm.NaibaoTalking)
+            {
+                if (_naibaoCooldown <= 0f)
+                {
+                    _gm.StartNaibaoCall(0, false);
+                    _naibaoCooldown = NaibaoCallIntervalSeconds;
+
+                    if (_gm.NaibaoTalking)
+                    {
+                        LastAction = "打电话压制奶包";
+                    }
+                }
+
+                return;
+            }
+
+            // 正在通话：尽快把台词推完挂断（通话中 +1 档电，别拖着）
+            _naibaoAdvanceTimer += dt;
+            if (_naibaoAdvanceTimer >= 0.8f)
+            {
+                _naibaoAdvanceTimer = 0f;
+                _gm.AdvanceNaibaoCall();
+                LastAction = "通话中，赶紧挂断";
             }
         }
 
