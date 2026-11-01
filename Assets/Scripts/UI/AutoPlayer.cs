@@ -125,11 +125,18 @@ namespace NailongFNAF.UI
             }
         }
 
-        /// <summary>关这侧门时朝那边偏一下头。</summary>
+        /// <summary>
+        /// 关这侧门时的转头 —— **已停用**（用户 2026-11-01 定）。
+        ///
+        /// 早先会朝关的那侧偏 ±0.55（约 38°），想让玩家看见「AI 转头去关门」。
+        /// 但手电是**贴在桌面世界点上**的，相机一转它就跟着画面跑出原来位置，
+        /// 看起来像「手电不固定了」。用户要的是 AI 模式下视角稳住不动。
+        ///
+        /// 留着这个空方法是为了调用点不用改，也不容易再被误加回来。
+        /// </summary>
         private void PeekAtSide(Side side)
         {
-            _turnPeekSide = side == Side.Left ? -1f : 1f;
-            _turnPeekLeft = TurnPeekSeconds;
+            // 故意留空
         }
 
         /// <summary>

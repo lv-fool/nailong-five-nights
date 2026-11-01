@@ -2268,6 +2268,28 @@ namespace NailongFNAF.UI
                     gm.SetFlashlight(want);
                 }
 
+                // ⚠️ 这几步不能省 —— 它们和下面「玩家路径」里的那几行是一回事，
+                // 只是 AI 替代了「按鼠标」这一环。早先这里直接 return 了，
+                // 结果 group.alpha 一直是 0、anchoredPosition 一直是 (0,0)，
+                // 手电按钮整个看不见（踩过）。
+                _flashlightGroup.alpha = usable ? 1f : 0f;
+                _flashlightGroup.blocksRaycasts = usable;
+
+                // 位置仍然按世界点投影 —— 和玩家模式完全一样
+                if (TryProjectToCanvas(FlashlightButtonWorld, out Vector2 aiFlashPos))
+                {
+                    if (usable && _flashlightButton != null)
+                    {
+                        ((RectTransform)_flashlightButton.transform).anchoredPosition = aiFlashPos;
+                    }
+
+                    if (_flashlightGlow != null)
+                    {
+                        ((RectTransform)_flashlightGlow.transform).anchoredPosition =
+                            aiFlashPos + new Vector2(0f, 300f);
+                    }
+                }
+
                 ApplyFlashlightVisuals(gm, usable);
                 return;
             }
