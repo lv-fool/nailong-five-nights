@@ -104,21 +104,49 @@ namespace NailongFNAF.UI
         /// </summary>
         private void ForceFrontView()
         {
+            // 正在「转头看门」就朝那边偏，否则回正前方
+            float want = _turnPeekLeft > 0f ? _turnPeekSide * TurnPeekPan : 0f;
+
             if (_panTargetField != null && _scene != null)
             {
-                _panTargetField.SetValue(_scene, 0f);
+                _panTargetField.SetValue(_scene, want);
             }
 
             if (_panField != null && _scene != null)
             {
-                _panField.SetValue(_scene, 0f);
+                _panField.SetValue(_scene, want);
             }
 
+            // ⚠️ CurrentView 始终保持 Front —— 它决定「手电照不照得到正门」，
+            // 跟画面偏不偏是两回事。转头只是视觉反馈，不该让手电失效。
             if (_gm.CurrentView != ViewSide.Front)
             {
                 _gm.SetView(ViewSide.Front);
             }
         }
+
+        /// <summary>关这侧门时朝那边偏一下头。</summary>
+        private void PeekAtSide(Side side)
+        {
+            _turnPeekSide = side == Side.Left ? -1f : 1f;
+            _turnPeekLeft = TurnPeekSeconds;
+        }
+
+        /// <summary>
+        /// 临时转头 —— 关某侧门时朝那边偏一下，让玩家看见「我去关门了」。
+        ///
+        /// 单位秒；> 0 期间 _pan 会被拉到 TurnPeekPan，归零后自动回正前方。
+        /// </summary>
+        private float _turnPeekLeft;
+
+        /// <summary>这一下转头朝哪边（-1 左 / +1 右）。</summary>
+        private float _turnPeekSide;
+
+        /// <summary>转头幅度 —— 0.55 差不多是「明显偏过去但还能看见正门」。别给 1，那是满转。</summary>
+        private const float TurnPeekPan = 0.55f;
+
+        /// <summary>转头停留多久（秒）。太短看不见，太长影响后续判断。</summary>
+        private const float TurnPeekSeconds = 0.45f;
 
         /// <summary>最近一次决策的说明，供调试面板显示。</summary>
         public string LastAction { get; private set; }
@@ -259,6 +287,12 @@ namespace NailongFNAF.UI
             //   · 正前方的噜噜只有 View==Front 时手电才照得到
             //   · 转头会让画面偏，不利于观察门口
             // 所以每帧都钉死在正前方，省掉所有转头相关的判断。
+            // 转头计时要递减，递减完 ForceFrontView 自然回正
+            if (_turnPeekLeft > 0f)
+            {
+                _turnPeekLeft -= dt;
+            }
+
             // 相机真的要转回来：写 _panTarget（视角是跟鼠标位置算的，
             // gm.SetView 只改标记不转相机）
             ForceFrontView();
@@ -451,6 +485,10 @@ namespace NailongFNAF.UI
             if (!closed)
             {
                 ToggleDoor(side);
+
+                // 关门时朝那侧偏一下头 —— 让玩家看见 AI「转头去关门」了
+                PeekAtSide(side);
+
                 LastAction = side + " 来人了，关门";
                 return true;
             }
