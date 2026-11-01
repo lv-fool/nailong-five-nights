@@ -66,10 +66,59 @@ namespace NailongFNAF.UI
         private System.Reflection.MethodInfo _setFlashlight;
         private System.Reflection.FieldInfo _monitorIntent;
 
+        /// <summary>
+        /// PrototypeScene._flashlightHeld —— 游戏内部「手电是不是按着」的状态。
+        ///
+        /// ⚠️ AI 必须写这个字段，不能只调 gm.SetFlashlight()：
+        /// ApplyFlashlight 每帧都用 _flashlightHeld 和真实的鼠标/Ctrl 状态比较，
+        /// 不一致就叫 OnFlashlightHold 覆盖回去。只设 gm.FlashlightOn 会被每帧冲掉，
+        /// 表现就是「AI 以为在闪，实际手电一直是灭的」。
+        /// </summary>
+        private System.Reflection.FieldInfo _flashlightHeld;
+
+        /// <summary>
+        /// PrototypeScene._pan —— 相机实际转了多少（-1 = 满左，0 = 正前，+1 = 满右）。
+        ///
+        /// ⚠️ 视角是**跟着鼠标位置**算的（PrototypeScene.Update 里
+        /// `_panTarget = (mouseX - 0.5) / PanSaturationK`），gm.SetView() 只改
+        /// 「现在看向哪边」这个标记、不转相机。AI 没法动鼠标，所以必须直接写这个字段，
+        /// 否则噜噜到门口时 AI 以为在照它、实际相机还歪在侧边、手电根本打不中。
+        /// </summary>
+        private System.Reflection.FieldInfo _panField;
+
+        /// <summary>同上，_panTarget 是目标值。</summary>
+        private System.Reflection.FieldInfo _panTargetField;
+
         private static readonly System.Reflection.BindingFlags Flags =
             System.Reflection.BindingFlags.Instance |
             System.Reflection.BindingFlags.Public |
             System.Reflection.BindingFlags.NonPublic;
+
+        /// <summary>
+        /// 把视角钉死在正前方。
+        ///
+        /// 两件事都要做：
+        ///   · _panTarget = 0 —— 相机真转回来（视角是跟鼠标位置算的）
+        ///   · gm.SetView(Front) —— 让「现在看向哪边」这个标记也一致，
+        ///     因为手电判定和敌人逻辑读的是它
+        /// </summary>
+        private void ForceFrontView()
+        {
+            if (_panTargetField != null && _scene != null)
+            {
+                _panTargetField.SetValue(_scene, 0f);
+            }
+
+            if (_panField != null && _scene != null)
+            {
+                _panField.SetValue(_scene, 0f);
+            }
+
+            if (_gm.CurrentView != ViewSide.Front)
+            {
+                _gm.SetView(ViewSide.Front);
+            }
+        }
 
         /// <summary>最近一次决策的说明，供调试面板显示。</summary>
         public string LastAction { get; private set; }
@@ -99,6 +148,20 @@ namespace NailongFNAF.UI
             _monitorIntent = t.GetField("_monitorPlayerIntent", Flags)
                           ?? t.GetField("monitorPlayerIntent", Flags);
 
+            // PrototypeScene 上的手电状态字段
+            if (_scene != null)
+            {
+                _flashlightHeld = typeof(PrototypeScene).GetField("_flashlightHeld", Flags);
+                _panField = typeof(PrototypeScene).GetField("_pan", Flags);
+                _panTargetField = typeof(PrototypeScene).GetField("_panTarget", Flags);
+            }
+
+            // 接管手电 —— 否则 PrototypeScene 每帧按鼠标状态把手电冲掉
+            if (_scene != null)
+            {
+                _scene.FlashlightExternalControl = true;
+            }
+
             _running = true;
             _monitorSweepTimer = 0f;
             _sweepCamera = 0;
@@ -116,6 +179,12 @@ namespace NailongFNAF.UI
 
             _running = false;
             ReleaseEverything();
+
+            if (_scene != null)
+            {
+                _scene.FlashlightExternalControl = false;
+                _scene.ExternalFlashlightOn = false;
+            }
             LastAction = "停止";
             Debug.Log("[AutoPlayer] 自动通关停止");
         }
@@ -146,6 +215,26 @@ namespace NailongFNAF.UI
             }
 
             Think(Time.deltaTime);
+        }
+
+        /// <summary>
+        /// 手电放在 LateUpdate 写 —— 这是唯一不被覆盖的时机。
+        ///
+        /// PrototypeScene.ApplyFlashlight（Update 里跑）每帧都会拿
+        /// 「鼠标/Ctrl 是否按着」去修正 _flashlightHeld 和 gm.FlashlightOn。
+        /// AI 不能动鼠标，所以只要 PrototypeScene 跑在 AI 后面，AI 写的值立刻被冲掉。
+        ///
+        /// LateUpdate 在所有 Update 之后 —— 写进去的值能活到下一帧的
+        /// EnemyDirector.Update（它才读 gm.FlashlightOn 构造 EnemyContext）。
+        /// 代价是手电状态晚一帧生效，对 0.4 秒一轮的闪光完全够用。
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!_running)
+            {
+                return;
+            }
+
             ApplyFlashlightIntent();
         }
 
@@ -163,8 +252,38 @@ namespace NailongFNAF.UI
 
             bool lowPower = _gm.Power.Level < LowPowerThreshold;
 
-            // ── 0. 压制奶包（优先级最高，她动手会直接坑人）──
-            HandleNaibao(dt);
+            // ── 强制视角回正 ──
+            //
+            // 玩家转头是为了看侧门，**AI 不需要** —— 它读 brain 的状态就知道
+            // 哪边有人，比转头快且准。而转头有两个副作用：
+            //   · 正前方的噜噜只有 View==Front 时手电才照得到
+            //   · 转头会让画面偏，不利于观察门口
+            // 所以每帧都钉死在正前方，省掉所有转头相关的判断。
+            // 相机真的要转回来：写 _panTarget（视角是跟鼠标位置算的，
+            // gm.SetView 只改标记不转相机）
+            ForceFrontView();
+
+            // ── 噜噜到门口时，一律优先处理它 ──
+            //
+            // ⚠️ **通话期间 CanOperate() 是 false**，SetView / SetFlashlight /
+            // 开关门全都不生效。如果这时候噜噜堵在正门，AI 会「以为在闪，
+            // 实际手电压根打不开」，然后被它扑掉（踩过）。
+            // 所以只要它站在门口，电话的事往后放。
+            bool luluUrgent = LuluNeedsFlash();
+
+            if (luluUrgent)
+            {
+                // 正在通话就先挂断 —— 它比奶包重要
+                if (_gm.NaibaoTalking)
+                {
+                    _gm.EndNaibaoCall();
+                }
+            }
+            else
+            {
+                // ── 0. 压制奶包（她动手会直接坑人，但不急过门口的噜噜）──
+                HandleNaibao(dt);
+            }
 
             // ── 1. 侧门 ──
             bool leftThreat = HandleSide(Side.Left, lowPower);
@@ -386,21 +505,23 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            // ⚠️ 手电只在「监控放下 + 视角朝正前方」时才算数
-            // （EnemyContext.IsShiningAtFront）。视角不对闪一辈子也没用。
-            if (_gm.CurrentView != ViewSide.Front)
-            {
-                _gm.SetView(ViewSide.Front);
-            }
+            // 手电只在「监控放下 + 视角朝正前方」时才算数
+            // （EnemyContext.IsShiningAtFront）—— 视角在 Think 开头已经钉死了，
+            // 这里只要保证监控是放下的（LuluNeedsFlash 那条分支已经处理）。
 
             // 站到门口 + 还没闪够 → 开手电闪它
             // 提前闪没用（要它站到门口才算），所以只在 atDoor 时闪
-            _luluFlashTimer += dt;
 
-            // 闪 0.25 秒、灭 0.2 秒，循环。
-            // 节奏别太慢：噜噜在门口最多等 OutsideGraceSeconds（活动度满级才 7.5 秒），
-            // 要在这段时间里闪够 4 次。0.45 秒一轮 → 4 次约 1.8 秒，够用。
-            bool shouldBeOn = (_luluFlashTimer % 0.45f) < 0.25f;
+            // ⚠️ 用 unscaledTime 而不是自己累加 dt：
+            // dt 只有 Update 里给，而闪光要跨很多帧才能被 LuluBrain 看到
+            // （它只在「从灭到亮」的那一帧计数）。自己累加容易和实际帧不同步，
+            // 改用绝对时钟，相位稳定。
+            float now = Time.unscaledTime;
+
+            // 闪 0.22 秒、灭 0.18 秒 —— 一轮 0.4 秒，闪够 4 次约 1.6 秒。
+            // 不能更快：LuluBrain 靠「上升沿」计数（_wasShining 从 false 变 true），
+            // 一开一关必须各撑过至少一帧，否则它根本看不到这次闪光。
+            bool shouldBeOn = (now % 0.4f) < 0.22f;
 
             if (shouldBeOn != _luluFlashing)
             {
@@ -550,14 +671,17 @@ namespace NailongFNAF.UI
         /// </summary>
         private void ApplyFlashlightIntent()
         {
-            if (_gm == null || _setFlashlight == null)
+            if (_gm == null)
             {
                 return;
             }
 
-            if (_gm.FlashlightOn != _wantFlashlight)
+            // 一口气写进「AI 想要的手电状态」——
+            // PrototypeScene.ApplyFlashlight 在接管模式下会照它去设 gm.FlashlightOn，
+            // 不再被鼠标状态覆盖。
+            if (_scene != null)
             {
-                _setFlashlight.Invoke(_gm, new object[] { _wantFlashlight });
+                _scene.ExternalFlashlightOn = _wantFlashlight;
             }
         }
     }

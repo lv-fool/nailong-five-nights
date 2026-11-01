@@ -2205,9 +2205,72 @@ namespace NailongFNAF.UI
         /// 手电筒：按钮跟着监控收起来；光只在「亮着 + 朝正前方」时打出来。
         /// 顺带兜底松手 —— 抬起事件被系统吞掉时（切窗口等）按钮会粘住。
         /// </summary>
+        /// <summary>
+        /// AI 接管手电时为 true —— 这时 ApplyFlashlight 不再按鼠标推算，
+        /// 改为直接采用 <see cref="ExternalFlashlightOn"/>。
+        ///
+        /// 为什么必须这样：手电每帧按「鼠标/Ctrl 是否按着」重算并写回 gm.FlashlightOn，
+        /// 外部（AutoPlayer）无论怎么写都会被下一帧冲掉。
+        /// 与其和它抢，不如开个后门让它别管。
+        /// </summary>
+        public bool FlashlightExternalControl { get; set; }
+
+        /// <summary>AI 想要的手电状态（仅在 <see cref="FlashlightExternalControl"/> 为真时生效）。</summary>
+        public bool ExternalFlashlightOn { get; set; }
+
+        /// <summary>
+        /// 手电的视觉部分：光斑亮度、按钮明暗。
+        ///
+        /// 抽出来是为了让 AI 接管分支也能复用 —— 那条路只跳过了「按鼠标推算状态」，
+        /// 视觉表现照旧。
+        /// </summary>
+        private void ApplyFlashlightVisuals(GameManager gm, bool usable)
+        {
+            if (_flashlightButton == null)
+            {
+                return;
+            }
+
+            bool shiningFront = gm.FlashlightOn && usable && gm.CurrentView == ViewSide.Front;
+            float target = shiningFront ? FlashlightGlowAlpha : 0f;
+
+            _flashlightGlowAlpha = Mathf.MoveTowards(_flashlightGlowAlpha, target,
+                Time.deltaTime * 5f);
+
+            if (_flashlightGlow != null)
+            {
+                Color glow = _flashlightGlow.color;
+                glow.a = _flashlightGlowAlpha;
+                _flashlightGlow.color = glow;
+                _flashlightGlow.enabled = _flashlightGlowAlpha > 0.001f;
+            }
+
+            if (_flashlightButton.sprite != null && _flashlightButton.sprite.name == "ui_flashlight")
+            {
+                _flashlightButton.color = gm.FlashlightOn
+                    ? Color.white
+                    : new Color(0.55f, 0.55f, 0.55f, 0.85f);
+            }
+        }
+
         private void ApplyFlashlight(GameManager gm, bool monitorUp, bool locked)
         {
             bool usable = !monitorUp && !locked;
+
+            // ── AI 接管：跳过鼠标推算，直接采用外部状态 ──
+            if (FlashlightExternalControl)
+            {
+                bool want = usable && ExternalFlashlightOn;
+
+                if (want != _flashlightHeld)
+                {
+                    _flashlightHeld = want;
+                    gm.SetFlashlight(want);
+                }
+
+                ApplyFlashlightVisuals(gm, usable);
+                return;
+            }
 
             _flashlightGroup.alpha = usable ? 1f : 0f;
             _flashlightGroup.blocksRaycasts = usable;
