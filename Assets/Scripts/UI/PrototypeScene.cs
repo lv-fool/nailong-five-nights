@@ -5451,6 +5451,19 @@ namespace NailongFNAF.UI
         /// </summary>
         private float NearestEnemyDistance()
         {
+            return NearestEnemyDistance(out _);
+        }
+
+        /// <summary>
+        /// 同上，但**同时告诉你它在哪一侧** —— 脚步声要按这个分左右声道。
+        ///
+        /// <paramref name="pan"/>：-1 = 左边来的，0 = 正前方（噜噜），+1 = 右边来的。
+        /// 没有敌人在动时返回 -1，pan 给 0。
+        /// </summary>
+        private float NearestEnemyDistance(out float pan)
+        {
+            pan = 0f;
+
             if (_enemyDirector == null)
             {
                 return -1f;
@@ -5471,9 +5484,25 @@ namespace NailongFNAF.UI
                 if (d < 0f) { d = 0f; }
                 if (d > 1f) { d = 1f; }
 
-                if (d > nearest)
+                if (d <= nearest)
                 {
-                    nearest = d;
+                    continue;
+                }
+
+                nearest = d;
+
+                // 这只就是「离你最近的那只」，脚步该从它那一侧响。
+                // 噜噜走正门 → 不偏；门类敌人按 Side 分左右。
+                var door = brain as DoorEnemyBrain;
+
+                if (door != null)
+                {
+                    pan = door.Side == Side.Left ? -1f : 1f;
+                }
+                else
+                {
+                    // 正门那只（噜噜）—— 声音从正前方来，声道居中
+                    pan = 0f;
                 }
             }
 
@@ -5482,7 +5511,7 @@ namespace NailongFNAF.UI
 
         private void UpdateFootsteps()
         {
-            float distance = NearestEnemyDistance();
+            float distance = NearestEnemyDistance(out float sidePan);
 
             // 太远就不该听见 —— 低于这个门槛一律静音
             const float AudibleFrom = 0.22f;
@@ -5495,7 +5524,7 @@ namespace NailongFNAF.UI
                     return;
                 }
 
-                EmitFootstep(distance);
+                EmitFootstep(distance, sidePan);
                 _footstepLeft--;
 
                 if (_footstepLeft > 0)
@@ -5534,7 +5563,7 @@ namespace NailongFNAF.UI
             // 起一串：2~4 步，第一步随机左右
             _footstepLeft = Random.Range(2, 5);
             _footstepRightFoot = Random.value < 0.5f;
-            EmitFootstep(distance);
+            EmitFootstep(distance, sidePan);
             _footstepLeft--;
             _footstepNextAt = Time.time + FootstepStepGap;
         }
@@ -5543,7 +5572,7 @@ namespace NailongFNAF.UI
         /// 放一声脚步。**响度随距离线性上升**：
         /// 刚进走廊时几乎听不见（0.15），站到门口就是满音量。
         /// </summary>
-        private void EmitFootstep(float distance)
+        private void EmitFootstep(float distance, float sidePan)
         {
             if (_audio == null)
             {
@@ -5555,11 +5584,24 @@ namespace NailongFNAF.UI
             // 听感上就是「贴着耳朵踩了一脚」。
             float volume = Mathf.Lerp(0.45f, 1.35f, Mathf.Clamp01(distance));
 
-            _audio.PlayFootstep(_footstepRightFoot, volume);
+            // ── 立体声定位 ──
+            // 两个因素叠加：
+            //   sidePan  = 敌人在哪一侧（-1 左 / 0 正前 / +1 右），决定**基准位置**
+            //   左右脚    在基准位置附近小幅交错（±0.18），模拟两只脚落地的细微差
+            //
+            // 只用左右脚那点偏移不够 —— 左边来的敌人听起来还是从中间响。
+            // 所以必须叠加 sidePan。
+            float footOffset = _footstepRightFoot ? FootstepFootPan : -FootstepFootPan;
+            float pan = Mathf.Clamp(sidePan + footOffset, -1f, 1f);
+
+            _audio.PlayFootstep(_footstepRightFoot, volume, pan);
 
             // 交替
             _footstepRightFoot = !_footstepRightFoot;
         }
+
+        /// <summary>左右脚在声场里的交错幅度（叠加在敌人方位之上）。</summary>
+        private const float FootstepFootPan = 0.18f;
 
         /// <summary>（旧的「附近就无规则响」判据，保留给别处用）</summary>
 

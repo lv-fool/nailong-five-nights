@@ -484,6 +484,26 @@ namespace NailongFNAF.Audio
         /// </summary>
         public void PlayFootstep(bool rightFoot, float volumeScale)
         {
+            PlayFootstep(rightFoot, volumeScale, rightFoot ? FootstepPan : -FootstepPan);
+        }
+
+        /// <summary>
+        /// 脚步声的立体声偏移量（0 = 正中，1 = 全右）。
+        ///
+        /// 为什么需要：左右脚步走的是**同一条 2D 音源**，位置一样 →
+        /// 不设 pan 的话两下听起来都从脑门正中出来，左右白分。
+        /// 给个 0.55 既分得清左右，又不至于像贴着一只耳朵响。
+        /// </summary>
+        private const float FootstepPan = 0.55f;
+
+        /// <summary>
+        /// 带立体声定位的脚步。
+        ///
+        /// <paramref name="pan"/>：-1 = 全左，0 = 正中，+1 = 全右。
+        /// 用于「敌人从哪边来」—— 左边来的脚步就该从左边响。
+        /// </summary>
+        public void PlayFootstep(bool rightFoot, float volumeScale, float pan)
+        {
             AudioClip clip = rightFoot ? _sfxFootstepRight : _sfxFootstepLeft;
 
             // 新素材缺失时退回原来那条单声道，不至于完全没声
@@ -500,7 +520,16 @@ namespace NailongFNAF.Audio
             if (volumeScale < 0f) { volumeScale = 0f; }
             if (volumeScale > 1f) { volumeScale = 1f; }
 
+            if (pan < -1f) { pan = -1f; }
+            if (pan > 1f) { pan = 1f; }
+
+            // ⚠️ PlayOneShot 用的是**播放这一瞬间**的音源参数。
+            // 所以先设 panStereo 再播，播完立刻复位 ——
+            // 不复位的话后面别的音效（门、灯）会继承这个左右偏移。
+            float before = _footstepSource.panStereo;
+            _footstepSource.panStereo = pan;
             _footstepSource.PlayOneShot(clip, _sfxVolume * volumeScale);
+            _footstepSource.panStereo = before;
         }
 
         public void PlayPowerOut()
