@@ -366,6 +366,37 @@ namespace NailongFNAF.UI
         /// </summary>
         private void HandleMonitor(float dt)
         {
+            var nailong = _director.GetBrain(EnemyId.Nailong) as NailongBrain;
+
+            // ── 判断「现在开监控还有没有意义」──
+            //
+            // 奶龙只有**偷电态**才需要盯：被看到才停手换位。
+            // 一旦转成**进攻态**，它就不再偷电了 —— 这时开监控纯属白烧电
+            // （监控每开着 = 耗电倍率 +1 档），而且它在走右门、看监控也帮不上忙。
+            //
+            // 所以：进攻态 / 已经到门口 / 已经在扑 → 一律不开监控。
+            bool nailongStealing = nailong != null
+                && nailong.Mode == NailongMode.Stealing
+                && !nailong.IsAttacking;
+
+            if (!nailongStealing)
+            {
+                // 没有需要盯的目标 → 收起监控，一直保持最省电
+                if (_gm.MonitorUp)
+                {
+                    SetMonitor(false);
+                    LastAction = "奶龙已进攻，收起监控";
+                }
+                else
+                {
+                    LastAction = "无需监控，保持省电";
+                }
+
+                _monitorSweepTimer = 0f;
+                _lookTimer = 0f;
+                return;
+            }
+
             if (!_gm.MonitorUp)
             {
                 _monitorSweepTimer += dt;
@@ -375,7 +406,7 @@ namespace NailongFNAF.UI
                     _monitorSweepTimer = 0f;
                     _lookTimer = 0f;
                     SetMonitor(true);
-                    LastAction = "抬头看监控";
+                    LastAction = "抬头看奶龙";
                 }
 
                 return;
@@ -384,18 +415,13 @@ namespace NailongFNAF.UI
             // ── 已抬头：把看的时间单独计时，到点就放下 ──
             _lookTimer += dt;
 
-            var nailong = _director.GetBrain(EnemyId.Nailong) as NailongBrain;
-
-            if (nailong != null && nailong.Mode == NailongMode.Stealing)
+            // 跳到它所在的机位 —— 被看到它才停手换位
+            if (_gm.CurrentCameraIndex != nailong.CameraIndex)
             {
-                // 跳到它所在的机位 —— 被看到它才停手换位
-                if (_gm.CurrentCameraIndex != nailong.CameraIndex)
-                {
-                    _gm.SetCamera(nailong.CameraIndex);
-                }
-
-                LastAction = "盯住奶龙 CAM" + (nailong.CameraIndex + 1);
+                _gm.SetCamera(nailong.CameraIndex);
             }
+
+            LastAction = "盯住奶龙 CAM" + (nailong.CameraIndex + 1);
 
             if (_lookTimer >= MonitorLookSeconds)
             {
