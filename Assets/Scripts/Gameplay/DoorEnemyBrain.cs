@@ -413,6 +413,19 @@ namespace NailongFNAF.Gameplay
             // 否则一步 Tick(3f) 会直接把 2 秒的最后一搏一起冲过去、当场退走。
             float remaining = dt;
 
+            // ⚠️ **被门挡住的瞬间就直接进入最后一搏**（用户 2026-11-03 定）。
+            //
+            // 早先是「走到门口先攒一个移动机会（约 5 秒），攒满发现门关着才开始计时」——
+            // 等于白白给玩家 5 秒免费时间。现在到门口发现门关着，
+            // DoorTimer 立刻填满，最后一搏马上开始。
+            //
+            // 只在「刚跨进最后一格」那一下补 —— 用 DoorTimer == 0 判断：
+            // 万一它被挡住又没退（比如中途开门重置），不该每帧都重填。
+            if (Stage >= MaxStage && DoorTimer <= 0f && ctx.IsDoorClosed(Side))
+            {
+                DoorTimer = DoorWindow;
+            }
+
             // 每帧先更新「门这一帧是开还是关」，供最后一搏检测上升沿用。
             // 必须在攒移动机会之前更新，否则「攒满那一帧门刚好打开」会漏判。
             bool doorClosedNow = ctx.IsDoorClosed(Side);

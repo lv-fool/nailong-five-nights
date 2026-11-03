@@ -177,14 +177,18 @@ namespace NailongFNAF.Tests
             AdvanceToStage(brain, ctx, 2);
             Assert.AreEqual(2, brain.Stage);
 
-            // 刚过 0.1 秒 —— 还在攒移动机会，不该退
+            // ⚠️ 2026-11-03 起：**被门挡住的瞬间就进最后一搏**，不再先等移动机会。
+            // 所以 0.1 秒后它已经在最后一搏里了 ——
+            // 原来这里断言「还在攒移动机会」，语义已经不成立。
             brain.Tick(0.1f, ctx);
-            Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
+            Assert.AreEqual(2, brain.Stage, "不该退");
+            Assert.IsTrue(brain.InLastChance, "到门口发现门关着，应当立刻进最后一搏");
             Assert.IsFalse(brain.RetreatedThisTick);
+            Assert.IsFalse(brain.IsAttacking);
 
-            // 攒满移动机会 —— 但缓冲还没走完
-            brain.Tick(turn, ctx);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
+            // 继续走一小段 —— 最后一搏还没走完，仍然站着
+            brain.Tick(brain.LastChanceSeconds * 0.3f, ctx);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完");
             Assert.IsFalse(brain.RetreatedThisTick);
             Assert.IsFalse(brain.IsAttacking);
 
@@ -425,9 +429,11 @@ namespace NailongFNAF.Tests
 
             AdvanceToStage(brain, closed, 2);
 
-            // 攒满移动机会 + 已经在最后一搏里走了 1 秒
-            brain.Tick(turn + 1f, closed);
+            // ⚠️ 2026-11-03 起门关着会**立刻**进最后一搏（不等移动机会）。
+            // AdvanceToStage 已经让它站在门口，这 1 秒就是在最后一搏里走的。
+            brain.Tick(1f, closed);
             Assert.AreEqual(2, brain.Stage, "最后一搏没走完，还站着");
+            Assert.IsTrue(brain.InLastChance);
 
             // 玩家开门 —— 这 2 秒重置
             brain.Tick(0.1f, opened);
@@ -460,8 +466,8 @@ namespace NailongFNAF.Tests
             var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
             AdvanceToStage(brain, closed, 2);
 
-            // 攒满移动机会 + 最后一搏走了一半
-            brain.Tick(turn + 1f, closed);
+            // 门关着 → 立刻进最后一搏，走 1 秒（还没满）
+            brain.Tick(1f, closed);
             Assert.AreEqual(2, brain.Stage);
 
             // 玩家开门 → 重置
@@ -878,15 +884,14 @@ namespace NailongFNAF.Tests
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
 
-            // 关门只是拖住它：移动机会 + 最后一搏 2 秒都走完才退
+            // ⚠️ 2026-11-03 起：门关着会**立刻**进最后一搏（不等移动机会）。
             brain.Tick(0.1f, closed);
-            Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
+            Assert.AreEqual(2, brain.Stage, "不该退");
+            Assert.IsTrue(brain.InLastChance, "门关着应当立刻进最后一搏");
 
-            // ⚠️ 用**实例的** DoorGraceSeconds，不要用常量：
-            // 奶龙的窗口 2026-10-31 从 3.02s 提到 4.98s（对齐牛来），
-            // 而 DoorEnemyBrain.DefaultDoorGraceSeconds 是 4.97s —— 差 0.01s 攒不满。
-            brain.Tick(brain.DoorGraceSeconds, closed);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
+            // 最后一搏还没走完 —— 仍然站着
+            brain.Tick(brain.LastChanceSeconds * 0.5f, closed);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完");
 
             brain.Tick(brain.LastChanceSeconds, closed);
             Assert.AreEqual(0, brain.Stage);
@@ -958,13 +963,14 @@ namespace NailongFNAF.Tests
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
 
-            // 关门不再立刻退 —— 要等移动机会 + 最后一搏 2 秒
+            // 关门不再立刻退 —— 但 2026-11-03 起会**立刻**进最后一搏（不等移动机会）
             brain.Tick(0.1f, closed);
-            Assert.AreEqual(2, brain.Stage, "还没到移动机会，继续站在门口");
+            Assert.AreEqual(2, brain.Stage, "继续站在门口");
+            Assert.IsTrue(brain.InLastChance);
 
-            // 攒满移动机会 —— 但最后一搏还没走完，仍不退
-            brain.Tick(brain.DoorGraceSeconds, closed);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
+            // 最后一搏还没走完 —— 仍不退
+            brain.Tick(brain.LastChanceSeconds * 0.5f, closed);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完");
 
             // 最后一搏走完、门还关着 → 退回偷电
             brain.Tick(brain.LastChanceSeconds, closed);
