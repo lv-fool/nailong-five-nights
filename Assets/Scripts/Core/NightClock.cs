@@ -98,17 +98,14 @@ namespace NailongFNAF.Core
         /// <summary>
         /// 用自定义节奏创建，并指定是否永夜模式。
         ///
-        /// ⚠️ 普通夜会**直接从 <see cref="StartHour"/> 点开始**（现在是 3AM）——
-        /// 这里必须设 ElapsedSeconds / CurrentHour，不能只留默认 0：
-        /// GameManager.Restart() 是 `new NightClock(...)` 造时钟的，
-        /// 根本不走 Reset()，只在构造函数里设才生效。
+        /// 每一局都从**午夜 0 点**开始（12AM → 6AM 完整打完）。
+        /// 「3AM 之后变凶」是另一回事，见 <see cref="BoostFromHour"/> ——
+        /// 它只抬难度，不改时钟起点。
         /// </summary>
         public NightClock(float secondsPerHour, bool endless)
         {
             SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
             Endless = endless;
-
-            // 从午夜 0 点开始（一直是 0，别再改）
         }
 
         /// <summary>
