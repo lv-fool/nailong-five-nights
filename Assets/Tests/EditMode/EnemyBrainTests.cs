@@ -355,7 +355,11 @@ namespace NailongFNAF.Tests
         {
             // 最危险的场景：玩家在门口反复开关门试探。
             // 早先「攒满后只要门开着就动手」的写法会让它一开门就被判动手，
-            // 和「开门重置 2 秒」的设计自相矛盾。
+            // 和「开门重置」的设计自相矛盾。
+            //
+            // ⚠️ 这里测的是**开门那一瞬间不会动手**，不是「永远不会动手」——
+            // 只要一直重置、最后一搏始终走不完，就不会动手。
+            // 「走完时门开着 → 动手」由 读数途中关门再开_最后一搏走完时门开着就动手 盯着。
             const float turn = 3f;
             var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1),
@@ -536,15 +540,11 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 读数途中关门又开门_关过门就锁存不会动手()
+        public void 读数途中关门再开_最后一搏走完时门开着就动手()
         {
-            // ⚠️ 这条是这次改动的主要动机。
-            //
-            // 旧行为（锁存之前）：读数走到一半关门、走完前又打开 →
-            // 读数攒满那一帧门恰好是开着的 → **当场扑上来**，前面关的全白费。
-            // 玩家会以为「我明明关了」，实际白关还送命。
-            //
-            // 新行为：关过门就锁存，读数走完也不会动手，中途开门顶多重置最后一搏。
+            // 这是「关门把判定点挪走」之后必须守住的下半条：
+            // 关门只是把判定从「读数末尾」挪到「最后一搏末尾」，**不是免疫**。
+            // 关门后又把门打开、一直开着，最后一搏走完那一刻门是开着的 → 当场扑。
             const float grace = 5f;
             var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1),
@@ -559,26 +559,51 @@ namespace NailongFNAF.Tests
             brain.Tick(0.1f, closed);        // 关门 → 进最后一搏
             Assert.IsTrue(brain.InLastChance);
 
-            // 又打开 —— 只许重置，不许动手
+            // 又打开 —— 只许重置，那一瞬间不许动手
             brain.Tick(0.1f, opened);
-            Assert.IsFalse(brain.IsAttacking, "开门只是重置，不该立刻被抓");
+            Assert.IsFalse(brain.IsAttacking, "开门只是重置计时，不该立刻被抓");
 
-            // 一路开着门走过「读数本该攒满」的时刻，全程都不许动手
+            // 门就这么开着 —— 最后一搏走完那一刻门开着 → 该动手了
             float elapsed = 0f;
-            for (int i = 0; i < 60; i++)
+            bool attacked = false;
+            for (int i = 0; i < 60 && !attacked; i++)
             {
                 brain.Tick(0.1f, opened);
                 elapsed += 0.1f;
-                Assert.IsFalse(brain.IsAttacking,
-                    "关过门就锁存了，读数走完也不该动手（已过 " + elapsed.ToString("F1") + "s）");
-
-                if (brain.Stage == 0)
-                {
-                    break;
-                }
+                attacked = brain.IsAttacking;
             }
 
-            Assert.AreEqual(0, brain.Stage, "最终还是退走（开门只是让它多站一会儿）");
+            Assert.IsTrue(attacked,
+                "最后一搏走完时门还开着，应当动手（等了 " + elapsed.ToString("F1") + "s）");
+            Assert.IsFalse(brain.RetreatedThisTick, "动手和退走不能同时发生");
+        }
+
+        [Test]
+        public void 最后一搏走完时门关着就退走()
+        {
+            // 和上一条配对：同样进最后一搏，同样走完，只差门最后关没关。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            brain.Tick(2f, opened);
+            brain.Tick(0.1f, closed);        // 关门 → 进最后一搏
+            Assert.IsTrue(brain.InLastChance);
+
+            // 中途开一下再关回去（重置一次），最后仍然是关着的
+            brain.Tick(0.1f, opened);
+            Assert.IsFalse(brain.IsAttacking, "开门那一瞬间不该动手");
+            brain.Tick(brain.LastChanceSeconds + 0.1f, closed);
+
+            Assert.IsFalse(brain.IsAttacking, "走完时门关着，不许动手");
+            Assert.AreEqual(0, brain.Stage, "门关着就该退走");
+            Assert.IsTrue(brain.RetreatedThisTick);
         }
 
         [Test]
