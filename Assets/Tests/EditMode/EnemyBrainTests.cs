@@ -500,6 +500,111 @@ namespace NailongFNAF.Tests
             Assert.IsTrue(brain.IsAttacking, "门开着，攒满就扑上来");
         }
 
+        // ---------------------------------------------------------------
+        // 读数途中关门（用户 2026-11-03 追加：「五秒内关门了也要进最后一搏」）
+        // ---------------------------------------------------------------
+
+        [Test]
+        public void 读数途中关门_立刻进最后一搏不再等读数走完()
+        {
+            // 旧行为：门开着的读数走到一半才关门，还得把剩下几秒读完才进最后一搏。
+            // 新行为：门一关就立刻进 —— 等于「关过门」当场生效。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            // 门开着走 2 秒 —— 读数走了 2/5，还不到最后一搏
+            brain.Tick(2f, opened);
+            Assert.IsFalse(brain.InLastChance, "门开着，读数还没走完");
+            Assert.IsFalse(brain.IsAttacking);
+
+            // 关门 → 立刻进最后一搏，不用再等剩下的 3 秒
+            brain.Tick(0.1f, closed);
+            Assert.IsTrue(brain.InLastChance, "门一关就该进最后一搏，不该等读数走完");
+            Assert.IsFalse(brain.IsAttacking, "关门不该被判动手");
+
+            // 最后一搏走完 → 退走
+            brain.Tick(brain.LastChanceSeconds + 0.1f, closed);
+            Assert.AreEqual(0, brain.Stage, "最后一搏走完就退走");
+            Assert.IsFalse(brain.IsAttacking);
+        }
+
+        [Test]
+        public void 读数途中关门又开门_关过门就锁存不会动手()
+        {
+            // ⚠️ 这条是这次改动的主要动机。
+            //
+            // 旧行为（锁存之前）：读数走到一半关门、走完前又打开 →
+            // 读数攒满那一帧门恰好是开着的 → **当场扑上来**，前面关的全白费。
+            // 玩家会以为「我明明关了」，实际白关还送命。
+            //
+            // 新行为：关过门就锁存，读数走完也不会动手，中途开门顶多重置最后一搏。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            brain.Tick(2f, opened);          // 读数走到 2/5
+            brain.Tick(0.1f, closed);        // 关门 → 进最后一搏
+            Assert.IsTrue(brain.InLastChance);
+
+            // 又打开 —— 只许重置，不许动手
+            brain.Tick(0.1f, opened);
+            Assert.IsFalse(brain.IsAttacking, "开门只是重置，不该立刻被抓");
+
+            // 一路开着门走过「读数本该攒满」的时刻，全程都不许动手
+            float elapsed = 0f;
+            for (int i = 0; i < 60; i++)
+            {
+                brain.Tick(0.1f, opened);
+                elapsed += 0.1f;
+                Assert.IsFalse(brain.IsAttacking,
+                    "关过门就锁存了，读数走完也不该动手（已过 " + elapsed.ToString("F1") + "s）");
+
+                if (brain.Stage == 0)
+                {
+                    break;
+                }
+            }
+
+            Assert.AreEqual(0, brain.Stage, "最终还是退走（开门只是让它多站一会儿）");
+        }
+
+        [Test]
+        public void 读数走完那一帧才关门_也算赶上了()
+        {
+            // 边界：读数刚好要攒满的那一帧门才关上。
+            // 关门判定跑在攒满之前，所以赶得上 —— 旧行为这里会当场扑上来。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            brain.Tick(grace - 0.05f, opened);   // 差 0.05 秒攒满
+            Assert.IsFalse(brain.InLastChance, "还差一点，不该已经进最后一搏");
+            Assert.IsFalse(brain.IsAttacking);
+
+            brain.Tick(0.05f, closed);           // 临门一脚关上
+            Assert.IsTrue(brain.InLastChance, "赶上了，该进最后一搏");
+            Assert.IsFalse(brain.IsAttacking, "关门了就不该动手");
+        }
+
         [Test]
         public void 门类敌人还在走廊时不会动手()
         {
