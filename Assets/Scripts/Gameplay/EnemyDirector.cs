@@ -515,6 +515,27 @@ namespace NailongFNAF.Gameplay
             get { return _brains.Values; }
         }
 
+        /// <summary>
+        /// 因为「每局从 3AM 开始」而补的那一级难度。
+        ///
+        /// **只给本来就不为 0 的敌人 +1** —— 0 表示「这一夜它压根不来」，
+        /// 抬到 1 等于把它请出场，会破坏每夜的角色安排。
+        ///
+        /// 上限是 <see cref="EnemyBrain.MaxActivityLevel"/>，别溢出去。
+        /// </summary>
+        private static int BoostForLateStart(int level)
+        {
+            if (level <= 0)
+            {
+                return level < 0 ? 0 : level;
+            }
+
+            int boosted = level + 1;
+            return boosted > EnemyBrain.MaxActivityLevel
+                ? EnemyBrain.MaxActivityLevel
+                : boosted;
+        }
+
         private void ApplyDifficulty()
         {
             foreach (var pair in _brains)
@@ -527,6 +548,12 @@ namespace NailongFNAF.Gameplay
                 {
                     level = (int)System.Math.Round(level * (1f + _overdrive));
                 }
+
+                // 「从 3AM 开局」的补偿：难度表是按**整夜**配的，
+                // 现在少打了 12AM~3AM 那三段（占一半时长），等于白白少掉一半压力。
+                // 所以每个**本来就不为 0** 的敌人 +1 —— 已经是 0 的（比如第 1 夜的奶龙）
+                // 保持 0，不然「这一夜它不来」这个设计就被破坏了。
+                level = BoostForLateStart(level);
 
                 pair.Value.SetActivityLevel(level);
             }

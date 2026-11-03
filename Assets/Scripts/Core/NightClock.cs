@@ -95,12 +95,33 @@ namespace NailongFNAF.Core
         {
         }
 
-        /// <summary>用自定义节奏创建，并指定是否永夜模式。</summary>
+        /// <summary>
+        /// 用自定义节奏创建，并指定是否永夜模式。
+        ///
+        /// ⚠️ 普通夜会**直接从 <see cref="StartHour"/> 点开始**（现在是 3AM）——
+        /// 这里必须设 ElapsedSeconds / CurrentHour，不能只留默认 0：
+        /// GameManager.Restart() 是 `new NightClock(...)` 造时钟的，
+        /// 根本不走 Reset()，只在构造函数里设才生效。
+        /// </summary>
         public NightClock(float secondsPerHour, bool endless)
         {
             SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
             Endless = endless;
+
+            if (!Endless)
+            {
+                ElapsedSeconds = StartHour * SecondsPerHour;
+                CurrentHour = StartHour;
+            }
         }
+
+        /// <summary>
+        /// 每一局从第几个小时开始（0 起）。**3 = 从 3AM 开始**（用户 2026-11-03 定）——
+        /// 跳过 12AM~3AM 那三段，直接从中段进。
+        ///
+        /// 永夜模式不受影响（它是无限长的，没有「开局从几点」的概念）。
+        /// </summary>
+        public const int StartHour = 3;
 
         /// <summary>推进时间。天亮之后不再变化（永夜模式不会天亮）。</summary>
         public void Tick(float deltaSeconds)
@@ -126,11 +147,23 @@ namespace NailongFNAF.Core
             CurrentHour = Endless ? hour : (hour > HoursPerNight ? HoursPerNight : hour);
         }
 
-        /// <summary>回到午夜 0 点，用于开始新的一夜。</summary>
+        /// <summary>
+        /// 开始新的一夜 —— 从 <see cref="StartHour"/> 点开始（现在是 3AM）。
+        ///
+        /// 永夜模式仍从 0 起（它没有天亮，也不该跳过时长）。
+        /// </summary>
         public void Reset()
         {
-            ElapsedSeconds = 0f;
-            CurrentHour = 0;
+            if (Endless)
+            {
+                ElapsedSeconds = 0f;
+                CurrentHour = 0;
+                return;
+            }
+
+            float start = StartHour * SecondsPerHour;
+            ElapsedSeconds = start;
+            CurrentHour = StartHour;
         }
     }
 }
