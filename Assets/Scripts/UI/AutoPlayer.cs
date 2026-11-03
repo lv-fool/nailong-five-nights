@@ -76,18 +76,9 @@ namespace NailongFNAF.UI
         /// </summary>
         private System.Reflection.FieldInfo _flashlightHeld;
 
-        /// <summary>
-        /// PrototypeScene._pan —— 相机实际转了多少（-1 = 满左，0 = 正前，+1 = 满右）。
-        ///
-        /// ⚠️ 视角是**跟着鼠标位置**算的（PrototypeScene.Update 里
-        /// `_panTarget = (mouseX - 0.5) / PanSaturationK`），gm.SetView() 只改
-        /// 「现在看向哪边」这个标记、不转相机。AI 没法动鼠标，所以必须直接写这个字段，
-        /// 否则噜噜到门口时 AI 以为在照它、实际相机还歪在侧边、手电根本打不中。
-        /// </summary>
-        private System.Reflection.FieldInfo _panField;
-
-        /// <summary>同上，_panTarget 是目标值。</summary>
-        private System.Reflection.FieldInfo _panTargetField;
+        // 注：早先这里还有 _pan / _panTarget 两个反射字段，用来每帧把视角钉在正前方。
+        // 2026-11-03 用户改成「只有闪手电时才回正」，改走 PrototypeScene.ViewExternalControl
+        // 那个正式开关，反射字段就没用了 —— 别再捡回来，直接写 _pan 会被 UpdateView 冲掉。
 
         private static readonly System.Reflection.BindingFlags Flags =
             System.Reflection.BindingFlags.Instance |
@@ -95,30 +86,31 @@ namespace NailongFNAF.UI
             System.Reflection.BindingFlags.NonPublic;
 
         /// <summary>
-        /// 把视角钉死在正前方。
+        /// 把手电要照的那一段视角收回正前方（**只在闪手电期间**用）。
         ///
         /// 两件事都要做：
-        ///   · _panTarget = 0 —— 相机真转回来（视角是跟鼠标位置算的）
-        ///   · gm.SetView(Front) —— 让「现在看向哪边」这个标记也一致，
-        ///     因为手电判定和敌人逻辑读的是它
+        ///   · 让 PrototypeScene 别再按鼠标算转头（ViewExternalControl）——
+        ///     否则它在 Update 里每帧重算 _panTarget，外面写的值立刻被冲掉
+        ///   · gm.SetView(Front) —— 噜噜认的是这个标记（EnemyContext.IsShiningAtFront）
+        ///
+        /// ⚠️ 用户 2026-11-03 定：**只有闪手电的时候**才回正，其余时间视角归玩家。
+        /// 早先这里每帧无条件钉死正前方，等于把玩家唯一的操作自由也抢了。
         /// </summary>
-        private void ForceFrontView()
+        private void SetFrontViewHold(bool hold)
         {
-            // 正在「转头看门」就朝那边偏，否则回正前方
-            float want = _turnPeekLeft > 0f ? _turnPeekSide * TurnPeekPan : 0f;
-
-            if (_panTargetField != null && _scene != null)
+            if (_scene != null)
             {
-                _panTargetField.SetValue(_scene, want);
+                _scene.ViewExternalControl = hold;
             }
 
-            if (_panField != null && _scene != null)
+            if (!hold)
             {
-                _panField.SetValue(_scene, want);
+                return;
             }
 
-            // ⚠️ CurrentView 始终保持 Front —— 它决定「手电照不照得到正门」，
-            // 跟画面偏不偏是两回事。转头只是视觉反馈，不该让手电失效。
+            // CurrentView 由 PrototypeScene.UpdateView 按 _pan 反推，
+            // 我们刚把手电接管起来，标记立刻改成 Front —— 手电这一帧就生效，
+            // 不用等镜头平滑转回来（转的过程玩家看得见，判定不用等它）。
             if (_gm.CurrentView != ViewSide.Front)
             {
                 _gm.SetView(ViewSide.Front);
@@ -130,7 +122,11 @@ namespace NailongFNAF.UI
         ///
         /// 早先会朝关的那侧偏 ±0.55（约 38°），想让玩家看见「AI 转头去关门」。
         /// 但手电是**贴在桌面世界点上**的，相机一转它就跟着画面跑出原来位置，
-        /// 看起来像「手电不固定了」。用户要的是 AI 模式下视角稳住不动。
+        /// 看起来像「手电不固定了」。
+        ///
+        /// 2026-11-03 又补了一条更硬的理由：**AI 代打期间视角默认归玩家**，
+        /// 关个门就抢镜头属于越权。现在整份代码里唯一允许动视角的地方
+        /// 是闪手电（见 SetFrontViewHold）。
         ///
         /// 留着这个空方法是为了调用点不用改，也不容易再被误加回来。
         /// </summary>
@@ -138,22 +134,6 @@ namespace NailongFNAF.UI
         {
             // 故意留空
         }
-
-        /// <summary>
-        /// 临时转头 —— 关某侧门时朝那边偏一下，让玩家看见「我去关门了」。
-        ///
-        /// 单位秒；> 0 期间 _pan 会被拉到 TurnPeekPan，归零后自动回正前方。
-        /// </summary>
-        private float _turnPeekLeft;
-
-        /// <summary>这一下转头朝哪边（-1 左 / +1 右）。</summary>
-        private float _turnPeekSide;
-
-        /// <summary>转头幅度 —— 0.55 差不多是「明显偏过去但还能看见正门」。别给 1，那是满转。</summary>
-        private const float TurnPeekPan = 0.55f;
-
-        /// <summary>转头停留多久（秒）。太短看不见，太长影响后续判断。</summary>
-        private const float TurnPeekSeconds = 0.45f;
 
         /// <summary>最近一次决策的说明，供调试面板显示。</summary>
         public string LastAction { get; private set; }
@@ -187,8 +167,6 @@ namespace NailongFNAF.UI
             if (_scene != null)
             {
                 _flashlightHeld = typeof(PrototypeScene).GetField("_flashlightHeld", Flags);
-                _panField = typeof(PrototypeScene).GetField("_pan", Flags);
-                _panTargetField = typeof(PrototypeScene).GetField("_panTarget", Flags);
             }
 
             // 接管手电 —— 否则 PrototypeScene 每帧按鼠标状态把手电冲掉
@@ -219,6 +197,10 @@ namespace NailongFNAF.UI
             {
                 _scene.FlashlightExternalControl = false;
                 _scene.ExternalFlashlightOn = false;
+
+                // ⚠️ 视角接管也一定要放掉 —— 漏了这行的话，停止 AI 之后
+                // ViewExternalControl 还停在 true，玩家再也没法按鼠标转头（永久锁正前方）。
+                _scene.ViewExternalControl = false;
             }
             LastAction = "停止";
             Debug.Log("[AutoPlayer] 自动通关停止");
@@ -244,6 +226,16 @@ namespace NailongFNAF.UI
                 {
                     _running = false;
                     LastAction = _gm.HasSurvived ? "通关" : "被抓";
+
+                    // ⚠️ 这一夜结束了也必须把两个「外部接管」放掉 ——
+                    // 否则下一局开局视角还被锁在正前方，玩家怎么晃鼠标都不转头。
+                    // （这里不能调 Stop()：它有 _running 早退，而上面刚把它设成 false。）
+                    if (_scene != null)
+                    {
+                        _scene.FlashlightExternalControl = false;
+                        _scene.ExternalFlashlightOn = false;
+                        _scene.ViewExternalControl = false;
+                    }
                 }
 
                 return;
@@ -287,22 +279,19 @@ namespace NailongFNAF.UI
 
             bool lowPower = _gm.Power.Level < LowPowerThreshold;
 
-            // ── 强制视角回正 ──
+            // ── 视角：平时完全交给玩家 ──
             //
-            // 玩家转头是为了看侧门，**AI 不需要** —— 它读 brain 的状态就知道
-            // 哪边有人，比转头快且准。而转头有两个副作用：
-            //   · 正前方的噜噜只有 View==Front 时手电才照得到
-            //   · 转头会让画面偏，不利于观察门口
-            // 所以每帧都钉死在正前方，省掉所有转头相关的判断。
-            // 转头计时要递减，递减完 ForceFrontView 自然回正
-            if (_turnPeekLeft > 0f)
-            {
-                _turnPeekLeft -= dt;
-            }
-
-            // 相机真的要转回来：写 _panTarget（视角是跟鼠标位置算的，
-            // gm.SetView 只改标记不转相机）
-            ForceFrontView();
+            // ⚠️ 用户 2026-11-03 定：**只有闪手电时才把视角收回正前方**，
+            // 其余时候一律不碰（早先是每帧无条件钉死正前方）。
+            //
+            // 为什么闪的时候必须回正：噜噜的手电判定是
+            // EnemyContext.IsShiningAtFront() = FlashlightOn && !MonitorUp && View == Front，
+            // 玩家把镜头歪到左边时，AI 就算把手电打开也照不到正门。
+            //
+            // 接管交给 PrototypeScene.ViewExternalControl —— 不能直接写 _pan：
+            // UpdateView 每帧按鼠标重算 _panTarget，外面写的一律被冲掉（踩过）。
+            // 开/关都集中在 HandleLulu（HandleLulu 每帧都会跑，所以「不闪了要放掉」
+            // 也在那里统一处理，这里不需要再兜一次）。
 
             // ── 噜噜到门口时，一律优先处理它 ──
             //
@@ -533,11 +522,18 @@ namespace NailongFNAF.UI
             if (lulu == null)
             {
                 SetFlashlight(false);
+                SetFrontViewHold(false);
                 return;
             }
 
             bool atDoor = lulu.Stage >= lulu.MaxStage;
             bool needsFlash = lulu.FlashCount < LuluFlashThreshold;
+
+            // ⚠️ 视角接管的唯一判据走 AutoPlayerViewPolicy（有单元测试盯着）：
+            //   只有「噜噜堵在正门 + 还没闪够 + 没在扑人」这一段才回正，
+            //   其余时候视角完全归玩家（用户 2026-11-03 定）。
+            SetFrontViewHold(AutoPlayerViewPolicy.ShouldHoldView(
+                atDoor, lulu.FlashCount, LuluFlashThreshold, lulu.IsAttacking));
 
             if (!atDoor || !needsFlash || lulu.IsAttacking)
             {
@@ -551,8 +547,8 @@ namespace NailongFNAF.UI
             }
 
             // 手电只在「监控放下 + 视角朝正前方」时才算数
-            // （EnemyContext.IsShiningAtFront）—— 视角在 Think 开头已经钉死了，
-            // 这里只要保证监控是放下的（LuluNeedsFlash 那条分支已经处理）。
+            // （EnemyContext.IsShiningAtFront）—— 视角在闪之前接管回正，
+            // 监控在 Think 里 LuluNeedsFlash 那条分支已经放下了。
 
             // 站到门口 + 还没闪够 → 开手电闪它
             // 提前闪没用（要它站到门口才算），所以只在 atDoor 时闪

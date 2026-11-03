@@ -1285,6 +1285,16 @@ namespace NailongFNAF.UI
                 // 通话面板和桌面手机对不上，氛围也散了。
                 // 冻结视角（_panTarget 不动），挂断后从原方向接着看。
             }
+            else if (ViewExternalControl)
+            {
+                // AI 代打要「用手电照正门」时临时接管视角：把镜头收回正前方。
+                //
+                // ⚠️ **只管这一小段**（用户 2026-11-03 定）：其余时候视角必须还给玩家。
+                // 转头是这个游戏唯一的操作自由，代打不该连它一起抢走。
+                // 这里只改目标值，转的过程仍交给下面的 SmoothDamp ——
+                // 所以是「转回来」而不是「啪一下跳回来」。
+                _panTarget = 0f;
+            }
             else
             {
                 float width = Screen.width;
@@ -1302,7 +1312,17 @@ namespace NailongFNAF.UI
             // 供敌人 AI 判断"玩家在看哪边"（只有噜噜的手电筒在用）。
             // 阈值按**角度**定：0.64 × 70° ≈ 45°，和满转 90° 时代一样 —— 手电筒手感不变。
             ViewSide view;
-            if (_pan <= -ViewSideThreshold)
+            if (ViewExternalControl)
+            {
+                // ⚠️ 接管期间**直接判正前方**，不要按 _pan 反推。
+                //
+                // 镜头是 SmoothDamp 慢慢转回来的（约 0.3 秒），这期间 _pan 还停在
+                // ±0.6 以上，按阈值算仍是 Left/Right —— 于是这一帧把 AI 刚设的 Front
+                // 又改回去，噜噜的 IsShiningAtFront 时灵时不灵，表现为「手电闪了但它不退」。
+                // 谁先跑（AutoPlayer 还是 UpdateView）也不该影响结果，所以干脆在这里定死。
+                view = ViewSide.Front;
+            }
+            else if (_pan <= -ViewSideThreshold)
             {
                 view = ViewSide.Left;
             }
@@ -2217,6 +2237,18 @@ namespace NailongFNAF.UI
 
         /// <summary>AI 想要的手电状态（仅在 <see cref="FlashlightExternalControl"/> 为真时生效）。</summary>
         public bool ExternalFlashlightOn { get; set; }
+
+        /// <summary>
+        /// AI 代打临时接管转头时为 true —— 期间鼠标不再驱动镜头，镜头回正前方。
+        ///
+        /// **只该在「手电要照正门」的那一小段打开**（见 AutoPlayer.HandleLulu），
+        /// 别的时候必须关掉：玩家转头是这个游戏唯一的操作自由。
+        ///
+        /// 为什么要这个开关而不是让 AI 直接写 `_panTarget`：
+        /// UpdateView 每帧都会按鼠标重算 `_panTarget`，AI 从外面写会被立刻冲掉
+        /// （和手电那边 `FlashlightExternalControl` 是同一个坑）。
+        /// </summary>
+        public bool ViewExternalControl { get; set; }
 
         /// <summary>
         /// 手电的视觉部分：光斑亮度、按钮明暗。
