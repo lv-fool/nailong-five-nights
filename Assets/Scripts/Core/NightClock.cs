@@ -108,20 +108,17 @@ namespace NailongFNAF.Core
             SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
             Endless = endless;
 
-            if (!Endless)
-            {
-                ElapsedSeconds = StartHour * SecondsPerHour;
-                CurrentHour = StartHour;
-            }
+            // 从午夜 0 点开始（一直是 0，别再改）
         }
 
         /// <summary>
-        /// 每一局从第几个小时开始（0 起）。**3 = 从 3AM 开始**（用户 2026-11-03 定）——
-        /// 跳过 12AM~3AM 那三段，直接从中段进。
+        /// 难度加强的起始小时（0 起）。到这一小时之后，所有非 0 的 AI 值都 +1。
+        /// **3 = 3AM 起变凶**（用户 2026-11-03 定）。
         ///
-        /// 永夜模式不受影响（它是无限长的，没有「开局从几点」的概念）。
+        /// ⚠️ 这不是「开局从几点开始」—— 每一局照旧从 12AM 打到 6AM，
+        /// 只是后半程敌人更凶（见 EnemyDirector 里按 CurrentHour 抬难度那段）。
         /// </summary>
-        public const int StartHour = 3;
+        public const int BoostFromHour = 3;
 
         /// <summary>推进时间。天亮之后不再变化（永夜模式不会天亮）。</summary>
         public void Tick(float deltaSeconds)
@@ -147,23 +144,11 @@ namespace NailongFNAF.Core
             CurrentHour = Endless ? hour : (hour > HoursPerNight ? HoursPerNight : hour);
         }
 
-        /// <summary>
-        /// 开始新的一夜 —— 从 <see cref="StartHour"/> 点开始（现在是 3AM）。
-        ///
-        /// 永夜模式仍从 0 起（它没有天亮，也不该跳过时长）。
-        /// </summary>
+        /// <summary>回到午夜 0 点，用于开始新的一夜。</summary>
         public void Reset()
         {
-            if (Endless)
-            {
-                ElapsedSeconds = 0f;
-                CurrentHour = 0;
-                return;
-            }
-
-            float start = StartHour * SecondsPerHour;
-            ElapsedSeconds = start;
-            CurrentHour = StartHour;
+            ElapsedSeconds = 0f;
+            CurrentHour = 0;
         }
     }
 }
