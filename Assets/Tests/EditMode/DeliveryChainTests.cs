@@ -31,6 +31,15 @@ namespace NailongFNAF.Tests
         /// </summary>
         private const int RngForWander = 0;
 
+        /// <summary>
+        /// 掷外卖档位用的骰子值。按 <see cref="DeliveryDrop.GainWeights"/> 的累计区间
+        /// （[0,15)=5 电、[15,30)=2 电、[30,100)=1 电），掷 0 落在最高档。
+        ///
+        /// 这条链路只关心「掉没掉、掉的是不是合法档位」，不关心掉几点，
+        /// 所以固定一个能命中的值就行。要测概率分布去 <see cref="DeliveryDropTests"/>。
+        /// </summary>
+        private const int RngForDeliveryGain = 0;
+
         /// <summary>骰子永远掷出同一个数 —— 让「必定前进 / 必定不动」可断言。</summary>
         private sealed class FixedRandom : IRandomSource
         {
@@ -169,7 +178,7 @@ namespace NailongFNAF.Tests
 
             if (willDrop && brain.Stage < brain.MaxStage)
             {
-                delivery.Drop(new FixedRandom(RngForWander));
+                delivery.Drop(new FixedRandom(RngForDeliveryGain));
             }
 
             Assert.IsTrue(delivery.Available, "退走后外卖应当出现在门口");
@@ -191,7 +200,7 @@ namespace NailongFNAF.Tests
         public void 外卖二十秒后消失()
         {
             var delivery = new DeliveryDrop();
-            delivery.Drop(new FixedRandom(RngForWander));
+            delivery.Drop(new FixedRandom(RngForDeliveryGain));
 
             Assert.IsTrue(delivery.Available);
 
