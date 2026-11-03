@@ -17,8 +17,20 @@ namespace NailongFNAF.Gameplay
         /// <summary>活动度上限（同 FNAF 1 的 AI 等级）。</summary>
         public const int MaxActivityLevel = 20;
 
-        /// <summary>默认掷骰间隔（秒）。</summary>
+        /// <summary>默认掷骰间隔（秒）—— 活动度 0 时的间隔。</summary>
         public const float DefaultMoveIntervalSeconds = 5f;
+
+        /// <summary>
+        /// 活动度满级时的掷骰间隔（秒）。
+        ///
+        /// **活动度现在同时影响「成功率」和「频率」**（用户 2026-11-03 定）：
+        ///   · 成功率：掷 1~20 的骰子，不超过活动度就前进
+        ///   · 频率：间隔从 <see cref="DefaultMoveIntervalSeconds"/> 线性压到 3 秒
+        ///
+        /// 两者叠起来，20 级敌人比原来快 67%（5 秒 → 3 秒，而且每次必走）。
+        /// 别压太狠：低于 2 秒玩家根本来不及反应。
+        /// </summary>
+        public const float MinMoveIntervalSeconds = 3f;
 
         public EnemyId Id { get; private set; }
 
@@ -31,6 +43,31 @@ namespace NailongFNAF.Gameplay
         protected float MoveTimer;
 
         /// <summary>当前位置阶梯。0 = 起点，越大越靠近玩家。具体含义由子类定义。</summary>
+        /// <summary>
+        /// 按活动度把基础间隔压下来。
+        ///
+        /// 活动度 0 → 保持基础间隔（反正掷骰也过不了）；
+        /// 活动度满级 → 压到 <see cref="MinMoveIntervalSeconds"/>。
+        /// 线性插值，中间档位平滑过渡。
+        /// </summary>
+        private static int ClampActivityStatic(int level)
+        {
+            if (level < 0)
+            {
+                return 0;
+            }
+
+            return level > MaxActivityLevel ? MaxActivityLevel : level;
+        }
+
+        protected static float IntervalForActivity(float baseInterval, int activityLevel)
+        {
+            int level = ClampActivityStatic(activityLevel);
+            float t = level / (float)MaxActivityLevel;
+
+            return baseInterval + (MinMoveIntervalSeconds - baseInterval) * t;
+        }
+
         public int Stage { get; protected set; }
 
         /// <summary>是否已经触发跳杀。</summary>
@@ -47,9 +84,14 @@ namespace NailongFNAF.Gameplay
             Id = id;
             Rng = rng;
             ActivityLevel = ClampActivity(activityLevel);
-            MoveIntervalSeconds = moveIntervalSeconds > 0f
+
+            // 基础间隔由子类给（现在都是 DefaultMoveIntervalSeconds），
+            // 再按活动度往下压 —— 见 MinMoveIntervalSeconds 的说明。
+            _baseMoveInterval = moveIntervalSeconds > 0f
                 ? moveIntervalSeconds
                 : DefaultMoveIntervalSeconds;
+
+            MoveIntervalSeconds = IntervalForActivity(_baseMoveInterval, ActivityLevel);
         }
 
         /// <summary>
@@ -167,7 +209,15 @@ namespace NailongFNAF.Gameplay
         public virtual void SetActivityLevel(int level)
         {
             ActivityLevel = ClampActivity(level);
+
+            // ⚠️ 间隔必须跟着重算 —— 活动度现在也决定频率。
+            // 3AM 那次 +1 加成走的就是这条路，不重算的话
+            // 「成功率涨了、但掷骰频率还是老样子」，体验上少一半效果。
+            MoveIntervalSeconds = IntervalForActivity(_baseMoveInterval, ActivityLevel);
         }
+
+        /// <summary>构造时给的基础间隔 —— 重算时要用它当基准，不能用已被压过的值。</summary>
+        private float _baseMoveInterval;
 
         private static int ClampActivity(int level)
         {

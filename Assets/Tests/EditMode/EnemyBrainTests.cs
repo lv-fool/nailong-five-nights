@@ -81,11 +81,17 @@ namespace NailongFNAF.Tests
             brain.Tick(0.05f, EnemyContext.Idle());
         }
 
+        /// <summary>
+        /// 把敌人推到指定 Stage。
+        ///
+        /// ⚠️ 用**实例自己的间隔**：活动度现在也决定频率（满级 3 秒），
+        /// 喂固定 5 秒会一次攒满两步、Stage 越过目标值。
+        /// </summary>
         private static void AdvanceToStage(EnemyBrain brain, EnemyContext ctx, int targetStage)
         {
             for (int i = 0; i < 50 && brain.Stage < targetStage; i++)
             {
-                brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+                brain.Tick(brain.MoveIntervalSeconds, ctx);
             }
         }
 
@@ -101,7 +107,7 @@ namespace NailongFNAF.Tests
 
             for (int i = 0; i < 100; i++)
             {
-                brain.Tick(5f, ctx);
+                brain.Tick(brain.MoveIntervalSeconds, ctx);
             }
 
             Assert.AreEqual(0, brain.Stage);
@@ -115,10 +121,12 @@ namespace NailongFNAF.Tests
                 EnemyBrain.MaxActivityLevel, new FixedRandom(EnemyBrain.MaxActivityLevel));
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(5f, ctx);
+            // ⚠️ 用实例自己的间隔 —— 活动度现在也决定频率（满级 3 秒），
+            // 写死 5 秒会一次攒满两次掷骰。
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(1, brain.Stage);
 
-            brain.Tick(5f, ctx);
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(2, brain.Stage);
         }
 
@@ -129,7 +137,9 @@ namespace NailongFNAF.Tests
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(4.9f, ctx);
+            // ⚠️ 用实例间隔的 90%：活动度现在也决定频率（满级 3 秒），
+            // 写死 4.9f 早就越过 3 秒了，掷骰会正常触发。
+            brain.Tick(brain.MoveIntervalSeconds * 0.9f, ctx);
 
             Assert.AreEqual(0, brain.Stage);
         }
@@ -278,7 +288,7 @@ namespace NailongFNAF.Tests
             int steps = brain.WanderStepsLeft;
             for (int i = 0; i < steps; i++)
             {
-                brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, idle);
+                brain.Tick(brain.MoveIntervalSeconds, idle);
 
                 Assert.Less(brain.Stage, brain.MaxStage, "游走期间不该到门口");
                 Assert.AreNotEqual(0, brain.Stage, "游走期间不回出生地");
@@ -491,7 +501,7 @@ namespace NailongFNAF.Tests
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(5f, ctx);
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
 
             Assert.AreEqual(1, brain.Stage);
             Assert.IsFalse(brain.IsAttacking);
@@ -534,7 +544,7 @@ namespace NailongFNAF.Tests
             AdvanceToStage(brain, EnemyContext.Idle(), 2);
 
             // 一口气按着不放 —— 只有「按下」那一下算数，想再闪一次得松手重按
-            brain.Tick(5f, shining);
+            brain.Tick(brain.MoveIntervalSeconds, shining);
 
             Assert.AreEqual(1, brain.FlashCount);
             Assert.AreEqual(2, brain.Stage);
@@ -723,11 +733,13 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(2, brain.PathCameraIndex, "出生地应该是海盗湾（2）");
 
-            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+            // ⚠️ 用实例自己的间隔：活动度现在也决定频率（满级 3 秒），
+            // 写死 DefaultMoveIntervalSeconds(5) 会一次攒满两步。
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(1, brain.Stage);
             Assert.AreEqual(1, brain.PathCameraIndex, "推进一格到餐厅（1）");
 
-            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(2, brain.Stage);
             Assert.AreEqual(-1, brain.PathCameraIndex, "到正门口后不再属于任何机位");
         }
@@ -833,7 +845,9 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(NailongMode.Approaching, brain.Mode);
             Assert.AreEqual(1, brain.CameraIndex, "转化后应站在路径起点（餐厅 1）");
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            // ⚠️ 用实例自己的间隔：活动度现在也决定频率（满级 3 秒），
+            // 写死 DefaultMoveIntervalSeconds(5) 会一次攒满两步、Stage 跳变。
+            float step = brain.MoveIntervalSeconds;
             brain.Tick(step, ctx);                          // 掷骰推进一格
             Assert.AreEqual(1, brain.Stage);
             Assert.AreEqual(6, brain.CameraIndex, "第一步之后应停到东走廊（6）");
@@ -857,7 +871,7 @@ namespace NailongFNAF.Tests
             brain.Tick(brain.StealIntervalSeconds, idle);
             Assert.AreEqual(NailongMode.Approaching, brain.Mode);
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
             brain.Tick(step, idle);
             brain.Tick(step, idle);          // 无路径 → MaxStage=2 → 两步到门口
             Assert.AreEqual(2, brain.Stage);
@@ -889,7 +903,7 @@ namespace NailongFNAF.Tests
             brain.Tick(brain.StealIntervalSeconds, ctx);   // 偷到电 → 转进攻态
             Assert.AreEqual(NailongMode.Approaching, brain.Mode);
 
-            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);   // 掷骰没过
+            brain.Tick(brain.MoveIntervalSeconds, ctx);   // 掷骰没过
 
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(0, brain.AdvanceCount);
@@ -904,7 +918,7 @@ namespace NailongFNAF.Tests
             var taken = new EnemyContext(false, false, false, false, false,
                 ViewSide.Front, 0, EnemyId.Niulai);
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
             brain.Tick(brain.StealIntervalSeconds, taken);   // 偷到电 → 转进攻态
             brain.Tick(step, taken);                          // 走廊
             Assert.AreEqual(1, brain.Stage);
@@ -922,7 +936,7 @@ namespace NailongFNAF.Tests
             var mine = new EnemyContext(false, false, false, false, false,
                 ViewSide.Front, 0, EnemyId.Nailong);
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
             brain.Tick(brain.StealIntervalSeconds, mine);
             brain.Tick(step, mine);
             brain.Tick(step, mine);
@@ -935,7 +949,7 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);   // 转进攻态
             brain.Tick(step, idle);
@@ -963,7 +977,7 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);   // 转进攻态
             brain.Tick(step, idle);
@@ -982,7 +996,7 @@ namespace NailongFNAF.Tests
             // 换位也就无从谈起；这时的应对手段只剩关门。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);
             brain.Tick(step, idle);
@@ -1006,7 +1020,7 @@ namespace NailongFNAF.Tests
             // 反过来说：到门口之后宽限计时照常走，看监控拦不住它。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);
             brain.Tick(step, idle);
