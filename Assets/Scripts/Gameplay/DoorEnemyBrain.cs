@@ -93,6 +93,9 @@ namespace NailongFNAF.Gameplay
         /// </summary>
         public int KnocksIssued { get; private set; }
 
+        /// <summary>这一趟站门口已经敲过了吗 —— 防「门一直关着每帧都敲」。</summary>
+        private bool _knockedThisVisit;
+
         /// <summary>取走一次「敲门」记录。表现层每帧问一次，没记录就返回 false。</summary>
         public bool ConsumeKnock()
         {
@@ -442,6 +445,26 @@ namespace NailongFNAF.Gameplay
 
             _doorWasClosed = doorClosedNow;
 
+            // ── 被门挡住 → 敲两下门（放在「攒满」判定**之前**）──
+            //
+            // ⚠️ 必须在前面：下面那个 `if (justFilled) { ... return; }` 会提前返回，
+            // 把敲门吃掉。而「到门口发现门关着」现在是立刻填满 DoorTimer，
+            // 走的就是那条提前返回的路径 —— 敲门永远不触发、外卖永远不掉（踩过）。
+            //
+            // _knockedThisVisit 防「门一直关着每帧都敲」。
+            bool doorBlocksNow = ctx.IsDoorClosed(Side)
+                && (!RequireLightToBlock || ctx.IsLightOn(Side));
+
+            if (doorBlocksNow && !_knockedThisVisit)
+            {
+                _knockedThisVisit = true;
+                KnocksIssued++;
+            }
+            else if (!doorBlocksNow)
+            {
+                _knockedThisVisit = false;   // 门开了 → 下次关门可以再敲
+            }
+
             // 记录「这一帧是不是刚好攒满」—— 只有这一帧才做「门开着就动手」的判定。
             //
             // ⚠️ 不能写成「攒满后只要门开着就动手」：那样玩家在最后一搏中途开门，
@@ -477,12 +500,6 @@ namespace NailongFNAF.Gameplay
                 return;
             }
 
-            // ── 攒满的那一刻：门关着 → 它被挡在外面，敲两下门 ──
-            // 只有真的走到门口（Stage 到顶）才会进到这段，走廊里不算。
-            if (justFilled && closed)
-            {
-                KnocksIssued++;
-            }
 
             // ── 门关着：进入「最后一搏」2 秒 ──
             //
@@ -536,6 +553,7 @@ namespace NailongFNAF.Gameplay
             DoorTimer = 0f;
             LastChanceTimer = 0f;
             _doorWasClosed = false;
+            _knockedThisVisit = false;   // 下次再来可以再敲一次
 
             // 只有配了机位路径的（袋鼠 / 牛来 / 奶龙进攻态）才谈得上「游走」。
             // 没路径的老三档实现只能回 Stage 0，保持原样。
