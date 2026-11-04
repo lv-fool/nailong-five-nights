@@ -516,41 +516,22 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
-        /// 「过了 3AM 变凶」的难度加成。
-        ///
-        /// 每一局照旧从 12AM 打到 6AM，但到了 <see cref="NightClock.BoostFromHour"/> 点之后，
-        /// 每个**本来就不为 0** 的敌人 +1 —— 后半程压力明显上来。
-        ///
-        /// **0 保持 0**：0 表示「这一夜它压根不来」，抬到 1 等于把它请出场，
-        /// 会破坏每夜的角色安排。
-        ///
-        /// 上限是 <see cref="EnemyBrain.MaxActivityLevel"/>，别溢出去。
+        /// 当前几点（0 = 12AM）。没有 GameManager / 时钟时按 0 算 —— 等于不吃任何加成。
         /// </summary>
-        private int BoostForLateNight(int level)
+        private int CurrentHour
         {
-            if (level <= 0)
+            get
             {
-                return level < 0 ? 0 : level;
-            }
+                if (_game == null || _game.Clock == null)
+                {
+                    return 0;
+                }
 
-            // 还没到点 → 原样
-            if (_game == null || _game.Clock == null)
-            {
-                return level;
+                return _game.Clock.CurrentHour;
             }
-
-            if (_game.Clock.CurrentHour < NightClock.BoostFromHour)
-            {
-                return level;
-            }
-
-            int boosted = level + 1;
-            return boosted > EnemyBrain.MaxActivityLevel
-                ? EnemyBrain.MaxActivityLevel
-                : boosted;
         }
 
-        /// <summary>上一次应用难度时是几 AM —— 换小时了就要重算（3AM 起 +1）。</summary>
+        /// <summary>上一次应用难度时是几 AM —— 换小时了就要重算（3AM / 4AM 都有加成）。</summary>
         private int _lastAppliedHour = -1;
 
         private void ApplyDifficulty()
@@ -566,10 +547,10 @@ namespace NailongFNAF.Gameplay
                     level = (int)System.Math.Round(level * (1f + _overdrive));
                 }
 
-                // 「3AM 之后变凶」：过了 <see cref="NightClock.BoostFromHour"/> 点，
-                // 每个**本来就不为 0** 的敌人 +1 —— 已经是 0 的保持 0，
-                // 不然「这一夜它压根不来」这个设计就被破坏了。
-                level = BoostForLateNight(level);
+                // 后半程加成（3AM 全体 +1、4AM 除奶龙外再 +1）——
+                // 规则全在 <see cref="LateNightBoost"/> 里，纯逻辑 + 单元测试。
+                // 已经是 0 的保持 0，不然「这一夜它压根不来」这个设计就被破坏了。
+                level = LateNightBoost.Apply(pair.Key, level, CurrentHour);
 
                 pair.Value.SetActivityLevel(level);
             }
@@ -661,10 +642,10 @@ namespace NailongFNAF.Gameplay
 
             _blackout.Reset();
 
-            // ── 换小时检查：过了 BoostFromHour（3AM）难度要抬一级 ──
+            // ── 换小时检查：3AM / 4AM 各抬一次难度 ──
             //
-            // ApplyDifficulty 平时只在换夜 / 调难度时调，时钟自然走过 3AM 时
-            // 没人通知它 —— 不在这里补一刀，那一级的加成永远不会生效。
+            // ApplyDifficulty 平时只在换夜 / 调难度时调，时钟自然走过 3AM / 4AM 时
+            // 没人通知它 —— 不在这里补一刀，那几级加成永远不会生效。
             if (game.Clock.CurrentHour != _lastAppliedHour)
             {
                 _lastAppliedHour = game.Clock.CurrentHour;
