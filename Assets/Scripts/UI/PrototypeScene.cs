@@ -6038,11 +6038,19 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            if (_enemyDirector.KnockCount > _lastKnockCount)
+            // 「计数器比游标大就播一声」—— 规则在 CounterCursor 里（纯逻辑 + 单元测试）。
+            //
+            // ⚠️ 它额外处理「计数器被重建」的情况：EnemyDirector 换夜时会把
+            // KnockCount 清零，而 _lastKnockCount 是表现层的游标、不会跟着重置。
+            // 不处理的话新一局第一声敲门是 1、游标还停在 1 → 被吞掉，
+            // 听起来就是「整夜没敲过门」（2026-11-04 报的就是这个）。
+            int newCursor;
+            if (CounterCursor.ShouldFire(_enemyDirector.KnockCount, _lastKnockCount, out newCursor))
             {
-                _lastKnockCount = _enemyDirector.KnockCount;
                 PlayKnockSfx();
             }
+
+            _lastKnockCount = newCursor;
 
             ApplyDeliveryBag(gm);
             HandleDeliveryClick(gm);
