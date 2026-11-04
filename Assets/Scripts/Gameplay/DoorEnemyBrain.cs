@@ -9,8 +9,9 @@ namespace NailongFNAF.Gameplay
     /// 这段不再属于任何机位，监控里看不到它，只能靠门口那盏灯现形。
     ///
     /// 到了门口分两个阶段，**每个阶段的末尾都判一次门，门开着就动手**：
-    ///   · **读数阶段**（<see cref="DoorGraceSeconds"/>，约 5 秒）：门一直开着 → 走完就扑
-    ///     （窗口照原版角色的移动机会间隔：邦尼 4.97s / 奇卡 4.98s / 弗莱迪 3.02s）
+    ///   · **读数阶段**（<see cref="DoorWindow"/>）：门一直开着 → 走完就扑。
+    ///     长度随活动度线性走：**活动度 0 → 7.62 秒，满级 → 各角色原值**
+    ///     （袋鼠 4.97s / 牛来 4.98s，照原版邦尼/奇卡的移动机会间隔）
     ///   · **最后一搏**（<see cref="LastChanceSeconds"/>，随活动度 1~3 秒）：
     ///     门**一关**就进这一段（不用等读数走完）；走完时门开着 → 扑，门关着 → 退走。
     ///     期间门被打开会**重置**计时，等于重新给一份窗口。
@@ -50,12 +51,46 @@ namespace NailongFNAF.Gameplay
         /// <summary>门口的额外宽限秒数（贝利亚之夜的「去甲肾上腺素」/「喹硫平」）。</summary>
         public float GraceBonusSeconds { get; set; }
 
-        /// <summary>把倍率套进 <see cref="DoorGraceSeconds"/> 之后真正用的窗口长度。</summary>
+        /// <summary>
+        /// 活动度 **0** 时「读数窗口」有多长（秒）。活动度满级时线性压回各角色自己的
+        /// <see cref="DoorGraceSeconds"/>。
+        ///
+        /// 用户 2026-11-04 定：**AI 值 0~20 对应 7.62s → 原值**。
+        /// 低难度给玩家更长的反应窗口，高难度压回原版节奏。
+        ///
+        /// ⚠️ 只作用于**读数**（门一直开着的那段）。最后一搏另有
+        /// <see cref="LastChanceSeconds"/>（1~3 秒，也是难度越高越久）。
+        /// </summary>
+        public const float DoorWindowAtZeroActivity = 7.62f;
+
+        /// <summary>
+        /// 按当前活动度折算出来的**读数窗口**（秒），**不含**贝利亚夜里那些加成。
+        ///
+        /// 活动度 0 → <see cref="DoorWindowAtZeroActivity"/>（7.62s）；
+        /// 活动度满级 → <see cref="DoorGraceSeconds"/>（袋鼠 4.97 / 牛来 4.98）。
+        /// 中间线性。运行时 <c>SetActivityLevel</c> 一改就立刻生效，不用重建。
+        /// </summary>
+        public float DoorReadoutSeconds
+        {
+            get
+            {
+                float t = ActivityLevel / (float)MaxActivityLevel;
+                if (t < 0f) { t = 0f; }
+                if (t > 1f) { t = 1f; }
+
+                return DoorWindowAtZeroActivity
+                    + (DoorGraceSeconds - DoorWindowAtZeroActivity) * t;
+            }
+        }
+
+        /// <summary>
+        /// 真正用的窗口长度：按活动度折算的读数窗口，再加贝利亚那些加成、乘倍率。
+        /// </summary>
         public float DoorWindow
         {
             get
             {
-                float window = DoorGraceSeconds + GraceBonusSeconds;
+                float window = DoorReadoutSeconds + GraceBonusSeconds;
 
                 if (window < 0f)
                 {
@@ -73,10 +108,13 @@ namespace NailongFNAF.Gameplay
         public Side Side { get; private set; }
 
         /// <summary>
-        /// 门**一直开着**时，它在门口撑多久就动手（秒）。
+        /// 门**一直开着**时，它在门口撑多久就动手（秒）—— **活动度满级**时的值。
         ///
         /// 照原版 FNAF 1 的「移动机会」间隔定（邦尼 4.97 / 奇卡 4.98 / 弗莱迪 3.02）。
         /// 也正是玩家从「它站到门口」到「必须关门」的**反应窗口**。
+        ///
+        /// ⚠️ 真正用的窗口在低难度下比它**长** —— 见 <see cref="DoorReadoutSeconds"/>。
+        /// 别直接拿这个字段当窗口用，要窗口请用 <see cref="DoorWindow"/>。
         ///
         /// ⚠️ 门在这个窗口里**任何时刻**关上，都会立刻转到
         /// <see cref="LastChanceSeconds"/> 那条路，不必撑满 —— 见 <see cref="OnTick"/>。
@@ -392,8 +430,8 @@ namespace NailongFNAF.Gameplay
         ///
         ///   · **门关着** → 立刻进「最后一搏」，撑完 <see cref="LastChanceSeconds"/>
         ///     （随活动度 1~3 秒）就退走。期间门被打开只是把这段**重置**，重头再算。
-        ///   · **门一直开着** → 撑满 <see cref="DoorGraceSeconds"/>（一个移动机会，
-        ///     约 5 秒）就动手。
+        ///   · **门一直开着** → 撑满 <see cref="DoorWindow"/>（活动度 0 时 7.62 秒、
+        ///     满级时 4.97/4.98 秒）就动手。
         ///
         /// 所以玩家看到的是：
         ///   · 关上门后它还要在门口站一会儿才走（不是一关就消失）
@@ -425,7 +463,7 @@ namespace NailongFNAF.Gameplay
 
             // ⚠️ **门只要关着，就立刻进最后一搏**（用户 2026-11-03 定，同日追加）。
             //
-            // 早先是「走到门口先攒一个移动机会（约 5 秒），攒满发现门关着才开始计时」——
+            // 早先是「走到门口先攒一个移动机会（4.97~7.62 秒，看难度），攒满发现门关着才开始计时」——
             // 等于白白给玩家 5 秒免费时间。所以改成：到门口发现门关着，立刻填满。
             //
             // 但只补「刚跨进门口那一下」还不够 —— 读数走到一半才关门的话：

@@ -213,6 +213,49 @@ namespace NailongFNAF.Tests
         //   2. 该退走时 IsAttacking 必须是 false（残留会让它「退了照样跳杀」）
         // ---------------------------------------------------------------
 
+        [Test]
+        public void 读数窗口随活动度从七点六二压到原值()
+        {
+            // 用户 2026-11-04 定：AI 值 0~20 对应 7.62s → 原值（线性）。
+            // 低难度给更长的反应窗口，满级压回原版节奏。
+            const float grace = 4.97f;
+
+            System.Func<int, DoorEnemyBrain> make = (activity) =>
+                new DoorEnemyBrain(EnemyId.Daishu, Side.Left, activity,
+                    new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            Assert.AreEqual(7.62f, DoorEnemyBrain.DoorWindowAtZeroActivity, 0.001f,
+                "活动度 0 的读数窗口被改过 —— 用户指定的是 7.62s");
+
+            Assert.AreEqual(7.62f, make(0).DoorWindow, 0.001f, "活动度 0 应该是 7.62s");
+            Assert.AreEqual(grace, make(EnemyBrain.MaxActivityLevel).DoorWindow, 0.001f,
+                "活动度满级应该压回原值");
+
+            // 中间线性
+            Assert.AreEqual((7.62f + grace) * 0.5f, make(10).DoorWindow, 0.001f,
+                "活动度 10 应该正好在中点");
+
+            // 越界也不能跑飞
+            Assert.AreEqual(7.62f, make(-5).DoorWindow, 0.001f, "低于 0 当 0");
+            Assert.AreEqual(grace, make(999).DoorWindow, 0.001f, "高于 20 当 20");
+        }
+
+        [Test]
+        public void 读数窗口只是读数_不改变最后一搏()
+        {
+            // 两段是独立的：读数随难度**变短**，最后一搏随难度**变长**。
+            System.Func<int, DoorEnemyBrain> make = (activity) =>
+                new DoorEnemyBrain(EnemyId.Daishu, Side.Left, activity,
+                    new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, 4.97f);
+
+            Assert.Greater(make(0).DoorWindow, make(EnemyBrain.MaxActivityLevel).DoorWindow,
+                "活动度低时读数窗口应该更长");
+
+            Assert.AreEqual(DoorEnemyBrain.LastChanceBaseSeconds, make(0).LastChanceSeconds, 0.001f);
+            Assert.AreEqual(DoorEnemyBrain.LastChanceMaxSeconds,
+                make(EnemyBrain.MaxActivityLevel).LastChanceSeconds, 0.001f);
+        }
+
         // ---------------------------------------------------------------
         // 最后一搏时长随难度增加 / 进攻失败 → 随机游走
         // ---------------------------------------------------------------
