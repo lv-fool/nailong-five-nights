@@ -9418,53 +9418,29 @@ namespace NailongFNAF.UI
         // 按钮回调
         // ---------------------------------------------------------------
 
+        // ⚠️ 音效统一走 DoorLightActions —— 那是 AI 代打和调试快捷键也会走的入口。
+        // 早先音效直接写在这几个回调里，结果 AI 直接调 GameManager、绕过回调，
+        // 开关门/灯全都没有声音（2026-11-04 报的）。
+        // **别在这里再补一次 PlayDoor/PlayLight**，会响两遍。
+
         private void OnDoorLeft()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.LeftDoorClosed;
-            gm.ToggleLeftDoor();
-
-            if (_audio != null && gm.LeftDoorClosed != before)
-            {
-                // 该侧已被突破 → 门灯都废了，退回默认机械音（见 AudioManager.PlayDoor）
-                _audio.PlayDoor(gm.LeftDoorClosed, gm.IsSideDisabled(Side.Left));
-            }
+            DoorLightActions.ToggleDoor(GameManager.Instance, Side.Left, _audio);
         }
 
         private void OnDoorRight()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.RightDoorClosed;
-            gm.ToggleRightDoor();
-
-            if (_audio != null && gm.RightDoorClosed != before)
-            {
-                _audio.PlayDoor(gm.RightDoorClosed, gm.IsSideDisabled(Side.Right));
-            }
+            DoorLightActions.ToggleDoor(GameManager.Instance, Side.Right, _audio);
         }
 
         private void OnLightLeft()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.LeftLightOn;
-            gm.ToggleLeftLight();
-
-            if (_audio != null && gm.LeftLightOn != before)
-            {
-                _audio.PlayLight(gm.LeftLightOn, gm.IsSideDisabled(Side.Left));
-            }
+            DoorLightActions.ToggleLight(GameManager.Instance, Side.Left, _audio);
         }
 
         private void OnLightRight()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.RightLightOn;
-            gm.ToggleRightLight();
-
-            if (_audio != null && gm.RightLightOn != before)
-            {
-                _audio.PlayLight(gm.RightLightOn, gm.IsSideDisabled(Side.Right));
-            }
+            DoorLightActions.ToggleLight(GameManager.Instance, Side.Right, _audio);
         }
 
         private void OnCameraBox(int index)

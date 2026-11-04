@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using NailongFNAF.Audio;
 using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 
@@ -52,6 +53,12 @@ namespace NailongFNAF.UI
         private GameManager _gm;
         private EnemyDirector _director;
         private PrototypeScene _scene;
+
+        /// <summary>
+        /// 音效播放器。开关门/灯的声音由 <see cref="DoorLightActions"/> 统一放 ——
+        /// 早先这里没有它，AI 的操作全程静音（2026-11-04 报的）。
+        /// </summary>
+        private AudioManager _audio;
 
         private bool _running;
 
@@ -149,6 +156,10 @@ namespace NailongFNAF.UI
 
             _director = FindObjectOfType<EnemyDirector>();
             _scene = FindObjectOfType<PrototypeScene>();
+
+            // 音效是关键反馈 —— 没有它 AI 关门/开灯完全听不出来（2026-11-04 报的）。
+            // 拿不到也不算致命错误，静默继续。
+            _audio = FindObjectOfType<AudioManager>();
 
             if (_director == null)
             {
@@ -658,28 +669,19 @@ namespace NailongFNAF.UI
         // 底层操作
         // ---------------------------------------------------------------
 
+        // ⚠️ 必须走 DoorLightActions，不能直接调 GameManager.ToggleXxx ——
+        // 那个是纯状态切换，不带音效。早先这里直接调 GameManager，
+        // 结果 AI 关门/开灯全程静音（2026-11-04 报的）。
+        // 音效由 DoorLightActions 统一放，玩家点按钮走的也是同一条路。
+
         private void ToggleDoor(Side side)
         {
-            if (side == Side.Left)
-            {
-                _gm.ToggleLeftDoor();
-            }
-            else
-            {
-                _gm.ToggleRightDoor();
-            }
+            DoorLightActions.ToggleDoor(_gm, side, _audio);
         }
 
         private void ToggleLight(Side side)
         {
-            if (side == Side.Left)
-            {
-                _gm.ToggleLeftLight();
-            }
-            else
-            {
-                _gm.ToggleRightLight();
-            }
+            DoorLightActions.ToggleLight(_gm, side, _audio);
         }
 
         private void SetMonitor(bool up)
