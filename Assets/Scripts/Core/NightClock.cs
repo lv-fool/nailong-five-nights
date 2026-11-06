@@ -95,12 +95,31 @@ namespace NailongFNAF.Core
         {
         }
 
-        /// <summary>用自定义节奏创建，并指定是否永夜模式。</summary>
+        /// <summary>
+        /// 用自定义节奏创建，并指定是否永夜模式。
+        ///
+        /// 每一局都从**午夜 0 点**开始（12AM → 6AM 完整打完）。
+        /// 「3AM 之后变凶」是另一回事，见 <see cref="BoostFromHour"/> ——
+        /// 它只抬难度，不改时钟起点。
+        /// </summary>
         public NightClock(float secondsPerHour, bool endless)
         {
             SecondsPerHour = secondsPerHour > 0f ? secondsPerHour : DefaultSecondsPerHour;
             Endless = endless;
         }
+
+        /// <summary>
+        /// **第一次**难度加强的起始小时（0 起）。到这一小时之后，所有非 0 的 AI 值都 +1。
+        /// **3 = 3AM 起变凶**（用户 2026-11-03 定）。
+        ///
+        /// ⚠️ 还有**第二次**（4AM 起、除奶龙外再 +1），常量在
+        /// <c>NailongFNAF.Gameplay.LateNightBoost.SecondBoostHour</c>。
+        /// 实际加成统一走 <c>LateNightBoost.Apply</c>，别在这儿重新实现一遍。
+        ///
+        /// ⚠️ 这不是「开局从几点开始」—— 每一局照旧从 12AM 打到 6AM，
+        /// 只是后半程敌人更凶（见 EnemyDirector 里按 CurrentHour 抬难度那段）。
+        /// </summary>
+        public const int BoostFromHour = 3;
 
         /// <summary>推进时间。天亮之后不再变化（永夜模式不会天亮）。</summary>
         public void Tick(float deltaSeconds)

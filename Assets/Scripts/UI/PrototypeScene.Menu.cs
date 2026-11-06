@@ -1540,6 +1540,13 @@ namespace NailongFNAF.UI
                 _dawnOverlay.gameObject.SetActive(true);
                 _dawnOverlay.transform.SetAsLastSibling();
                 _dawnTimer = 0f;
+
+                // 天亮的头一帧播胜利音效（1.78s，配合 1.8s 渐白正好贴合）。
+                // 放在这个 if 里 = 每次通关只播一次，不会每帧重复触发。
+                if (_audio != null)
+                {
+                    _audio.PlayVictory();
+                }
             }
 
             _dawnTimer += Time.deltaTime;

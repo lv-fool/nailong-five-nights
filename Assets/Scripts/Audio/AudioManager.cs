@@ -157,6 +157,18 @@ namespace NailongFNAF.Audio
         /// <summary>门音效专属通道（开门要二倍速，需要独立的 pitch）。</summary>
         private AudioSource _doorSource;
 
+        /// <summary>胜利音效专属通道 —— 天亮那一刻不能被别的音效掐断。</summary>
+        private AudioSource _victorySource;
+
+        /// <summary>胜利音效素材（懒加载）。</summary>
+        private AudioClip _victoryClip;
+
+        /// <summary>天亮胜利音效路径（音效 1.78s，配合 1.8s 渐白正好）。</summary>
+        private const string VictoryClipPath = "Audio/sfx_victory";
+
+        /// <summary>胜利音效音量 —— 通关高光时刻，比普通音效响一点。</summary>
+        private const float VictoryVolume = 0.85f;
+
         /// <summary>开灯循环音源。</summary>
         private AudioSource _lightLoopSource;
 
@@ -205,6 +217,7 @@ namespace NailongFNAF.Audio
 
             // 门音效独立通道：开门要二倍速，neng pitch 只影响这一路
             _doorSource = CreateSource("DoorSfx", false, _sfxVolume);
+            _victorySource = CreateSource("VictorySfx", false, VictoryVolume);
 
             _lightLoopSource = CreateSource("LightBuzz", true, 0f);
             _lightBuzz = Resources.Load<AudioClip>(LightBuzzClipPath);
@@ -275,6 +288,34 @@ namespace NailongFNAF.Audio
         private void ScheduleNextDistant()
         {
             _nextDistantAt = Time.time + UnityEngine.Random.Range(DistantMinGap, DistantMaxGap);
+        }
+
+        /// <summary>
+        /// 天亮胜利音效 —— 撑过 6 点那一刻播一次。
+        ///
+        /// 用专属音源而不是共享的 _sfx：通关瞬间可能还有别的音效在响
+        /// （门、脚步、风扇），共享通道会把它掐断。
+        /// </summary>
+        public void PlayVictory()
+        {
+            if (_victorySource == null)
+            {
+                return;
+            }
+
+            if (_victoryClip == null)
+            {
+                _victoryClip = Resources.Load<AudioClip>(VictoryClipPath);
+            }
+
+            if (_victoryClip == null)
+            {
+                return;
+            }
+
+            _victorySource.Stop();
+            _victorySource.clip = _victoryClip;
+            _victorySource.Play();
         }
 
         /// <summary>
@@ -443,6 +484,26 @@ namespace NailongFNAF.Audio
         /// </summary>
         public void PlayFootstep(bool rightFoot, float volumeScale)
         {
+            PlayFootstep(rightFoot, volumeScale, rightFoot ? FootstepPan : -FootstepPan);
+        }
+
+        /// <summary>
+        /// 脚步声的立体声偏移量（0 = 正中，1 = 全右）。
+        ///
+        /// 为什么需要：左右脚步走的是**同一条 2D 音源**，位置一样 →
+        /// 不设 pan 的话两下听起来都从脑门正中出来，左右白分。
+        /// 给个 0.55 既分得清左右，又不至于像贴着一只耳朵响。
+        /// </summary>
+        private const float FootstepPan = 0.55f;
+
+        /// <summary>
+        /// 带立体声定位的脚步。
+        ///
+        /// <paramref name="pan"/>：-1 = 全左，0 = 正中，+1 = 全右。
+        /// 用于「敌人从哪边来」—— 左边来的脚步就该从左边响。
+        /// </summary>
+        public void PlayFootstep(bool rightFoot, float volumeScale, float pan)
+        {
             AudioClip clip = rightFoot ? _sfxFootstepRight : _sfxFootstepLeft;
 
             // 新素材缺失时退回原来那条单声道，不至于完全没声
@@ -459,7 +520,16 @@ namespace NailongFNAF.Audio
             if (volumeScale < 0f) { volumeScale = 0f; }
             if (volumeScale > 1f) { volumeScale = 1f; }
 
+            if (pan < -1f) { pan = -1f; }
+            if (pan > 1f) { pan = 1f; }
+
+            // ⚠️ PlayOneShot 用的是**播放这一瞬间**的音源参数。
+            // 所以先设 panStereo 再播，播完立刻复位 ——
+            // 不复位的话后面别的音效（门、灯）会继承这个左右偏移。
+            float before = _footstepSource.panStereo;
+            _footstepSource.panStereo = pan;
             _footstepSource.PlayOneShot(clip, _sfxVolume * volumeScale);
+            _footstepSource.panStereo = before;
         }
 
         public void PlayPowerOut()

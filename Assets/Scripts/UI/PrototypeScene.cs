@@ -363,26 +363,36 @@ namespace NailongFNAF.UI
         private const string FontResourcePath = "Fonts/SourceHanSansCN-Normal";
 
         /// <summary>
-        /// 镜头**直接跟鼠标**：鼠标在屏幕哪儿，镜头就朝哪儿。
+        /// 镜头跟手的缓动时间（秒），吃掉鼠标的微小抖动。
         ///
-        /// 这个值只是跟手的缓动时间（秒），用来吃掉鼠标的微小抖动，别调大 ——
-        /// 大了镜头就会「拖」在鼠标后面。想完全 1:1 跟手就写 0。
+        /// 2026-11-03 从 0.08 调到 **0.10**：用户反馈「镜头跟随太晃」。
+        /// 实测（60fps）：鼠标 ±4% 屏宽的抖，镜头摆幅从 16.5° 降到 9.5°（**少四成**）；
+        /// 转到 45° 从 0.10s 变 0.12s、转到 69° 从 0.25s 变 0.32s —— 手感觉不出来。
+        /// 再往大调（0.12 / 0.14）抖动只再降一点点，转速却明显拖慢，不划算。
+        ///
+        /// ⚠️ 治手抖的主力是 <see cref="ViewPanMapping"/> 的**中心死区**，缓动只负责
+        /// 把死区之外剩下那点碎抖磨平。别靠调大这个值来治晃 —— 越调大转头越黏，
+        /// 而且 0.14 以上抖动只再降一点点，转速却明显拖慢。
         /// </summary>
-        private const float TurnSmoothTime = 0.08f;
+        private const float TurnSmoothTime = 0.10f;
 
         /// <summary>
-        /// 鼠标映射的「跟手区间」半宽：`pan = Clamp((x − 0.5) / K, −1, 1)`。
+        /// 鼠标映射的「跟手区间」半宽和中心死区 —— 具体算法在
+        /// <see cref="ViewPanMapping"/>（纯逻辑，有单元测试盯着）。
         ///
-        /// K = 0.20 → 中间 40% 屏宽按比例跟手，**两边各 30% 是饱和区**（推到那儿视角
-        /// 就不再变）。饱和区是必需的：墙上的按钮跟着墙走，鼠标要靠「推过去」才能压住它，
-        /// 而绝对线性映射下墙上的点滑得比鼠标快（见 <see cref="BuildWallButtons"/>），
-        /// 永远追不上。有了饱和区，饱和区内 dx/dmouse = 0，按钮才稳。
+        /// 为什么这两个数不能凭手感调：墙上的按钮跟着墙走，鼠标要靠「推过去」才能压住它。
+        /// 绝对线性映射下墙上的点滑得比鼠标快（见 <see cref="BuildWallButtons"/>），
+        /// 永远追不上。所以**饱和区**（推到那儿视角就不再变）是必需的，
+        /// 且饱和起点必须早于按钮满转时的屏幕 x。
         ///
-        /// ⚠️ **别再调小**：按钮满转时的屏幕 x 随窗口宽高比变 —— 窗口越宽水平视场越大、
-        /// 按钮越往中间跑（16:9 时在 0.906，2.4:1 时只剩 0.798）。K 必须小到让**最靠中间
-        /// 的那个位置也落在饱和区里**（0.5 + 0.20 = 0.70）。K = 0.20 能覆盖到约 3.5:1 的窗口。
+        /// ⚠️ 按钮满转时的屏幕 x 随窗口宽高比变 —— 窗口越宽水平视场越大、按钮越往中间跑
+        /// （实测 16:9 在 0.944，2.4:1 在 0.829，3.15:1 在 0.750）。
+        /// 当前饱和起点是 **0.75**（0.5 + 死区 0.10 + 活跃区 0.15），按钮压得住的窗口比到约 3.15:1。
+        /// 再宽就得把门往前挪、重渲全景（见 docs/04-设计决策.md）。
         /// </summary>
-        private const float PanSaturationK = 0.20f;
+        private const float PanDeadZone = ViewPanMapping.DefaultDeadZone;
+
+        private const float PanActiveSpan = ViewPanMapping.DefaultSpan;
 
         /// <summary>
         /// 判「玩家在看哪一边」的 |_pan| 阈值。只有噜噜的手电筒在用（`IsShiningAtFront`）。
@@ -1260,8 +1270,16 @@ namespace NailongFNAF.UI
         {
             if (!CanOperate(gm))
             {
-                // 断电 / 天亮 / 被抓 —— 视角锁回正面，只能眼睁睁看着
-                _panTarget = 0f;
+                // 断电 / 天亮 / 被抓 —— 玩家已经不能操作，视角由系统接管。
+                //
+                // ⚠️ 断电时**甩到最左边**，不是回正面：奶龙是从**左门**来「收电费」的，
+                // 而断电演出的立绘位置是按左门的屏幕坐标算的（见 ApplyBlackoutCharacter）。
+                // 视角在正面时左门偏航 ~90°、整个在画面外，立绘会被算到屏幕外面去，
+                // 整段演出玩家什么都看不见。转到最左后门心落在画面里，它就在正前方闪。
+                // 转的过程被静默段的黑幕盖着，看不见。
+                //
+                // 天亮 / 被抓还是回正面。
+                _panTarget = gm.HasPowerOut ? -1f : 0f;
             }
             else if (gm.MonitorUp)
             {
@@ -1277,24 +1295,51 @@ namespace NailongFNAF.UI
                 // 通话面板和桌面手机对不上，氛围也散了。
                 // 冻结视角（_panTarget 不动），挂断后从原方向接着看。
             }
+            else if (ViewExternalControl)
+            {
+                // AI 代打要「用手电照正门」时临时接管视角：把镜头收回正前方。
+                //
+                // ⚠️ **只管这一小段**（用户 2026-11-03 定）：其余时候视角必须还给玩家。
+                // 转头是这个游戏唯一的操作自由，代打不该连它一起抢走。
+                // 这里只改目标值，转的过程仍交给下面的 SmoothDamp ——
+                // 所以是「转回来」而不是「啪一下跳回来」。
+                _panTarget = 0f;
+            }
             else
             {
                 float width = Screen.width;
                 float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
 
-                // 鼠标位置映射成转头量：正中 0，推到 |x−0.5| ≥ PanSaturationK 就满转。
-                // 中间那段按比例跟手，两边各留一段**饱和区**（推到那儿视角不再变）——
-                // 贴墙的按钮只有落在这段里，鼠标才压得住、点得到（见 BuildWallButtons）。
-                _panTarget = Mathf.Clamp((x - 0.5f) / PanSaturationK, -1f, 1f);
+                // 鼠标位置映射成转头量：中心一段**死区**（鼠标怎么晃都不动），
+                // 然后线性跟手，推到饱和点之后不再变。曲线在 ViewPanMapping 里，
+                // 有单元测试盯着，别在这儿临时调参。
+                _panTarget = ViewPanMapping.Map(x, PanDeadZone, PanActiveSpan);
             }
 
-            // 一点缓动：跟手，但不让鼠标的微小抖动直接抖到画面上
-            _pan = Mathf.SmoothDamp(_pan, _panTarget, ref _panVelocity, TurnSmoothTime);
+            // 缓动：吃掉鼠标的高频抖动（真正治手抖的是 ViewPanMapping 的死区，
+            // 缓动只管把剩下的碎抖磨平）。
+            //
+            // ⚠️ **不要给 SmoothDamp 传 maxSpeed**。试过 200/240°/s 两档，实测
+            // 转满反而从 0.45 秒拖到 0.52 秒 —— 它的 maxSpeed 卡的是**位移**，
+            // 不是角速度，在起手最需要快的那一段直接把速度按住，越限越慢。
+            // 要限速得自己写积分，不值得：SmoothDamp 的曲线本身就没快到会闪。
+            _pan = Mathf.SmoothDamp(_pan, _panTarget, ref _panVelocity,
+                TurnSmoothTime, Mathf.Infinity, Time.unscaledDeltaTime);
 
             // 供敌人 AI 判断"玩家在看哪边"（只有噜噜的手电筒在用）。
             // 阈值按**角度**定：0.64 × 70° ≈ 45°，和满转 90° 时代一样 —— 手电筒手感不变。
             ViewSide view;
-            if (_pan <= -ViewSideThreshold)
+            if (ViewExternalControl)
+            {
+                // ⚠️ 接管期间**直接判正前方**，不要按 _pan 反推。
+                //
+                // 镜头是 SmoothDamp 慢慢转回来的（约 0.3 秒），这期间 _pan 还停在
+                // ±0.6 以上，按阈值算仍是 Left/Right —— 于是这一帧把 AI 刚设的 Front
+                // 又改回去，噜噜的 IsShiningAtFront 时灵时不灵，表现为「手电闪了但它不退」。
+                // 谁先跑（AutoPlayer 还是 UpdateView）也不该影响结果，所以干脆在这里定死。
+                view = ViewSide.Front;
+            }
+            else if (_pan <= -ViewSideThreshold)
             {
                 view = ViewSide.Left;
             }
@@ -1788,6 +1833,15 @@ namespace NailongFNAF.UI
         private void SetBlackout()
         {
             SetLayer(_bgBase, null, Color.black, 1f);
+
+            // ⚠️ 断电期间房间虽然被黑幕盖住，相机**仍然要跟着 _pan 转**。
+            // 断电演出的奶龙立绘是按「左门的屏幕坐标」摆的（见 ApplyBlackoutCharacter），
+            // 相机停着不动的话，视角甩到最左只是一句空话 —— 立绘的位置也不会跟着变，
+            // 左门偏航 ~90° 仍在画面外，整段演出看不见人。
+            if (_room != null)
+            {
+                _room.SetPan(_pan);
+            }
         }
 
         /// <summary>
@@ -2104,13 +2158,17 @@ namespace NailongFNAF.UI
             foreach (var brain in _enemyDirector.Brains)
             {
                 var door = brain as DoorEnemyBrain;
-                if (door == null || door.Side != side || door.IsAttacking)
+                if (door == null || door.Side != side)
                 {
                     continue;
                 }
 
-                // 站到门口 = Stage 到顶（门类敌人配了机位路径，MaxStage 不再是固定的 2）
-                if (door.Stage >= door.MaxStage)
+                // 正在扑上来的**也要显示**（用户 2026-10-31 定）：
+                // 早先这里遇到 IsAttacking 就跳过，结果「门开着 + 攒满移动机会」
+                // 那一帧立绘立刻被隐藏，玩家开灯什么都看不到、下一帧就跳杀 ——
+                // 变成靠信息缺失杀人。现在它扑的瞬间仍站着可见。
+                // 站到门口 = Stage 到顶；正在攻击时 Stage 也是到顶的。
+                if (door.Stage >= door.MaxStage || door.IsAttacking)
                 {
                     id = door.Id;
                     return true;
@@ -2184,9 +2242,106 @@ namespace NailongFNAF.UI
         /// 手电筒：按钮跟着监控收起来；光只在「亮着 + 朝正前方」时打出来。
         /// 顺带兜底松手 —— 抬起事件被系统吞掉时（切窗口等）按钮会粘住。
         /// </summary>
+        /// <summary>
+        /// AI 接管手电时为 true —— 这时 ApplyFlashlight 不再按鼠标推算，
+        /// 改为直接采用 <see cref="ExternalFlashlightOn"/>。
+        ///
+        /// 为什么必须这样：手电每帧按「鼠标/Ctrl 是否按着」重算并写回 gm.FlashlightOn，
+        /// 外部（AutoPlayer）无论怎么写都会被下一帧冲掉。
+        /// 与其和它抢，不如开个后门让它别管。
+        /// </summary>
+        public bool FlashlightExternalControl { get; set; }
+
+        /// <summary>AI 想要的手电状态（仅在 <see cref="FlashlightExternalControl"/> 为真时生效）。</summary>
+        public bool ExternalFlashlightOn { get; set; }
+
+        /// <summary>
+        /// AI 代打临时接管转头时为 true —— 期间鼠标不再驱动镜头，镜头回正前方。
+        ///
+        /// **只该在「手电要照正门」的那一小段打开**（见 AutoPlayer.HandleLulu），
+        /// 别的时候必须关掉：玩家转头是这个游戏唯一的操作自由。
+        ///
+        /// 为什么要这个开关而不是让 AI 直接写 `_panTarget`：
+        /// UpdateView 每帧都会按鼠标重算 `_panTarget`，AI 从外面写会被立刻冲掉
+        /// （和手电那边 `FlashlightExternalControl` 是同一个坑）。
+        /// </summary>
+        public bool ViewExternalControl { get; set; }
+
+        /// <summary>
+        /// 手电的视觉部分：光斑亮度、按钮明暗。
+        ///
+        /// 抽出来是为了让 AI 接管分支也能复用 —— 那条路只跳过了「按鼠标推算状态」，
+        /// 视觉表现照旧。
+        /// </summary>
+        private void ApplyFlashlightVisuals(GameManager gm, bool usable)
+        {
+            if (_flashlightButton == null)
+            {
+                return;
+            }
+
+            bool shiningFront = gm.FlashlightOn && usable && gm.CurrentView == ViewSide.Front;
+            float target = shiningFront ? FlashlightGlowAlpha : 0f;
+
+            _flashlightGlowAlpha = Mathf.MoveTowards(_flashlightGlowAlpha, target,
+                Time.deltaTime * 5f);
+
+            if (_flashlightGlow != null)
+            {
+                Color glow = _flashlightGlow.color;
+                glow.a = _flashlightGlowAlpha;
+                _flashlightGlow.color = glow;
+                _flashlightGlow.enabled = _flashlightGlowAlpha > 0.001f;
+            }
+
+            if (_flashlightButton.sprite != null && _flashlightButton.sprite.name == "ui_flashlight")
+            {
+                _flashlightButton.color = gm.FlashlightOn
+                    ? Color.white
+                    : new Color(0.55f, 0.55f, 0.55f, 0.85f);
+            }
+        }
+
         private void ApplyFlashlight(GameManager gm, bool monitorUp, bool locked)
         {
             bool usable = !monitorUp && !locked;
+
+            // ── AI 接管：跳过鼠标推算，直接采用外部状态 ──
+            if (FlashlightExternalControl)
+            {
+                bool want = usable && ExternalFlashlightOn;
+
+                if (want != _flashlightHeld)
+                {
+                    _flashlightHeld = want;
+                    gm.SetFlashlight(want);
+                }
+
+                // ⚠️ 这几步不能省 —— 它们和下面「玩家路径」里的那几行是一回事，
+                // 只是 AI 替代了「按鼠标」这一环。早先这里直接 return 了，
+                // 结果 group.alpha 一直是 0、anchoredPosition 一直是 (0,0)，
+                // 手电按钮整个看不见（踩过）。
+                _flashlightGroup.alpha = usable ? 1f : 0f;
+                _flashlightGroup.blocksRaycasts = usable;
+
+                // 位置仍然按世界点投影 —— 和玩家模式完全一样
+                if (TryProjectToCanvas(FlashlightButtonWorld, out Vector2 aiFlashPos))
+                {
+                    if (usable && _flashlightButton != null)
+                    {
+                        ((RectTransform)_flashlightButton.transform).anchoredPosition = aiFlashPos;
+                    }
+
+                    if (_flashlightGlow != null)
+                    {
+                        ((RectTransform)_flashlightGlow.transform).anchoredPosition =
+                            aiFlashPos + new Vector2(0f, 300f);
+                    }
+                }
+
+                ApplyFlashlightVisuals(gm, usable);
+                return;
+            }
 
             _flashlightGroup.alpha = usable ? 1f : 0f;
             _flashlightGroup.blocksRaycasts = usable;
@@ -5430,6 +5585,19 @@ namespace NailongFNAF.UI
         /// </summary>
         private float NearestEnemyDistance()
         {
+            return NearestEnemyDistance(out _);
+        }
+
+        /// <summary>
+        /// 同上，但**同时告诉你它在哪一侧** —— 脚步声要按这个分左右声道。
+        ///
+        /// <paramref name="pan"/>：-1 = 左边来的，0 = 正前方（噜噜），+1 = 右边来的。
+        /// 没有敌人在动时返回 -1，pan 给 0。
+        /// </summary>
+        private float NearestEnemyDistance(out float pan)
+        {
+            pan = 0f;
+
             if (_enemyDirector == null)
             {
                 return -1f;
@@ -5450,9 +5618,25 @@ namespace NailongFNAF.UI
                 if (d < 0f) { d = 0f; }
                 if (d > 1f) { d = 1f; }
 
-                if (d > nearest)
+                if (d <= nearest)
                 {
-                    nearest = d;
+                    continue;
+                }
+
+                nearest = d;
+
+                // 这只就是「离你最近的那只」，脚步该从它那一侧响。
+                // 噜噜走正门 → 不偏；门类敌人按 Side 分左右。
+                var door = brain as DoorEnemyBrain;
+
+                if (door != null)
+                {
+                    pan = door.Side == Side.Left ? -1f : 1f;
+                }
+                else
+                {
+                    // 正门那只（噜噜）—— 声音从正前方来，声道居中
+                    pan = 0f;
                 }
             }
 
@@ -5461,7 +5645,7 @@ namespace NailongFNAF.UI
 
         private void UpdateFootsteps()
         {
-            float distance = NearestEnemyDistance();
+            float distance = NearestEnemyDistance(out float sidePan);
 
             // 太远就不该听见 —— 低于这个门槛一律静音
             const float AudibleFrom = 0.22f;
@@ -5474,7 +5658,7 @@ namespace NailongFNAF.UI
                     return;
                 }
 
-                EmitFootstep(distance);
+                EmitFootstep(distance, sidePan);
                 _footstepLeft--;
 
                 if (_footstepLeft > 0)
@@ -5513,7 +5697,7 @@ namespace NailongFNAF.UI
             // 起一串：2~4 步，第一步随机左右
             _footstepLeft = Random.Range(2, 5);
             _footstepRightFoot = Random.value < 0.5f;
-            EmitFootstep(distance);
+            EmitFootstep(distance, sidePan);
             _footstepLeft--;
             _footstepNextAt = Time.time + FootstepStepGap;
         }
@@ -5522,7 +5706,7 @@ namespace NailongFNAF.UI
         /// 放一声脚步。**响度随距离线性上升**：
         /// 刚进走廊时几乎听不见（0.15），站到门口就是满音量。
         /// </summary>
-        private void EmitFootstep(float distance)
+        private void EmitFootstep(float distance, float sidePan)
         {
             if (_audio == null)
             {
@@ -5534,11 +5718,24 @@ namespace NailongFNAF.UI
             // 听感上就是「贴着耳朵踩了一脚」。
             float volume = Mathf.Lerp(0.45f, 1.35f, Mathf.Clamp01(distance));
 
-            _audio.PlayFootstep(_footstepRightFoot, volume);
+            // ── 立体声定位 ──
+            // 两个因素叠加：
+            //   sidePan  = 敌人在哪一侧（-1 左 / 0 正前 / +1 右），决定**基准位置**
+            //   左右脚    在基准位置附近小幅交错（±0.18），模拟两只脚落地的细微差
+            //
+            // 只用左右脚那点偏移不够 —— 左边来的敌人听起来还是从中间响。
+            // 所以必须叠加 sidePan。
+            float footOffset = _footstepRightFoot ? FootstepFootPan : -FootstepFootPan;
+            float pan = Mathf.Clamp(sidePan + footOffset, -1f, 1f);
+
+            _audio.PlayFootstep(_footstepRightFoot, volume, pan);
 
             // 交替
             _footstepRightFoot = !_footstepRightFoot;
         }
+
+        /// <summary>左右脚在声场里的交错幅度（叠加在敌人方位之上）。</summary>
+        private const float FootstepFootPan = 0.18f;
 
         /// <summary>（旧的「附近就无规则响」判据，保留给别处用）</summary>
 
@@ -5841,11 +6038,19 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            if (_enemyDirector.KnockCount > _lastKnockCount)
+            // 「计数器比游标大就播一声」—— 规则在 CounterCursor 里（纯逻辑 + 单元测试）。
+            //
+            // ⚠️ 它额外处理「计数器被重建」的情况：EnemyDirector 换夜时会把
+            // KnockCount 清零，而 _lastKnockCount 是表现层的游标、不会跟着重置。
+            // 不处理的话新一局第一声敲门是 1、游标还停在 1 → 被吞掉，
+            // 听起来就是「整夜没敲过门」（2026-11-04 报的就是这个）。
+            int newCursor;
+            if (CounterCursor.ShouldFire(_enemyDirector.KnockCount, _lastKnockCount, out newCursor))
             {
-                _lastKnockCount = _enemyDirector.KnockCount;
                 PlayKnockSfx();
             }
+
+            _lastKnockCount = newCursor;
 
             ApplyDeliveryBag(gm);
             HandleDeliveryClick(gm);
@@ -7484,12 +7689,17 @@ namespace NailongFNAF.UI
         /// 按钮跟着墙一起移动，像画在墙上。
         ///
         /// 位置贴着门框**外侧**：门洞世界偏航角 ±77°~103°，按钮世界点约 ±106.6°，
-        /// 满转 70° 时投到屏幕 x ≈ 0.905（门框外沿在 0.854），正好紧挨着门框。
+        /// 满转 70° 时投到屏幕 x ≈ 0.944（门框外沿在 0.854），正好紧挨着门框。
         ///
-        /// ⚠️ **必须靠 <see cref="PanSaturationK"/> 那段饱和区才能点得到**：
+        /// ⚠️ **必须靠 <see cref="ViewPanMapping"/> 那段饱和区才能点得到**：
         /// 鼠标位置同时决定转头量，按钮又跟着墙走 —— 若映射是绝对线性的，鼠标每挪 1 单位，
         /// 墙上的点要滑 `1.09 × 满转角(rad) × sec²Δ` 单位（满转 70°、Δ=34° 时约 1.6），
         /// 比鼠标快，**永远追不上**。饱和区里 `dx/dmouse = 0`，按钮就钉住不动了。
+        ///
+        /// ⚠️ 按钮满转时的屏幕 x 跟**窗口宽高比**强相关（视场越大它越往中间跑）：
+        /// 16:9 在 0.944、2.4:1 在 0.829、3.15:1 在 0.750。而当前饱和起点是 **0.75**
+        /// （0.5 + 死区 0.10 + 活跃区 0.15），窗口比宽过约 3.15:1 时鼠标推到边也压不住按钮。
+        /// 这不是配置问题，是「门开在座位旁边」的几何结果 —— 要彻底解决得把门往前挪、重渲全景。
         /// </summary>
         private void BuildWallButtons()
         {
@@ -8585,6 +8795,110 @@ namespace NailongFNAF.UI
                 DebugAdvanceTwoMinutes);
             MakeDebugButton(panel.transform, "+2 小时", 840f, -146f, 150f, 34f,
                 DebugAdvanceTwoHours);
+
+            // ── 自动通关 AI ──
+            // 挂在场景里的 AutoPlayer，点一下让它自己打；再点一下交还控制权。
+            // 状态文案单独一行，能看见它现在在干什么。
+            Text aiLabel = MakeLabel(panel.transform, "AI：", 17,
+                new Color(0.65f, 0.95f, 0.75f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(620f, -188f), new Vector2(52f, 34f));
+            aiLabel.alignment = TextAnchor.MiddleLeft;
+
+            MakeDebugButton(panel.transform, "开始自动打", 680f, -188f, 150f, 34f,
+                DebugToggleAutoPlayer);
+
+            // MakeDebugButton 不返回引用，自己从子物体里捞回来（改文案要用）
+            var aiBtnGo = panel.transform.Find("DebugBtn_" + panel.transform.childCount);
+            foreach (var b in panel.GetComponentsInChildren<Button>(true))
+            {
+                var lbl = b.GetComponentInChildren<Text>();
+                if (lbl != null && lbl.text == "开始自动打")
+                {
+                    _debugAiButton = b;
+                    break;
+                }
+            }
+
+            _debugAiText = MakeLabel(panel.transform, string.Empty, 16,
+                new Color(0.8f, 0.9f, 0.8f),
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(840f, -188f), new Vector2(360f, 34f));
+            _debugAiText.alignment = TextAnchor.MiddleLeft;
+        }
+
+        /// <summary>自动通关 AI 的宿主（懒创建）。</summary>
+        private AutoPlayer _autoPlayer;
+
+        /// <summary>调试面板上的 AI 开关按钮。</summary>
+        private Button _debugAiButton;
+
+        /// <summary>调试面板上的 AI 状态文字。</summary>
+        private Text _debugAiText;
+
+        /// <summary>
+        /// 调试面板：一键开关自动通关 AI。
+        ///
+        /// AI 本体在 <see cref="AutoPlayer"/>，这里只负责建 / 停和显示状态。
+        /// </summary>
+        private void DebugToggleAutoPlayer()
+        {
+            if (_autoPlayer != null)
+            {
+                // 已经在跑 → 停下，交还控制权
+                _autoPlayer.Stop();
+                Destroy(_autoPlayer.gameObject);
+                _autoPlayer = null;
+
+                if (_debugAiButton != null)
+                {
+                    var label = _debugAiButton.GetComponentInChildren<Text>();
+                    if (label != null)
+                    {
+                        label.text = "开始自动打";
+                    }
+                }
+
+                return;
+            }
+
+            var go = new GameObject("AutoPlayerHost");
+            _autoPlayer = go.AddComponent<AutoPlayer>();
+            _autoPlayer.Begin();
+
+            if (_debugAiButton != null)
+            {
+                var label = _debugAiButton.GetComponentInChildren<Text>();
+                if (label != null)
+                {
+                    label.text = "停止 AI";
+                }
+            }
+        }
+
+        /// <summary>每帧把 AI 在干什么显示到调试面板上。</summary>
+        private void UpdateDebugAiText()
+        {
+            if (_debugAiText == null)
+            {
+                return;
+            }
+
+            if (_autoPlayer == null)
+            {
+                if (_debugAiText.text.Length > 0)
+                {
+                    _debugAiText.text = string.Empty;
+                }
+
+                return;
+            }
+
+            string action = _autoPlayer.LastAction;
+            if (_debugAiText.text != action)
+            {
+                _debugAiText.text = action;
+            }
         }
 
         /// <summary>
@@ -9104,53 +9418,29 @@ namespace NailongFNAF.UI
         // 按钮回调
         // ---------------------------------------------------------------
 
+        // ⚠️ 音效统一走 DoorLightActions —— 那是 AI 代打和调试快捷键也会走的入口。
+        // 早先音效直接写在这几个回调里，结果 AI 直接调 GameManager、绕过回调，
+        // 开关门/灯全都没有声音（2026-11-04 报的）。
+        // **别在这里再补一次 PlayDoor/PlayLight**，会响两遍。
+
         private void OnDoorLeft()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.LeftDoorClosed;
-            gm.ToggleLeftDoor();
-
-            if (_audio != null && gm.LeftDoorClosed != before)
-            {
-                // 该侧已被突破 → 门灯都废了，退回默认机械音（见 AudioManager.PlayDoor）
-                _audio.PlayDoor(gm.LeftDoorClosed, gm.IsSideDisabled(Side.Left));
-            }
+            DoorLightActions.ToggleDoor(GameManager.Instance, Side.Left, _audio);
         }
 
         private void OnDoorRight()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.RightDoorClosed;
-            gm.ToggleRightDoor();
-
-            if (_audio != null && gm.RightDoorClosed != before)
-            {
-                _audio.PlayDoor(gm.RightDoorClosed, gm.IsSideDisabled(Side.Right));
-            }
+            DoorLightActions.ToggleDoor(GameManager.Instance, Side.Right, _audio);
         }
 
         private void OnLightLeft()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.LeftLightOn;
-            gm.ToggleLeftLight();
-
-            if (_audio != null && gm.LeftLightOn != before)
-            {
-                _audio.PlayLight(gm.LeftLightOn, gm.IsSideDisabled(Side.Left));
-            }
+            DoorLightActions.ToggleLight(GameManager.Instance, Side.Left, _audio);
         }
 
         private void OnLightRight()
         {
-            var gm = GameManager.Instance;
-            bool before = gm.RightLightOn;
-            gm.ToggleRightLight();
-
-            if (_audio != null && gm.RightLightOn != before)
-            {
-                _audio.PlayLight(gm.RightLightOn, gm.IsSideDisabled(Side.Right));
-            }
+            DoorLightActions.ToggleLight(GameManager.Instance, Side.Right, _audio);
         }
 
         private void OnCameraBox(int index)

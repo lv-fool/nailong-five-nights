@@ -8,8 +8,13 @@ namespace NailongFNAF.Gameplay
     /// 路径走完（<see cref="MaxStage"/>）就是**站到了门口** ——
     /// 这段不再属于任何机位，监控里看不到它，只能靠门口那盏灯现形。
     ///
-    /// 到了门口：门关着 → 被挡回去；门开着 → 撑过 DoorGraceSeconds 就动手
-    /// （这个窗口照原版角色的移动机会间隔：邦尼 4.97s / 奇卡 4.98s / 弗莱迪 3.02s）。
+    /// 到了门口分两个阶段，**每个阶段的末尾都判一次门，门开着就动手**：
+    ///   · **读数阶段**（<see cref="DoorWindow"/>）：门一直开着 → 走完就扑。
+    ///     长度随活动度线性走：**活动度 0 → 7.62 秒，满级 → 各角色原值**
+    ///     （袋鼠 4.97s / 牛来 4.98s，照原版邦尼/奇卡的移动机会间隔）
+    ///   · **最后一搏**（<see cref="LastChanceSeconds"/>，随活动度 1~3 秒）：
+    ///     门**一关**就进这一段（不用等读数走完）；走完时门开着 → 扑，门关着 → 退走。
+    ///     期间门被打开会**重置**计时，等于重新给一份窗口。
     ///
     /// **右门是共用通道** —— 门口已经站着别人时，后来者停在走廊等（先来后到）。
     ///
@@ -46,12 +51,46 @@ namespace NailongFNAF.Gameplay
         /// <summary>门口的额外宽限秒数（贝利亚之夜的「去甲肾上腺素」/「喹硫平」）。</summary>
         public float GraceBonusSeconds { get; set; }
 
-        /// <summary>把倍率套进 <see cref="DoorGraceSeconds"/> 之后真正用的窗口长度。</summary>
+        /// <summary>
+        /// 活动度 **0** 时「读数窗口」有多长（秒）。活动度满级时线性压回各角色自己的
+        /// <see cref="DoorGraceSeconds"/>。
+        ///
+        /// 用户 2026-11-04 定：**AI 值 0~20 对应 7.62s → 原值**。
+        /// 低难度给玩家更长的反应窗口，高难度压回原版节奏。
+        ///
+        /// ⚠️ 只作用于**读数**（门一直开着的那段）。最后一搏另有
+        /// <see cref="LastChanceSeconds"/>（1~3 秒，也是难度越高越久）。
+        /// </summary>
+        public const float DoorWindowAtZeroActivity = 7.62f;
+
+        /// <summary>
+        /// 按当前活动度折算出来的**读数窗口**（秒），**不含**贝利亚夜里那些加成。
+        ///
+        /// 活动度 0 → <see cref="DoorWindowAtZeroActivity"/>（7.62s）；
+        /// 活动度满级 → <see cref="DoorGraceSeconds"/>（袋鼠 4.97 / 牛来 4.98）。
+        /// 中间线性。运行时 <c>SetActivityLevel</c> 一改就立刻生效，不用重建。
+        /// </summary>
+        public float DoorReadoutSeconds
+        {
+            get
+            {
+                float t = ActivityLevel / (float)MaxActivityLevel;
+                if (t < 0f) { t = 0f; }
+                if (t > 1f) { t = 1f; }
+
+                return DoorWindowAtZeroActivity
+                    + (DoorGraceSeconds - DoorWindowAtZeroActivity) * t;
+            }
+        }
+
+        /// <summary>
+        /// 真正用的窗口长度：按活动度折算的读数窗口，再加贝利亚那些加成、乘倍率。
+        /// </summary>
         public float DoorWindow
         {
             get
             {
-                float window = DoorGraceSeconds + GraceBonusSeconds;
+                float window = DoorReadoutSeconds + GraceBonusSeconds;
 
                 if (window < 0f)
                 {
@@ -69,15 +108,18 @@ namespace NailongFNAF.Gameplay
         public Side Side { get; private set; }
 
         /// <summary>
-        /// 到门口后的**「移动机会」间隔**（秒）—— 门开着还是关着都用它。
+        /// 门**一直开着**时，它在门口撑多久就动手（秒）—— **活动度满级**时的值。
         ///
-        /// 原版语义：敌人每次移动机会才做一次决定，
-        ///   门关着 → 这次机会用来退走
-        ///   门开着 → 这次机会用来动手
-        /// 所以它同时是「关门后多久才走」和「开门后多久才动手」。
+        /// 照原版 FNAF 1 的「移动机会」间隔定（邦尼 4.97 / 奇卡 4.98 / 弗莱迪 3.02）。
+        /// 也正是玩家从「它站到门口」到「必须关门」的**反应窗口**。
         ///
-        /// 名字沿用旧称 DoorGraceSeconds（大量引用和测试都在用），
-        /// 但含义已经从「开门宽限」扩展成「回合间隔」。
+        /// ⚠️ 真正用的窗口在低难度下比它**长** —— 见 <see cref="DoorReadoutSeconds"/>。
+        /// 别直接拿这个字段当窗口用，要窗口请用 <see cref="DoorWindow"/>。
+        ///
+        /// ⚠️ 门在这个窗口里**任何时刻**关上，都会立刻转到
+        /// <see cref="LastChanceSeconds"/> 那条路，不必撑满 —— 见 <see cref="OnTick"/>。
+        ///
+        /// 名字沿用旧称 DoorGraceSeconds（大量引用和测试都在用）。
         /// </summary>
         public float DoorGraceSeconds { get; private set; }
 
@@ -92,6 +134,9 @@ namespace NailongFNAF.Gameplay
         /// 纯逻辑类不认识音频和道具，这里只记账。
         /// </summary>
         public int KnocksIssued { get; private set; }
+
+        /// <summary>这一趟站门口已经敲过了吗 —— 防「门一直关着每帧都敲」。</summary>
+        private bool _knockedThisVisit;
 
         /// <summary>取走一次「敲门」记录。表现层每帧问一次，没记录就返回 false。</summary>
         public bool ConsumeKnock()
@@ -110,10 +155,9 @@ namespace NailongFNAF.Gameplay
         ///
         /// 规则（按用户 2026-10-22 定）：
         /// <list type="number">
-        /// <item>到门口后先攒满 <see cref="DoorGraceSeconds"/>（一个移动机会）。</item>
-        /// <item>攒满后**不立刻决定**，而是再进入一段缓冲期。</item>
-        /// <item>缓冲期内门**一旦被打开就重置**，重新计时 —— 玩家还有补救机会。</item>
-        /// <item>缓冲期走完：门还开着 → 动手；门关着 → 退走。</item>
+        /// <item>门**一关**就进这段缓冲（不必等 <see cref="DoorGraceSeconds"/> 读数走完）。</item>
+        /// <item>缓冲期内门**一旦被打开就重置**，重新计时 —— 玩家还能再补救一次。</item>
+        /// <item>缓冲期走完：**门开着 → 动手**（和读数阶段末尾那条对称）；门关着 → 退走。</item>
         /// </list>
         ///
         /// **缓冲时长随难度增加**（见 <see cref="LastChanceSeconds"/>）：
@@ -382,20 +426,24 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
-        /// 站在门口之后的行为 —— **照原版 FNAF 1 的回合制**。
+        /// 站在门口之后的行为。两条路二选一，判据只看**门关没关**：
         ///
-        /// 关键：无论门开还是门关，它都不会「立刻」做反应，
-        /// 而是等到**下一次移动机会**（每 MoveIntervalSeconds 一次）才行动：
-        ///
-        ///   门关着 → 用这次机会**退走**
-        ///   门开着 → 用这次机会**动手**
+        ///   · **门关着** → 立刻进「最后一搏」，撑完 <see cref="LastChanceSeconds"/>
+        ///     （随活动度 1~3 秒）就退走。期间门被打开只是把这段**重置**，重头再算。
+        ///   · **门一直开着** → 撑满 <see cref="DoorWindow"/>（活动度 0 时 7.62 秒、
+        ///     满级时 4.97/4.98 秒）就动手。
         ///
         /// 所以玩家看到的是：
         ///   · 关上门后它还要在门口站一会儿才走（不是一关就消失）
-        ///   · 打开门后它也不是立刻扑进来，得等下一次机会
+        ///   · 打开门后它也不是立刻扑进来，得先撑完那段反应窗口
         ///
-        /// 早先的实现是「关门立刻退、开门立刻开始算动手计时」，
-        /// 等于关门即无敌、开门即必死，两头都没有喘息。
+        /// ⚠️ 一句话概括：**判定只发生在两个阶段的末尾，那两帧门开着就扑** ——
+        ///   · 读数走完那一帧门开着 → 扑
+        ///   · 最后一搏走完那一帧门开着 → 扑
+        ///
+        /// 中途关一次门只能把判定点从「读数末尾」挪到「最后一搏末尾」，**不免疫**。
+        /// 反过来说，最后一搏期间开门会把计时清零、重新给一份窗口 ——
+        /// 那是「拿电费换时间」的赌博：计时走完时门还开着，就当场扑。
         /// </summary>
         protected override void OnTick(float dt, EnemyContext ctx)
         {
@@ -413,6 +461,26 @@ namespace NailongFNAF.Gameplay
             // 否则一步 Tick(3f) 会直接把 2 秒的最后一搏一起冲过去、当场退走。
             float remaining = dt;
 
+            // ⚠️ **门只要关着，就立刻进最后一搏**（用户 2026-11-03 定，同日追加）。
+            //
+            // 早先是「走到门口先攒一个移动机会（4.97~7.62 秒，看难度），攒满发现门关着才开始计时」——
+            // 等于白白给玩家 5 秒免费时间。所以改成：到门口发现门关着，立刻填满。
+            //
+            // 但只补「刚跨进门口那一下」还不够 —— 读数走到一半才关门的话：
+            //   · 它要等 5 秒读数**走完**才进最后一搏（玩家多挨一段）
+            //   · 更糟的是，玩家要是在读数走完前又把门打开，
+            //     那一帧门是开着的 → 当场扑上来，前面关的那几秒全白费
+            // 用户 2026-11-03 追加：**五秒内关过门，一样要进最后一搏**。
+            // 所以现在门一关就把 DoorTimer 填满 —— 判定点整个挪到「最后一搏末尾」，
+            // 读数阶段再也不会判它动手。
+            //
+            // 每帧填是安全的：DoorTimer 一旦到 DoorWindow 就只增不减
+            //（只有退走 / 换位 / 再次跨进门口才清零），填了不会有副作用。
+            if (Stage >= MaxStage && DoorTimer < DoorWindow && ctx.IsDoorClosed(Side))
+            {
+                DoorTimer = DoorWindow;
+            }
+
             // 每帧先更新「门这一帧是开还是关」，供最后一搏检测上升沿用。
             // 必须在攒移动机会之前更新，否则「攒满那一帧门刚好打开」会漏判。
             bool doorClosedNow = ctx.IsDoorClosed(Side);
@@ -428,6 +496,26 @@ namespace NailongFNAF.Gameplay
             }
 
             _doorWasClosed = doorClosedNow;
+
+            // ── 被门挡住 → 敲两下门（放在「攒满」判定**之前**）──
+            //
+            // ⚠️ 必须在前面：下面那个 `if (justFilled) { ... return; }` 会提前返回，
+            // 把敲门吃掉。而「到门口发现门关着」现在是立刻填满 DoorTimer，
+            // 走的就是那条提前返回的路径 —— 敲门永远不触发、外卖永远不掉（踩过）。
+            //
+            // _knockedThisVisit 防「门一直关着每帧都敲」。
+            bool doorBlocksNow = ctx.IsDoorClosed(Side)
+                && (!RequireLightToBlock || ctx.IsLightOn(Side));
+
+            if (doorBlocksNow && !_knockedThisVisit)
+            {
+                _knockedThisVisit = true;
+                KnocksIssued++;
+            }
+            else if (!doorBlocksNow)
+            {
+                _knockedThisVisit = false;   // 门开了 → 下次关门可以再敲
+            }
 
             // 记录「这一帧是不是刚好攒满」—— 只有这一帧才做「门开着就动手」的判定。
             //
@@ -454,32 +542,31 @@ namespace NailongFNAF.Gameplay
             bool closed = ctx.IsDoorClosed(Side)
                 && (!RequireLightToBlock || ctx.IsLightOn(Side));
 
-            // ── 攒满的那一刻：门开着就**立刻动手** ──
+            // ── 读数攒满的那一刻：门开着就**立刻动手** ──
             //
-            // 这里的语义是「它扑上来了」—— 移动机会刚到、门又开着，
-            // 没有理由再等 2 秒。2 秒缓冲只服务于「门关着」的情况。
+            // 这里的语义是「它扑上来了」—— 读数刚到、门又开着，
+            // 没有理由再等最后一搏。那段缓冲只服务于「门关着」的情况。
             if (justFilled && !closed)
             {
                 IsAttacking = true;
                 return;
             }
 
-            // ── 攒满的那一刻：门关着 → 它被挡在外面，敲两下门 ──
-            // 只有真的走到门口（Stage 到顶）才会进到这段，走廊里不算。
-            if (justFilled && closed)
-            {
-                KnocksIssued++;
-            }
 
-            // ── 门关着：进入「最后一搏」2 秒 ──
+            // ── 门关着：进入「最后一搏」 ──
             //
-            // 规则（用户 2026-10-22 定）：
-            //   · 攒满移动机会、且门关着 → 开始计这 2 秒
+            // 规则（用户 2026-10-22 定，2026-11-03 补齐最后一条）：
+            //   · 读数攒满、且门关着 → 开始计这段缓冲
             //   · 期间**门被打开的那一刻**重置计时（从关变开 = 上升沿）
-            //   · 2 秒走完门还关着 → 退走
+            //   · 走完时**门开着 → 动手**；门关着 → **退走**
             //
-            // 「门被打开就重置」的含义：玩家在最后关头开门，它反而要重来一遍，
-            // 于是「反复开关门」变成一场有代价的赌博，而不是无脑按住关门。
+            // 「门被打开就重置」的含义：玩家在最后关头开门，它反而要重来一遍 ——
+            // 于是「反复开关门」是一场**有代价的赌博**：开门能省电、能把判定往后拖，
+            // 但计时走完那一刻门还开着，它就当场扑上来。
+            //
+            // ⚠️ 最后那条「门开着 → 动手」是 2026-11-03 补的。
+            // 早先这里是无条件 Retreat()，等于「关过一次门就永久免疫」——
+            // 开门零风险，上面说的「赌博」根本没有赌注。
             if (_doorWasOpenedWhileLastChance)
             {
                 LastChanceTimer = 0f;
@@ -491,15 +578,23 @@ namespace NailongFNAF.Gameplay
 
             if (LastChanceTimer < LastChanceSeconds)
             {
-                return;   // 这 2 秒还没走完，继续站着
+                return;   // 还没走完，继续站着
             }
 
-            // 2 秒走完、门一直关着 → 退走
+            // ── 走完了：门开着就动手 ──
             //
-            // ⚠️ 这里**不能**再补一句 IsAttacking = true —— 早先改逻辑时
-            // 残留了一行无条件赋值，导致「退走」和「动手」同时发生：
-            // Stage 归零（看着像走了）、IsAttacking 却是 true（下一帧立刻判突破），
-            // 玩家会看到它明明退了、却照样跳杀。
+            // 和上面「读数攒满那一帧」对称 —— 两个阶段的末尾都判门。
+            if (!closed)
+            {
+                IsAttacking = true;
+                return;
+            }
+
+            // 门一直关着 → 退走
+            //
+            // ⚠️ 退走和动手**必须二选一**。早先改逻辑时残留过一行无条件的
+            // IsAttacking = true，导致两者同时发生：Stage 归零（看着像走了）、
+            // IsAttacking 却是 true（下一帧立刻判突破），玩家会看到它明明退了、照样跳杀。
             LastChanceTimer = 0f;
             NoteBlocked();
             Retreat();
@@ -523,6 +618,7 @@ namespace NailongFNAF.Gameplay
             DoorTimer = 0f;
             LastChanceTimer = 0f;
             _doorWasClosed = false;
+            _knockedThisVisit = false;   // 下次再来可以再敲一次
 
             // 只有配了机位路径的（袋鼠 / 牛来 / 奶龙进攻态）才谈得上「游走」。
             // 没路径的老三档实现只能回 Stage 0，保持原样。

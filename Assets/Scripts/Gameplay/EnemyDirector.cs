@@ -515,6 +515,25 @@ namespace NailongFNAF.Gameplay
             get { return _brains.Values; }
         }
 
+        /// <summary>
+        /// 当前几点（0 = 12AM）。没有 GameManager / 时钟时按 0 算 —— 等于不吃任何加成。
+        /// </summary>
+        private int CurrentHour
+        {
+            get
+            {
+                if (_game == null || _game.Clock == null)
+                {
+                    return 0;
+                }
+
+                return _game.Clock.CurrentHour;
+            }
+        }
+
+        /// <summary>上一次应用难度时是几 AM —— 换小时了就要重算（3AM / 4AM 都有加成）。</summary>
+        private int _lastAppliedHour = -1;
+
         private void ApplyDifficulty()
         {
             foreach (var pair in _brains)
@@ -527,6 +546,11 @@ namespace NailongFNAF.Gameplay
                 {
                     level = (int)System.Math.Round(level * (1f + _overdrive));
                 }
+
+                // 后半程加成（3AM 全体 +1、4AM 除奶龙外再 +1）——
+                // 规则全在 <see cref="LateNightBoost"/> 里，纯逻辑 + 单元测试。
+                // 已经是 0 的保持 0，不然「这一夜它压根不来」这个设计就被破坏了。
+                level = LateNightBoost.Apply(pair.Key, level, CurrentHour);
 
                 pair.Value.SetActivityLevel(level);
             }
@@ -617,6 +641,16 @@ namespace NailongFNAF.Gameplay
             }
 
             _blackout.Reset();
+
+            // ── 换小时检查：3AM / 4AM 各抬一次难度 ──
+            //
+            // ApplyDifficulty 平时只在换夜 / 调难度时调，时钟自然走过 3AM / 4AM 时
+            // 没人通知它 —— 不在这里补一刀，那几级加成永远不会生效。
+            if (game.Clock.CurrentHour != _lastAppliedHour)
+            {
+                _lastAppliedHour = game.Clock.CurrentHour;
+                ApplyDifficulty();
+            }
 
             foreach (var pair in _brains)
             {

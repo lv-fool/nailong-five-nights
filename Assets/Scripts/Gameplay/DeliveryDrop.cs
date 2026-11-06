@@ -16,10 +16,27 @@ namespace NailongFNAF.Gameplay
     public class DeliveryDrop
     {
         /// <summary>
-        /// 捡起来能补的电量档位（百分比）。每落一份随机抽一档 ——
-        /// 1 点算运气差，5 点算运气好，中间是 2 点。
+        /// 捡起来能补的电量档位（百分比）。**加权**抽取，不是均匀三档
+        /// （老板 2026-11-03 定）：
+        ///
+        ///   · 1 点 —— 70%，大多数时候是「聊胜于无」
+        ///   · 2 点 —— 15%
+        ///   · 5 点 —— 15%
+        ///
+        /// 平均下来一份约 1.75 点。这个表要和 <see cref="GainWeights"/> 一一对应，
+        /// 两边的顺序不能各自改 —— 改档位请连权重一起改。
         /// </summary>
         public static readonly float[] Gains = { 5f, 2f, 1f };
+
+        /// <summary>
+        /// 与 <see cref="Gains"/> 一一对应的权重（相对值，不必加起来等于 100）：
+        /// 5 点 15、2 点 15、1 点 70。
+        ///
+        /// ⚠️ 之所以按「先抽权重表下标、再映射回 Gains」来写，是为了保住 Gains 原有的
+        /// 排列（外部和测试都按下标读它）。**别用「把 1 点重复 70 次塞进数组」那种写法**：
+        /// 档位一多数组就爆炸，而且抽档概率会跟数组长度耦合。
+        /// </summary>
+        public static readonly int[] GainWeights = { 15, 15, 70 };
 
         /// <summary>默认骰子（<see cref="Drop()"/> 不带参数时用它）。</summary>
         private static readonly IRandomSource SharedRandom = new SystemRandomSource();
@@ -80,8 +97,71 @@ namespace NailongFNAF.Gameplay
             bool fresh = !_available;
             _available = true;
             _age = 0f;
-            _gain = Gains[roll.Range(0, Gains.Length)];
+            _gain = RollGain(roll);
             return fresh;
+        }
+
+        /// <summary>
+        /// 按权重抽一档电量（70% 是 1 点、各 15% 是 2 点和 5 点）。
+        ///
+        /// 做法：把权重累加成一条 [0, total) 的区间带，掷一个点落在哪段就是哪档。
+        /// 这样骰子只需要「随机整数」这一种能力（<see cref="IRandomSource"/> 就这些），
+        /// 测试里塞个固定值也能精确命中想要的档位。
+        ///
+        /// 骰子返回越界值（测试里的 FixedRandom 不会夹）时按 clamp 处理，
+        /// 不让它抛异常 —— 外卖不该因为骰子不听话把整局搞崩。
+        /// </summary>
+        private static float RollGain(IRandomSource roll)
+        {
+            int count = GainWeights.Length < Gains.Length ? GainWeights.Length : Gains.Length;
+            if (count <= 0)
+            {
+                return 0f;
+            }
+
+            int total = 0;
+            for (int i = 0; i < count; i++)
+            {
+                if (GainWeights[i] > 0)
+                {
+                    total += GainWeights[i];
+                }
+            }
+
+            if (total <= 0)
+            {
+                // 权重表被填成 0 也别崩 —— 退回最朴素的一档
+                return Gains[count - 1];
+            }
+
+            int pick = roll.Range(0, total);
+            if (pick < 0)
+            {
+                pick = 0;
+            }
+            else if (pick >= total)
+            {
+                pick = total - 1;
+            }
+
+            int edge = 0;
+            for (int i = 0; i < count; i++)
+            {
+                int weight = GainWeights[i];
+                if (weight <= 0)
+                {
+                    continue;
+                }
+
+                edge += weight;
+                if (pick < edge)
+                {
+                    return Gains[i];
+                }
+            }
+
+            // 理论上走不到这儿（上面的 total 已经把权重加全了）
+            return Gains[count - 1];
         }
 
         /// <summary>时间流逝。放凉的自己消失。</summary>

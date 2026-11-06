@@ -6,6 +6,10 @@ namespace NailongFNAF.Tests
     /// <summary>
     /// 夜晚时钟的行为规格。
     /// 节奏依据：FNAF 1 —— 每游戏小时 85 秒，一夜 510 秒。
+    ///
+    /// 每一局**照旧从 12AM 打到 6AM**。
+    /// （3AM 只是「难度加强的起点」，不影响时钟本身 —— 见
+    ///  <see cref="NightClock.BoostFromHour"/> 和 EnemyDirector.BoostForLateNight。）
     /// </summary>
     public class NightClockTests
     {
@@ -75,6 +79,20 @@ namespace NailongFNAF.Tests
 
             Assert.AreEqual(0.5f, clock.NightProgress, Tolerance);
             Assert.AreEqual(3, clock.CurrentHour);
+        }
+
+        [Test]
+        public void 走过三点_但时钟照常走()
+        {
+            var clock = new NightClock();
+
+            // 3AM 只是难度加成起点，不是开局时间
+            clock.Tick(85f * NightClock.BoostFromHour);
+            Assert.AreEqual(NightClock.BoostFromHour, clock.CurrentHour);
+
+            clock.Tick(85f);
+            Assert.AreEqual(NightClock.BoostFromHour + 1, clock.CurrentHour);
+            Assert.IsFalse(clock.IsNightComplete);
         }
 
         [Test]

@@ -81,11 +81,17 @@ namespace NailongFNAF.Tests
             brain.Tick(0.05f, EnemyContext.Idle());
         }
 
+        /// <summary>
+        /// 把敌人推到指定 Stage。
+        ///
+        /// ⚠️ 用**实例自己的间隔**：活动度现在也决定频率（满级 3 秒），
+        /// 喂固定 5 秒会一次攒满两步、Stage 越过目标值。
+        /// </summary>
         private static void AdvanceToStage(EnemyBrain brain, EnemyContext ctx, int targetStage)
         {
             for (int i = 0; i < 50 && brain.Stage < targetStage; i++)
             {
-                brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+                brain.Tick(brain.MoveIntervalSeconds, ctx);
             }
         }
 
@@ -101,7 +107,7 @@ namespace NailongFNAF.Tests
 
             for (int i = 0; i < 100; i++)
             {
-                brain.Tick(5f, ctx);
+                brain.Tick(brain.MoveIntervalSeconds, ctx);
             }
 
             Assert.AreEqual(0, brain.Stage);
@@ -115,10 +121,12 @@ namespace NailongFNAF.Tests
                 EnemyBrain.MaxActivityLevel, new FixedRandom(EnemyBrain.MaxActivityLevel));
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(5f, ctx);
+            // ⚠️ 用实例自己的间隔 —— 活动度现在也决定频率（满级 3 秒），
+            // 写死 5 秒会一次攒满两次掷骰。
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(1, brain.Stage);
 
-            brain.Tick(5f, ctx);
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(2, brain.Stage);
         }
 
@@ -129,7 +137,9 @@ namespace NailongFNAF.Tests
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(4.9f, ctx);
+            // ⚠️ 用实例间隔的 90%：活动度现在也决定频率（满级 3 秒），
+            // 写死 4.9f 早就越过 3 秒了，掷骰会正常触发。
+            brain.Tick(brain.MoveIntervalSeconds * 0.9f, ctx);
 
             Assert.AreEqual(0, brain.Stage);
         }
@@ -167,14 +177,18 @@ namespace NailongFNAF.Tests
             AdvanceToStage(brain, ctx, 2);
             Assert.AreEqual(2, brain.Stage);
 
-            // 刚过 0.1 秒 —— 还在攒移动机会，不该退
+            // ⚠️ 2026-11-03 起：**被门挡住的瞬间就进最后一搏**，不再先等移动机会。
+            // 所以 0.1 秒后它已经在最后一搏里了 ——
+            // 原来这里断言「还在攒移动机会」，语义已经不成立。
             brain.Tick(0.1f, ctx);
-            Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
+            Assert.AreEqual(2, brain.Stage, "不该退");
+            Assert.IsTrue(brain.InLastChance, "到门口发现门关着，应当立刻进最后一搏");
             Assert.IsFalse(brain.RetreatedThisTick);
+            Assert.IsFalse(brain.IsAttacking);
 
-            // 攒满移动机会 —— 但缓冲还没走完
-            brain.Tick(turn, ctx);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
+            // 继续走一小段 —— 最后一搏还没走完，仍然站着
+            brain.Tick(brain.LastChanceSeconds * 0.3f, ctx);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完");
             Assert.IsFalse(brain.RetreatedThisTick);
             Assert.IsFalse(brain.IsAttacking);
 
@@ -198,6 +212,49 @@ namespace NailongFNAF.Tests
         //   1. 该进攻时 IsAttacking 必须是 true，而且**保持住**
         //   2. 该退走时 IsAttacking 必须是 false（残留会让它「退了照样跳杀」）
         // ---------------------------------------------------------------
+
+        [Test]
+        public void 读数窗口随活动度从七点六二压到原值()
+        {
+            // 用户 2026-11-04 定：AI 值 0~20 对应 7.62s → 原值（线性）。
+            // 低难度给更长的反应窗口，满级压回原版节奏。
+            const float grace = 4.97f;
+
+            System.Func<int, DoorEnemyBrain> make = (activity) =>
+                new DoorEnemyBrain(EnemyId.Daishu, Side.Left, activity,
+                    new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            Assert.AreEqual(7.62f, DoorEnemyBrain.DoorWindowAtZeroActivity, 0.001f,
+                "活动度 0 的读数窗口被改过 —— 用户指定的是 7.62s");
+
+            Assert.AreEqual(7.62f, make(0).DoorWindow, 0.001f, "活动度 0 应该是 7.62s");
+            Assert.AreEqual(grace, make(EnemyBrain.MaxActivityLevel).DoorWindow, 0.001f,
+                "活动度满级应该压回原值");
+
+            // 中间线性
+            Assert.AreEqual((7.62f + grace) * 0.5f, make(10).DoorWindow, 0.001f,
+                "活动度 10 应该正好在中点");
+
+            // 越界也不能跑飞
+            Assert.AreEqual(7.62f, make(-5).DoorWindow, 0.001f, "低于 0 当 0");
+            Assert.AreEqual(grace, make(999).DoorWindow, 0.001f, "高于 20 当 20");
+        }
+
+        [Test]
+        public void 读数窗口只是读数_不改变最后一搏()
+        {
+            // 两段是独立的：读数随难度**变短**，最后一搏随难度**变长**。
+            System.Func<int, DoorEnemyBrain> make = (activity) =>
+                new DoorEnemyBrain(EnemyId.Daishu, Side.Left, activity,
+                    new FixedRandom(1), EnemyBrain.DefaultMoveIntervalSeconds, 4.97f);
+
+            Assert.Greater(make(0).DoorWindow, make(EnemyBrain.MaxActivityLevel).DoorWindow,
+                "活动度低时读数窗口应该更长");
+
+            Assert.AreEqual(DoorEnemyBrain.LastChanceBaseSeconds, make(0).LastChanceSeconds, 0.001f);
+            Assert.AreEqual(DoorEnemyBrain.LastChanceMaxSeconds,
+                make(EnemyBrain.MaxActivityLevel).LastChanceSeconds, 0.001f);
+        }
 
         // ---------------------------------------------------------------
         // 最后一搏时长随难度增加 / 进攻失败 → 随机游走
@@ -278,7 +335,7 @@ namespace NailongFNAF.Tests
             int steps = brain.WanderStepsLeft;
             for (int i = 0; i < steps; i++)
             {
-                brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, idle);
+                brain.Tick(brain.MoveIntervalSeconds, idle);
 
                 Assert.Less(brain.Stage, brain.MaxStage, "游走期间不该到门口");
                 Assert.AreNotEqual(0, brain.Stage, "游走期间不回出生地");
@@ -341,7 +398,11 @@ namespace NailongFNAF.Tests
         {
             // 最危险的场景：玩家在门口反复开关门试探。
             // 早先「攒满后只要门开着就动手」的写法会让它一开门就被判动手，
-            // 和「开门重置 2 秒」的设计自相矛盾。
+            // 和「开门重置」的设计自相矛盾。
+            //
+            // ⚠️ 这里测的是**开门那一瞬间不会动手**，不是「永远不会动手」——
+            // 只要一直重置、最后一搏始终走不完，就不会动手。
+            // 「走完时门开着 → 动手」由 读数途中关门再开_最后一搏走完时门开着就动手 盯着。
             const float turn = 3f;
             var brain = new DoorEnemyBrain(EnemyId.Niulai, Side.Left,
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1),
@@ -415,9 +476,11 @@ namespace NailongFNAF.Tests
 
             AdvanceToStage(brain, closed, 2);
 
-            // 攒满移动机会 + 已经在最后一搏里走了 1 秒
-            brain.Tick(turn + 1f, closed);
+            // ⚠️ 2026-11-03 起门关着会**立刻**进最后一搏（不等移动机会）。
+            // AdvanceToStage 已经让它站在门口，这 1 秒就是在最后一搏里走的。
+            brain.Tick(1f, closed);
             Assert.AreEqual(2, brain.Stage, "最后一搏没走完，还站着");
+            Assert.IsTrue(brain.InLastChance);
 
             // 玩家开门 —— 这 2 秒重置
             brain.Tick(0.1f, opened);
@@ -450,8 +513,8 @@ namespace NailongFNAF.Tests
             var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
             AdvanceToStage(brain, closed, 2);
 
-            // 攒满移动机会 + 最后一搏走了一半
-            brain.Tick(turn + 1f, closed);
+            // 门关着 → 立刻进最后一搏，走 1 秒（还没满）
+            brain.Tick(1f, closed);
             Assert.AreEqual(2, brain.Stage);
 
             // 玩家开门 → 重置
@@ -484,6 +547,132 @@ namespace NailongFNAF.Tests
             Assert.IsTrue(brain.IsAttacking, "门开着，攒满就扑上来");
         }
 
+        // ---------------------------------------------------------------
+        // 读数途中关门（用户 2026-11-03 追加：「五秒内关门了也要进最后一搏」）
+        // ---------------------------------------------------------------
+
+        [Test]
+        public void 读数途中关门_立刻进最后一搏不再等读数走完()
+        {
+            // 旧行为：门开着的读数走到一半才关门，还得把剩下几秒读完才进最后一搏。
+            // 新行为：门一关就立刻进 —— 等于「关过门」当场生效。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            // 门开着走 2 秒 —— 读数走了 2/5，还不到最后一搏
+            brain.Tick(2f, opened);
+            Assert.IsFalse(brain.InLastChance, "门开着，读数还没走完");
+            Assert.IsFalse(brain.IsAttacking);
+
+            // 关门 → 立刻进最后一搏，不用再等剩下的 3 秒
+            brain.Tick(0.1f, closed);
+            Assert.IsTrue(brain.InLastChance, "门一关就该进最后一搏，不该等读数走完");
+            Assert.IsFalse(brain.IsAttacking, "关门不该被判动手");
+
+            // 最后一搏走完 → 退走
+            brain.Tick(brain.LastChanceSeconds + 0.1f, closed);
+            Assert.AreEqual(0, brain.Stage, "最后一搏走完就退走");
+            Assert.IsFalse(brain.IsAttacking);
+        }
+
+        [Test]
+        public void 读数途中关门再开_最后一搏走完时门开着就动手()
+        {
+            // 这是「关门把判定点挪走」之后必须守住的下半条：
+            // 关门只是把判定从「读数末尾」挪到「最后一搏末尾」，**不是免疫**。
+            // 关门后又把门打开、一直开着，最后一搏走完那一刻门是开着的 → 当场扑。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            brain.Tick(2f, opened);          // 读数走到 2/5
+            brain.Tick(0.1f, closed);        // 关门 → 进最后一搏
+            Assert.IsTrue(brain.InLastChance);
+
+            // 又打开 —— 只许重置，那一瞬间不许动手
+            brain.Tick(0.1f, opened);
+            Assert.IsFalse(brain.IsAttacking, "开门只是重置计时，不该立刻被抓");
+
+            // 门就这么开着 —— 最后一搏走完那一刻门开着 → 该动手了
+            float elapsed = 0f;
+            bool attacked = false;
+            for (int i = 0; i < 60 && !attacked; i++)
+            {
+                brain.Tick(0.1f, opened);
+                elapsed += 0.1f;
+                attacked = brain.IsAttacking;
+            }
+
+            Assert.IsTrue(attacked,
+                "最后一搏走完时门还开着，应当动手（等了 " + elapsed.ToString("F1") + "s）");
+            Assert.IsFalse(brain.RetreatedThisTick, "动手和退走不能同时发生");
+        }
+
+        [Test]
+        public void 最后一搏走完时门关着就退走()
+        {
+            // 和上一条配对：同样进最后一搏，同样走完，只差门最后关没关。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            brain.Tick(2f, opened);
+            brain.Tick(0.1f, closed);        // 关门 → 进最后一搏
+            Assert.IsTrue(brain.InLastChance);
+
+            // 中途开一下再关回去（重置一次），最后仍然是关着的
+            brain.Tick(0.1f, opened);
+            Assert.IsFalse(brain.IsAttacking, "开门那一瞬间不该动手");
+            brain.Tick(brain.LastChanceSeconds + 0.1f, closed);
+
+            Assert.IsFalse(brain.IsAttacking, "走完时门关着，不许动手");
+            Assert.AreEqual(0, brain.Stage, "门关着就该退走");
+            Assert.IsTrue(brain.RetreatedThisTick);
+        }
+
+        [Test]
+        public void 读数走完那一帧才关门_也算赶上了()
+        {
+            // 边界：读数刚好要攒满的那一帧门才关上。
+            // 关门判定跑在攒满之前，所以赶得上 —— 旧行为这里会当场扑上来。
+            const float grace = 5f;
+            var brain = new DoorEnemyBrain(EnemyId.Daishu, Side.Left,
+                EnemyBrain.MaxActivityLevel, new FixedRandom(1),
+                EnemyBrain.DefaultMoveIntervalSeconds, grace);
+
+            var opened = EnemyContext.Idle();
+            var closed = new EnemyContext(true, false, false, false, false, ViewSide.Front, 0);
+
+            AdvanceToStage(brain, opened, 2);
+
+            brain.Tick(grace - 0.05f, opened);   // 差 0.05 秒攒满
+            Assert.IsFalse(brain.InLastChance, "还差一点，不该已经进最后一搏");
+            Assert.IsFalse(brain.IsAttacking);
+
+            brain.Tick(0.05f, closed);           // 临门一脚关上
+            Assert.IsTrue(brain.InLastChance, "赶上了，该进最后一搏");
+            Assert.IsFalse(brain.IsAttacking, "关门了就不该动手");
+        }
+
         [Test]
         public void 门类敌人还在走廊时不会动手()
         {
@@ -491,7 +680,7 @@ namespace NailongFNAF.Tests
                 EnemyBrain.MaxActivityLevel, new FixedRandom(1));
             var ctx = EnemyContext.Idle();
 
-            brain.Tick(5f, ctx);
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
 
             Assert.AreEqual(1, brain.Stage);
             Assert.IsFalse(brain.IsAttacking);
@@ -534,7 +723,7 @@ namespace NailongFNAF.Tests
             AdvanceToStage(brain, EnemyContext.Idle(), 2);
 
             // 一口气按着不放 —— 只有「按下」那一下算数，想再闪一次得松手重按
-            brain.Tick(5f, shining);
+            brain.Tick(brain.MoveIntervalSeconds, shining);
 
             Assert.AreEqual(1, brain.FlashCount);
             Assert.AreEqual(2, brain.Stage);
@@ -723,11 +912,13 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(2, brain.PathCameraIndex, "出生地应该是海盗湾（2）");
 
-            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+            // ⚠️ 用实例自己的间隔：活动度现在也决定频率（满级 3 秒），
+            // 写死 DefaultMoveIntervalSeconds(5) 会一次攒满两步。
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(1, brain.Stage);
             Assert.AreEqual(1, brain.PathCameraIndex, "推进一格到餐厅（1）");
 
-            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);
+            brain.Tick(brain.MoveIntervalSeconds, ctx);
             Assert.AreEqual(2, brain.Stage);
             Assert.AreEqual(-1, brain.PathCameraIndex, "到正门口后不再属于任何机位");
         }
@@ -833,7 +1024,9 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(NailongMode.Approaching, brain.Mode);
             Assert.AreEqual(1, brain.CameraIndex, "转化后应站在路径起点（餐厅 1）");
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            // ⚠️ 用实例自己的间隔：活动度现在也决定频率（满级 3 秒），
+            // 写死 DefaultMoveIntervalSeconds(5) 会一次攒满两步、Stage 跳变。
+            float step = brain.MoveIntervalSeconds;
             brain.Tick(step, ctx);                          // 掷骰推进一格
             Assert.AreEqual(1, brain.Stage);
             Assert.AreEqual(6, brain.CameraIndex, "第一步之后应停到东走廊（6）");
@@ -857,19 +1050,21 @@ namespace NailongFNAF.Tests
             brain.Tick(brain.StealIntervalSeconds, idle);
             Assert.AreEqual(NailongMode.Approaching, brain.Mode);
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
             brain.Tick(step, idle);
             brain.Tick(step, idle);          // 无路径 → MaxStage=2 → 两步到门口
             Assert.AreEqual(2, brain.Stage);
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
 
-            // 关门只是拖住它：移动机会 + 最后一搏 2 秒都走完才退
+            // ⚠️ 2026-11-03 起：门关着会**立刻**进最后一搏（不等移动机会）。
             brain.Tick(0.1f, closed);
-            Assert.AreEqual(2, brain.Stage, "还没到移动机会，应该继续站在门口");
+            Assert.AreEqual(2, brain.Stage, "不该退");
+            Assert.IsTrue(brain.InLastChance, "门关着应当立刻进最后一搏");
 
-            brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
+            // 最后一搏还没走完 —— 仍然站着
+            brain.Tick(brain.LastChanceSeconds * 0.5f, closed);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完");
 
             brain.Tick(brain.LastChanceSeconds, closed);
             Assert.AreEqual(0, brain.Stage);
@@ -886,7 +1081,7 @@ namespace NailongFNAF.Tests
             brain.Tick(brain.StealIntervalSeconds, ctx);   // 偷到电 → 转进攻态
             Assert.AreEqual(NailongMode.Approaching, brain.Mode);
 
-            brain.Tick(EnemyBrain.DefaultMoveIntervalSeconds, ctx);   // 掷骰没过
+            brain.Tick(brain.MoveIntervalSeconds, ctx);   // 掷骰没过
 
             Assert.AreEqual(0, brain.Stage);
             Assert.AreEqual(0, brain.AdvanceCount);
@@ -901,7 +1096,7 @@ namespace NailongFNAF.Tests
             var taken = new EnemyContext(false, false, false, false, false,
                 ViewSide.Front, 0, EnemyId.Niulai);
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
             brain.Tick(brain.StealIntervalSeconds, taken);   // 偷到电 → 转进攻态
             brain.Tick(step, taken);                          // 走廊
             Assert.AreEqual(1, brain.Stage);
@@ -919,7 +1114,7 @@ namespace NailongFNAF.Tests
             var mine = new EnemyContext(false, false, false, false, false,
                 ViewSide.Front, 0, EnemyId.Nailong);
 
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
             brain.Tick(brain.StealIntervalSeconds, mine);
             brain.Tick(step, mine);
             brain.Tick(step, mine);
@@ -932,7 +1127,7 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);   // 转进攻态
             brain.Tick(step, idle);
@@ -941,13 +1136,14 @@ namespace NailongFNAF.Tests
 
             var closed = new EnemyContext(false, true, false, false, false, ViewSide.Front, 0);
 
-            // 关门不再立刻退 —— 要等移动机会 + 最后一搏 2 秒
+            // 关门不再立刻退 —— 但 2026-11-03 起会**立刻**进最后一搏（不等移动机会）
             brain.Tick(0.1f, closed);
-            Assert.AreEqual(2, brain.Stage, "还没到移动机会，继续站在门口");
+            Assert.AreEqual(2, brain.Stage, "继续站在门口");
+            Assert.IsTrue(brain.InLastChance);
 
-            // 攒满移动机会 —— 但最后一搏还没走完，仍不退
-            brain.Tick(NailongBrain.FreddyDoorWindowSeconds, closed);
-            Assert.AreEqual(2, brain.Stage, "移动机会到了，但最后一搏还没走完");
+            // 最后一搏还没走完 —— 仍不退
+            brain.Tick(brain.LastChanceSeconds * 0.5f, closed);
+            Assert.AreEqual(2, brain.Stage, "最后一搏还没走完");
 
             // 最后一搏走完、门还关着 → 退回偷电
             brain.Tick(brain.LastChanceSeconds, closed);
@@ -960,7 +1156,7 @@ namespace NailongFNAF.Tests
         {
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);   // 转进攻态
             brain.Tick(step, idle);
@@ -968,7 +1164,7 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(2, brain.Stage);
 
             // 门开着：攒满移动机会就立刻动手，没有 2 秒缓冲
-            brain.Tick(NailongBrain.DefaultDoorGraceSeconds, idle);
+            brain.Tick(brain.DoorGraceSeconds, idle);
             Assert.IsTrue(brain.IsAttacking, "门开着，攒满就扑上来");
         }
 
@@ -979,7 +1175,7 @@ namespace NailongFNAF.Tests
             // 换位也就无从谈起；这时的应对手段只剩关门。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);
             brain.Tick(step, idle);
@@ -1003,7 +1199,7 @@ namespace NailongFNAF.Tests
             // 反过来说：到门口之后宽限计时照常走，看监控拦不住它。
             var brain = new NailongBrain(EnemyBrain.MaxActivityLevel, new FixedRandom(1), 3);
             var idle = EnemyContext.Idle();
-            float step = EnemyBrain.DefaultMoveIntervalSeconds;
+            float step = brain.MoveIntervalSeconds;   // 用实例自己的间隔：活动度也决定频率
 
             brain.Tick(brain.StealIntervalSeconds, idle);
             brain.Tick(step, idle);
@@ -1012,7 +1208,7 @@ namespace NailongFNAF.Tests
 
             var watching = new EnemyContext(false, false, false, false, true, ViewSide.Front,
                 brain.CameraIndex);
-            brain.Tick(NailongBrain.DefaultDoorGraceSeconds, watching);
+            brain.Tick(brain.DoorGraceSeconds, watching);
             Assert.IsTrue(brain.IsAttacking, "门开着，攒满就动手（看不看监控都一样）");
         }
 
