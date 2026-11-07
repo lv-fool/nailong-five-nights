@@ -646,8 +646,22 @@ def render_dirs(dirs, tex, seed, dark, exposure, w, h, proj, vig=True, props=Tru
                                   0.55, gain)
 
     # ---- 墙上的海报 / 儿童画
-    for axis, side_max, u0, v0, u1, v1, dec in DECALS:
-        m = (which == 0) & (ax == axis) & (on_max == side_max)
+    #
+    # ⚠️ 元组支持两种长度：
+    #   6 元组 (axis, side_max, u0, v0, u1, v1, dec) —— 贴**盒子 0**（房间墙），旧写法
+    #   7 元组 (which_box, axis, side_max, u0, v0, u1, v1, dec) —— 指定贴哪个盒子
+    #
+    # 为什么加 7 元组（2026-11-07）：海盗湾的「OUT OF ORDER」告示牌要贴在**幕布**上，
+    # 而幕布是盒子 1、不是盒子 0。原来写死 which == 0，告示牌一个像素都画不出来。
+    # 6 元组保持向后兼容，别的地方不用改。
+    for entry in DECALS:
+        # 8 元组 = 指定盒子；7 元组 = 贴盒子 0（旧写法）
+        if len(entry) == 8:
+            which_box, axis, side_max, u0, v0, u1, v1, dec = entry
+        else:
+            which_box = 0
+            axis, side_max, u0, v0, u1, v1, dec = entry
+        m = (which == which_box) & (ax == axis) & (on_max == side_max)
         if not m.any():
             continue
         sel = m & (u > u0) & (u < u1) & (v > v0) & (v < v1)

@@ -38,6 +38,33 @@ CHAR_H_LO, CHAR_H_HI = 0.08, 0.20
 CHAR_S_LO = 0.30
 CHAR_V_LO = 0.30
 
+# ─────────────────────────────────────────────────────────────────────
+# 监控后期（v5 追加，2026-11-07）
+#
+# 用户反馈「画风有点草率」。实测截图发现根因不是角色，是**海报**：
+# 海报是 2048×1024 的高清 AI 图，饱和度拉满，而底图是程序渲的低模。
+# 贴纸用的还是 UI/Default 材质，**一点劣化都没有** —— 像两块发光画布贴在灰墙上。
+#
+# 这里把监控画面那套后期烤进贴图。数值必须和 MonitorCRT.shader 对齐：
+#   · 色偏 0.82 / 1.08 / 1.04
+#   · 降饱和 0.34
+#   · 降对比 ×0.78
+#   · 扫描线 0.72~1.00
+#   · 整体压暗 ×0.90
+# 改了 shader 记得回来同步这里，不然海报又和底图分成两层。
+# ─────────────────────────────────────────────────────────────────────
+MONITOR_LOOK   = True     # 关了就是纯做旧（v4 行为）
+MON_SAT        = 0.40     # 降饱和量（shader 是 0.34，海报本来就更艳，多压一点）
+MON_CONTRAST   = 0.80     # 降对比（shader 0.78）
+MON_SCAN       = 0.26     # 扫描线深度
+# ⚠️ 间距按**目标显示尺寸**算，不按贴图尺寸 ——
+# 海报贴到监控里只有约 300~600 像素宽（原图 1920），缩 3~6 倍。
+# 所以这里 12px 一条，缩完差不多 2~4px，正好是底图那种横纹。
+# 第一版写的 3px，缩图之后彻底看不见（踩过）。
+MON_SCAN_LINES = 12
+MON_NOISE      = 5.0      # 噪点
+MON_TINT       = (0.86, 1.06, 1.03)   # 色偏：压红提绿蓝
+
 MASK_SANITY = 0.15
 
 
@@ -131,6 +158,34 @@ def process(path, out_path):
         gain = (mean0 * TARGET_MEAN_RATIO) / cur
         gain = float(np.clip(gain, 0.5, 4.0))
         arr = arr * gain
+
+    # ★★ 监控后期 —— 让海报和底图/敌人处在同一个「监控画面」里
+    if MONITOR_LOOK:
+        arr = np.clip(arr, 0, 255)
+
+        # 降饱和
+        lum = arr[:, :, 0] * 0.299 + arr[:, :, 1] * 0.587 + arr[:, :, 2] * 0.114
+        for ch in range(3):
+            arr[:, :, ch] = arr[:, :, ch] * (1 - MON_SAT) + lum * MON_SAT
+
+        # 降对比（往 128 靠）
+        arr = (arr - 128.0) * MON_CONTRAST + 128.0
+
+        # 色偏
+        arr *= np.array(MON_TINT, dtype=np.float32)
+
+        # 扫描线：整张图一起压，和底图那层横纹对得上
+        if MON_SCAN > 0 and MON_SCAN_LINES > 0:
+            ys = np.arange(h, dtype=np.float32)
+            phase = (ys % MON_SCAN_LINES) / float(MON_SCAN_LINES)
+            arr *= (1.0 - MON_SCAN * phase)[:, None, None]
+
+        # 噪点
+        if MON_NOISE > 0:
+            arr += rng.normal(0.0, MON_NOISE, arr.shape)
+
+        # 整体压暗（老监控屏不会那么透亮）
+        arr *= 0.92
 
     arr = np.clip(arr, 0, 255) * WHITE_CAP
     arr = np.clip(arr, 0, 255).astype(np.uint8)

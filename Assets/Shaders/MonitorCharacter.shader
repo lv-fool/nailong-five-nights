@@ -12,6 +12,10 @@ Shader "NailongFNAF/MonitorCharacter"
         // 立绘超出监控画面框的部分直接丢弃 —— 敌人半个身子探出画面外时，框外那截不能画。
         // 关闭裁剪：设成 (-10000,-10000,10000,10000) 即可。
         _ScreenRect ("Screen Rect (px)", Vector) = (-10000,-10000,10000,10000)
+        // 劣化强度 —— 必须和底图 MonitorCRT 的 _Strength 取**同一个值**，
+        // 否则敌人和背景会有两套不同的脏法，看着还是贴纸（见 MonitorCrtStrength）。
+        // 0 = 不劣化（编辑器调点位时用）。
+        _CrtStrength ("CRT Degradation", Range(0, 1)) = 1
     }
 
     SubShader
@@ -58,6 +62,7 @@ Shader "NailongFNAF/MonitorCharacter"
             float _UseOccluder;
             float4 _OccluderRect;
             float _DebugMode;
+            float _CrtStrength;
             float4 _ScreenRect;
 
             v2f vert(appdata_t v)
@@ -77,6 +82,13 @@ Shader "NailongFNAF/MonitorCharacter"
                 OUT.screenUV = sp.xy / sp.w;
                 OUT.color = v.color * _Color;
                 return OUT;
+            }
+
+            // 和 MonitorCRT.shader 里那份**一模一样**的哈希，别各写各的 ——
+            // 两边噪点分布对不上时，敌人和背景的颗粒会像两层不同的膜。
+            float Hash(float2 p)
+            {
+                return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
             }
 
             fixed4 frag(v2f i) : SV_Target
@@ -126,6 +138,58 @@ Shader "NailongFNAF/MonitorCharacter"
                     // 仍会参与写入；clip 是彻底不产生片元）
                     // occ = 1 → clip(-0.5) 丢弃；occ = 0 → clip(0.5) 保留
                     clip(0.5 - occ);
+                }
+
+                // ─────────────────────────────────────────────────────────
+                // 监控劣化 —— 和底图 MonitorCRT.shader **同一套公式、同一个强度值**。
+                //
+                // 为什么不各调各的：玩法上敌人是「贴在监控画面里」的，
+                // 底图已经压过一遍饱和 / 对比、加过扫描线和噪点，
+                // 敌人如果保持原样，就会像一张高清贴纸浮在糊画面上 ——
+                // 2026-11-07 用户反馈「画风有点草率」，根因就是这个。
+                //
+                // ⚠️ 这里的 uv 用 **screenUV**，不是 texcoord。
+                // texcoord 是立绘自己的 0~1，扫描线会跟着立绘走 ——
+                // 立绘动的时候横纹也跟着动，一眼假。
+                // screenUV 是整屏的，横纹才会像「打在屏幕上」。
+                // ─────────────────────────────────────────────────────────
+                float crt = saturate(_CrtStrength);
+                if (crt > 0.001)
+                {
+                    // 和底图一样有个 1 秒渐入，避免刚进 Play 时脏得太突然
+                    float warmup = saturate(_Time.y / 1.0);
+                    float cs = crt * lerp(0.35, 1.0, warmup);
+                    float2 suv = i.screenUV;
+
+                    // ③ 色偏（压红提绿蓝）
+                    c.r *= lerp(1.0, 0.82, cs);
+                    c.g *= lerp(1.0, 1.08, cs);
+                    c.b *= lerp(1.0, 1.04, cs);
+
+                    // ③b 降饱和
+                    float lum = dot(c.rgb, float3(0.299, 0.587, 0.114));
+                    c.rgb = lerp(c.rgb, lum.xxx, 0.34 * cs);
+
+                    // ③c 降对比
+                    c.rgb = (c.rgb - 0.5) * lerp(1.0, 0.78, cs) + 0.5;
+
+                    // ① 扫描线（跟着屏幕走，不跟立绘走）
+                    float scanPos = suv.y * 360.0 + _Time.y * 10.0;
+                    float scan = 0.72 + 0.28 * sin(scanPos * 3.14159);
+                    c.rgb *= lerp(1.0, scan, cs);
+
+                    // ② 颗粒噪点（乘法，理由见 MonitorCRT：加法会让纯黑处飘白点）
+                    float n = Hash(floor(suv * _ScreenParams.xy / 2.0)
+                                   + floor(_Time.y * 30.0));
+                    c.rgb *= 1.0 + (n - 0.5) * 0.30 * cs;
+
+                    // ④ 暗角（按整屏算，和底图对齐）
+                    float2 dv = suv - 0.5;
+                    float vig = 1.0 - dot(dv, dv) * 1.35 * cs;
+                    c.rgb *= max(0.35, vig);
+
+                    // ⑥ 整体压暗
+                    c.rgb *= lerp(1.0, 0.90, cs);
                 }
 
                 return c;

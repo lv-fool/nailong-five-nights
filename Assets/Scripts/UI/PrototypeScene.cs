@@ -8075,7 +8075,15 @@ namespace NailongFNAF.UI
 
                 if (shader != null)
                 {
-                    img.material = new Material(shader);
+                    var charMat = new Material(shader);
+
+                    // ⚠️ 必须和底图 MonitorCRT 的 _Strength 取**同一个值**。
+                    // 底图压过一遍、敌人不压的话，敌人就像高清贴纸浮在糊画面上
+                    // （2026-11-07 用户反馈「画风有点草率」，根因就在这）。
+                    // 以后要关掉劣化做编辑器调点位，两边一起关，别只关一边。
+                    charMat.SetFloat("_CrtStrength", MonitorCrtStrength);
+
+                    img.material = charMat;
                 }
 
                 _monitorCharacters[i] = img;
