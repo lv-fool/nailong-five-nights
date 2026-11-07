@@ -1740,6 +1740,10 @@ namespace NailongFNAF.UI
             {
                 UpdateMonitorAreaScale();
                 ApplyMonitorOverlay(gm);
+
+                // 插画抖动要靠「这张图占画面多宽」换算偏移量，
+                // 必须在 ApplyMonitorOverlay 摆好四角之后再算。
+                UpdateStickerJitterRatios();
             }
 
             UpdateMonitorBlur(monitorUp);
@@ -4102,6 +4106,14 @@ namespace NailongFNAF.UI
                 var quad = go.GetComponent<QuadGraphic>();
                 quad.raycastTarget = false;
 
+                // 挂抖动材质 —— 让插画跟着底图一起抖。
+                //
+                // 底图的抖动是在 MonitorCRT.shader 里做「逐行 uv 偏移」，
+                // 插画是兄弟节点，不跟着抖的话画面就是「底图抖、插画不动」
+                // （用户 2026-11-07 报的）。这里用同一套哈希 + 同一个行号，
+                // 抖出来才对得上。
+                AttachStickerJitter(quad);
+
                 _stickerPool.Add(quad);
             }
 
@@ -4112,6 +4124,10 @@ namespace NailongFNAF.UI
             for (int i = 0; i < _stickerPool.Count; i++)
             {
                 var quad = _stickerPool[i];
+
+                // 兜底：池子是复用的，早期创建的控件可能没挂上抖动材质
+                // （AttachStickerJitter 曾在材质未就绪时提前 return）。这里补一次。
+                EnsureStickerJitter(quad);
 
                 if (i >= count || stickers[i] == null || string.IsNullOrEmpty(stickers[i].image))
                 {
@@ -4191,6 +4207,122 @@ namespace NailongFNAF.UI
         /// 载入一张贴图。<c>image</c> 是相对 Assets/Resources/ 的路径（不带扩展名），
         /// 例如 "Posters/poster_01"。
         /// </summary>
+        /// <summary>
+        /// 给一张插画挂上「跟着底图抖」的材质。
+        ///
+        /// 抖动公式和 <c>MonitorCRT.shader</c> 完全一致，靠**屏幕 UV 行号**对齐 ——
+        /// 用贴图自己的 UV 会抖成两层互不相干的花纹。
+        /// </summary>
+        private void AttachStickerJitter(QuadGraphic quad)
+        {
+            if (quad == null)
+            {
+                return;
+            }
+
+            // ⚠️ **不要依赖 _monitorCrtMaterial**。
+            // 第一版写了 if (_monitorCrtMaterial == null) return; —— 结果插画池
+            // 是在 ApplyMonitorStickers 里按需创建的，那时 _monitorCrtMaterial
+            // 还没就绪（它在 BuildMonitorLayer 里才赋值），于是永远直接 return，
+            // 插画的材质一直是 UI/Default，根本不抖（踩过，2026-11-07）。
+            //
+            // 从 Resources 拿模板材质，不要只靠 Shader.Find ——
+            // 这个 shader 没别的资源引用，打包会被当"没人用"剔除。
+            var template = Resources.Load<Material>("MonitorStickerMaterial");
+            Shader shader = template != null
+                ? template.shader
+                : Shader.Find("NailongFNAF/MonitorSticker");
+
+            if (shader == null)
+            {
+                // 找不到就保持 UI/Default —— 不抖，但至少画得出来
+                return;
+            }
+
+            // ⚠️ **必须走 QuadGraphic.SetShader，不能写 quad.material = mat**。
+            // QuadGraphic.Texture 的 setter 每次换贴图都会执行
+            // material = _ownMaterial，把外部设的材质整个覆盖掉 ——
+            // 表现就是「怎么都挂不上抖动 shader」（2026-11-07 踩了很久）。
+            quad.SetShader(shader);
+
+            // 材质是 SetShader 内部新建的，这里再取出来设参数
+            var mat = quad.material;
+            if (mat != null && mat.HasProperty("_Strength"))
+            {
+                mat.SetFloat("_Strength", MonitorCrtStrength);
+            }
+        }
+
+        /// <summary>
+        /// 只在「还没挂上抖动材质」时补一次。每帧调用，但正常情况一次就够。
+        /// </summary>
+        private void EnsureStickerJitter(QuadGraphic quad)
+        {
+            if (quad == null)
+            {
+                return;
+            }
+
+            var cur = quad.material;
+            if (cur != null && cur.shader != null
+                && cur.shader.name == "NailongFNAF/MonitorSticker")
+            {
+                return;
+            }
+
+            AttachStickerJitter(quad);
+        }
+
+        /// <summary>
+        /// 每帧把「这张插画占画面多宽」传给材质 —— shader 靠它把
+        /// 「屏幕 UV 偏移」换算成「贴图 UV 偏移」。
+        /// </summary>
+        private void UpdateStickerJitterRatios()
+        {
+            if (_stickerPool == null || _stickerRoot == null)
+            {
+                return;
+            }
+
+            float hostW = _stickerRoot.rect.width;
+            if (hostW <= 1f)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _stickerPool.Count; i++)
+            {
+                var quad = _stickerPool[i];
+                if (quad == null || !quad.gameObject.activeSelf)
+                {
+                    continue;
+                }
+
+                var mat = quad.material;
+                if (mat == null || !mat.HasProperty("_ScreenWidthRatio"))
+                {
+                    continue;
+                }
+
+                // 四角里最左和最右的差 = 这张图在画布上的像素宽
+                float minX = float.MaxValue;
+                float maxX = float.MinValue;
+
+                for (int c = 0; c < 4; c++)
+                {
+                    float x = quad.GetCorner(c).x;
+                    if (x < minX) { minX = x; }
+                    if (x > maxX) { maxX = x; }
+                }
+
+                float wPx = maxX - minX;
+                if (wPx > 1f)
+                {
+                    mat.SetFloat("_ScreenWidthRatio", Mathf.Clamp01(wPx / hostW));
+                }
+            }
+        }
+
         private Texture2D LoadStickerTexture(string image)
         {
             if (string.IsNullOrEmpty(image))

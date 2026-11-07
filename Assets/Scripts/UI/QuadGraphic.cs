@@ -27,6 +27,11 @@ namespace NailongFNAF.UI
         private Texture _texture;
 
         /// <summary>
+        /// 外部想要的 shader（null = UI/Default）。由 <see cref="SetShader"/> 设置。
+        /// </summary>
+        private Shader _desiredShader;
+
+        /// <summary>
         /// 覆盖 Graphic.mainTexture —— UGUI 渲染时读的是**这个属性**，
         /// 不是 material.mainTexture。
         ///
@@ -36,6 +41,46 @@ namespace NailongFNAF.UI
         public override Texture mainTexture
         {
             get { return _texture != null ? _texture : s_WhiteTexture; }
+        }
+
+        /// <summary>
+        /// 指定这个控件内部自建材质用的 shader。
+        ///
+        /// ⚠️ **不要从外面写 <c>graphic.material = ...</c>** ——
+        /// <see cref="Texture"/> 的 setter 每次换贴图都会执行
+        /// <c>material = _ownMaterial</c>，把外部设的材质**整个覆盖掉**
+        /// （2026-11-07 踩过：插画怎么都挂不上抖动 shader，就是这个原因）。
+        ///
+        /// 走这个入口的话，自建材质会按指定 shader 重建。
+        /// 传 null = 退回 UI/Default。
+        /// </summary>
+        public void SetShader(Shader shader)
+        {
+            _desiredShader = shader;
+
+            // 已经有自建材质的话，重建一个（旧的那个 Unity 会回收）
+            if (_ownMaterial != null)
+            {
+                var tex = _ownMaterial.mainTexture;
+                var color = _ownMaterial.HasProperty("_Color")
+                    ? _ownMaterial.GetColor("_Color")
+                    : Color.white;
+
+                _ownMaterial = new Material(_desiredShader != null
+                    ? _desiredShader
+                    : Shader.Find("UI/Default"));
+
+                _ownMaterial.name = "QuadGraphic (instance)";
+                _ownMaterial.mainTexture = tex;
+
+                if (_ownMaterial.HasProperty("_Color"))
+                {
+                    _ownMaterial.SetColor("_Color", color);
+                }
+
+                material = _ownMaterial;
+                SetMaterialDirty();
+            }
         }
 
         public Texture Texture
@@ -53,7 +98,13 @@ namespace NailongFNAF.UI
                 // 那个比较永远成立，于是每次设贴图都 new 一个材质（泄漏）。
                 if (_ownMaterial == null)
                 {
-                    var shader = Shader.Find("UI/Default");
+                    // 优先用外部指定的 shader（见 SetShader），没有才退回 UI/Default
+                    var shader = _desiredShader;
+
+                    if (shader == null)
+                    {
+                        shader = Shader.Find("UI/Default");
+                    }
 
                     if (shader == null)
                     {
