@@ -17,6 +17,10 @@ Shader "NailongFNAF/MonitorCRT"
         [PerRendererData] _MainTex ("Sprite Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
         _Strength ("Degradation", Range(0, 1)) = 1
+        // 切台撕裂强度：C# 在切换瞬间拉满、随雪花一起衰减回 0。
+        // ⚠️ MonitorSticker.shader 里有**同一份**公式和这个参数 ——
+        // 只抖底图不抖插画，就是刚修完的那个 bug 的翻版。
+        _Burst ("Tear Burst", Range(0, 1)) = 0
     }
 
     SubShader
@@ -55,12 +59,14 @@ Shader "NailongFNAF/MonitorCRT"
                 float4 vertex   : SV_POSITION;
                 fixed4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
+                float2 screenUV : TEXCOORD1;
             };
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
             fixed4 _Color;
             float _Strength;
+            float _Burst;
 
             v2f vert(appdata_t IN)
             {
@@ -68,6 +74,10 @@ Shader "NailongFNAF/MonitorCRT"
                 OUT.vertex = UnityObjectToClipPos(IN.vertex);
                 OUT.texcoord = TRANSFORM_TEX(IN.texcoord, _MainTex);
                 OUT.color = IN.color * _Color;
+
+                float4 sp = ComputeScreenPos(OUT.vertex);
+                OUT.screenUV = sp.xy / sp.w;
+
                 return OUT;
             }
 
@@ -97,7 +107,26 @@ Shader "NailongFNAF/MonitorCRT"
                 float bigJump = step(0.985, Hash(float2(floor(_Time.y * 3.0), 11.0)));
                 uv.x += bigJump * (Hash(float2(floor(uv.y * 60.0), floor(_Time.y * 20.0))) - 0.5) * 0.012 * s;
 
+                // ⑥ 切台撕裂（_Burst）：约 1/5 的行被整行横向甩开，
+                // 甩开的行顺带提一点亮度 —— 丢行的信号就是会闪白。
+                // 行粒度 40（≈27px 一条），比 lineJitter 的 240 粗得多：
+                // 撕裂是"大块错位"，不是"细纹抖动"，两者要看得出是两回事。
+                //
+                // ⚠️ 行号用**屏幕 UV**，不用贴图 uv.y ——
+                // 插画和立绘的撕裂都按屏幕行分（见 MonitorSticker/MonitorCharacter）。
+                // 底图满铺监控区，而监控区在非 16:9 有黑边：uv.y 和 screenUV.y
+                // 在边缘能差出十几行。±48px 的大错位下，行号对不上就是
+                // 「底图撕在这、插画撕在那」—— 刚修完的「一动一静」的翻版。
+                // （lineJitter 仍用 uv.y：±3px 的细抖，错几行看不出来，别动它。）
+                float tearRow = floor(IN.screenUV.y * 40.0);
+                float tearTick = floor(_Time.y * 60.0);
+                float tearSel = step(0.80, Hash(float2(tearRow, tearTick)));
+                uv.x += tearSel * (Hash(float2(tearRow + 17.1, tearTick)) - 0.5) * 0.05 * _Burst;
+
                 fixed4 c = tex2D(_MainTex, uv) * IN.color;
+
+                // 被撕裂甩开的行顺带提亮一点（丢行的信号就是会闪白）
+                c.rgb *= 1.0 + tearSel * 0.18 * _Burst;
 
                 // ③ 色偏：明显压红、提绿蓝 → 老 CCD 的青绿味
                 c.r *= lerp(1.0, 0.82, s);

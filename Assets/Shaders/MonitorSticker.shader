@@ -32,6 +32,9 @@ Shader "NailongFNAF/MonitorSticker"
         // 这张图在画面上占多宽（0~1）。由 C# 每帧写，用来把「屏幕 UV 偏移」
         // 换算成「贴图 UV 偏移」。
         _ScreenWidthRatio ("Screen Width Ratio", Float) = 0.3
+        // 切台撕裂强度 —— 必须和 MonitorCRT / MonitorCharacter 同一份公式、
+        // 同一个值，否则切台时插画和立绘不跟着底图撕，就是「一动一静」那个 bug 的翻版。
+        _Burst ("Tear Burst", Range(0, 1)) = 0
     }
 
     SubShader
@@ -77,6 +80,7 @@ Shader "NailongFNAF/MonitorSticker"
             fixed4 _Color;
             float _Strength;
             float _ScreenWidthRatio;
+            float _Burst;
 
             v2f vert(appdata_t IN)
             {
@@ -121,6 +125,15 @@ Shader "NailongFNAF/MonitorSticker"
                 // 偶尔一次大幅漂移
                 float bigJump = step(0.985, Hash(float2(floor(_Time.y * 3.0), 11.0)));
                 offsetScreen += bigJump * (Hash(float2(floor(sy * 60.0), floor(_Time.y * 20.0))) - 0.5) * 0.012 * s;
+
+                // ⑥ 切台撕裂 —— 行号、阈值、幅度、hash 参数全部和 MonitorCRT 逐字一致。
+                // 这里用**屏幕 UV** 的行号（底图用的是它自己的贴图 uv.y，
+                // 满屏时两者相等；非 16:9 有黑边时本来就有同样的偏差，
+                // 和 lineJitter 保持一致，不另立标准）。
+                float tearRow = floor(sy * 40.0);
+                float tearTick = floor(_Time.y * 60.0);
+                float tearSel = step(0.80, Hash(float2(tearRow, tearTick)));
+                offsetScreen += tearSel * (Hash(float2(tearRow + 17.1, tearTick)) - 0.5) * 0.05 * _Burst;
 
                 // 屏幕 UV 偏移 → 贴图 UV 偏移（除以图占屏幕宽度的比例）
                 float2 uv = IN.texcoord;

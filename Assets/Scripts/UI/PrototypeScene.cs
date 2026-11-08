@@ -1464,6 +1464,19 @@ namespace NailongFNAF.UI
         /// <summary>噪点覆盖层（全屏 RawImage，盖在画面框之上）。</summary>
         private UnityEngine.UI.RawImage _staticOverlay;
 
+        /// <summary>监控左上角的 REC 红点（圆形贴图 Image），随 RecordBlink 硬开关。</summary>
+        private UnityEngine.UI.Image _recordDot;
+
+        /// <summary>红点旁边的「REC」字样，跟着红点一起亮灭。</summary>
+        private UnityEngine.UI.Text _recordText;
+
+        /// <summary>
+        /// 底图本来的颜色（白或厨房的黑）。呼吸亮度**乘**在它上面，
+        /// 由 `SetMonitorFrame` 记录 —— 不记录的话下一帧就被 `SetMonitorFrame`
+        /// 重新设回纯色，呼吸永远被覆盖（这类「两个写入方抢一个字段」踩过多次）。
+        /// </summary>
+        private Color _monitorBaseColor = Color.white;
+
         // ── 贝利亚彩蛋的虚影（故事模式第 4 / 5 夜）──────────────────────
         //
         // 他只出现在**监控画面里**：一张半透明的黑贝大头压在画面上，
@@ -1517,6 +1530,11 @@ namespace NailongFNAF.UI
                 _staticStrength = Mathf.MoveTowards(
                     _staticStrength, 0f, Time.unscaledDeltaTime / StaticFadeSeconds);
 
+                // 撕裂跟着雪花一起衰减（同一个尺同一个节奏，见 `_staticStrength`）。
+                // 写进所有带 `_Burst` 的材质：底图、插画、立绘 —— 少写一层，
+                // 切台时那一层就不撕，正是「一动一静」的翻版。
+                ApplyBurstToMonitorMaterials(_staticStrength);
+
                 _staticOverlay.enabled = true;
 
                 // 强度走**顶点色 alpha**（shader 里读 IN.color.a）。
@@ -1531,6 +1549,90 @@ namespace NailongFNAF.UI
             else if (_staticOverlay.enabled)
             {
                 _staticOverlay.enabled = false;
+
+                // 衰减到头：把各材质的 _Burst 归零一次，
+                // 否则残留的 0.001 会让撕裂行永远带一丝错位。
+                ApplyBurstToMonitorMaterials(0f);
+            }
+        }
+
+        /// <summary>
+        /// 把撕裂强度写进监控画面所有带 `_Burst` 的材质（底图 / 插画 / 立绘）。
+        /// 用 HasProperty 过滤 —— 材质没这个参数（旧版 shader 没重编译时）就跳过，
+        /// 不报错不刷屏。
+        /// </summary>
+        private void ApplyBurstToMonitorMaterials(float burst)
+        {
+            if (_monitorCrtMaterial != null && _monitorCrtMaterial.HasProperty("_Burst"))
+            {
+                _monitorCrtMaterial.SetFloat("_Burst", burst);
+            }
+
+            foreach (var quad in _stickerPool)
+            {
+                if (quad == null)
+                {
+                    continue;
+                }
+
+                var mat = quad.material;
+                if (mat != null && mat.HasProperty("_Burst"))
+                {
+                    mat.SetFloat("_Burst", burst);
+                }
+            }
+
+            if (_monitorCharacters != null)
+            {
+                foreach (var img in _monitorCharacters)
+                {
+                    if (img == null)
+                    {
+                        continue;
+                    }
+
+                    var mat = img.material;
+                    if (mat != null && mat.HasProperty("_Burst"))
+                    {
+                        mat.SetFloat("_Burst", burst);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 监控画面的「活着」的部分（方向二，2026-11-08）：
+        /// REC 红点硬开关 + 每路 CAM 的呼吸亮度。
+        ///
+        /// ⚠️ 呼吸写的是 `_monitorFrame.color`，而 `SetMonitorFrame`（切机位时）
+        /// 也会写它。两边的规矩：**SetMonitorFrame 只记录基色不动手，
+        /// 这里每帧把「基色 × 呼吸」真正写进去** —— 单点写入，不会互相覆盖。
+        ///
+        /// ⚠️ 用 unscaled 时间：跳杀/结算把 timeScale 压下去时，红点跟着停
+        /// 是**对的**（那一刻本来就不在看监控），但呼吸如果还在跑，
+        /// 暂停画面会一闪一闪 —— 所以两者统一用同一个尺，行为一致。
+        /// </summary>
+        private void UpdateMonitorLiveliness(GameManager gm)
+        {
+            float t = Time.unscaledTime;
+
+            // REC 红点：亮灭是硬开关（RecordBlink），不做渐变
+            if (_recordDot != null)
+            {
+                bool on = RecordBlink.IsOn(t);
+                _recordDot.enabled = on;
+                if (_recordText != null)
+                {
+                    _recordText.enabled = on;
+                }
+            }
+
+            // 呼吸：基色 × 每路 CAM 自己的相位
+            var frame = _monitorFrame != null ? _monitorFrame : _monitorOverlay;
+            if (frame != null)
+            {
+                float breath = CameraBreath.Value(gm.CurrentCameraIndex, t);
+                frame.color = _monitorBaseColor * breath;
             }
         }
 
@@ -1744,6 +1846,8 @@ namespace NailongFNAF.UI
                 // 插画抖动要靠「这张图占画面多宽」换算偏移量，
                 // 必须在 ApplyMonitorOverlay 摆好四角之后再算。
                 UpdateStickerJitterRatios();
+
+                UpdateMonitorLiveliness(gm);
             }
 
             UpdateMonitorBlur(monitorUp);
@@ -2787,6 +2891,8 @@ namespace NailongFNAF.UI
         /// <summary>把画面贴图设到底图那一层（没有底图层的旧场景就退回 overlay 本体）。</summary>
         private void SetMonitorFrame(Sprite sprite, Color color)
         {
+            _monitorBaseColor = color;
+
             if (_monitorFrame != null)
             {
                 _monitorFrame.sprite = sprite;
@@ -8140,6 +8246,37 @@ namespace NailongFNAF.UI
                 TextAnchor.MiddleCenter, 46, new Color(0.72f, 0.86f, 0.72f));
             StretchToParent(_monitorLabel.rectTransform);
 
+            // REC 红点（方向二 · 2026-11-08）：左上角，1 秒硬开关一闪一闪。
+            //
+            // 层级刻意在底图/插画/立绘**之后**、静态噪点**之前**：
+            // 红点是"录像机自己的指示灯"，不该被 CRT 劣化压暗（它在画面边缘，
+            // 官方 FNAF 的 REC 点也不跟着画面抖），但切台雪花要能盖住它。
+            var dotGo = new GameObject("RecordDot",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(UnityEngine.UI.Image));
+            dotGo.transform.SetParent(_monitorArea, false);
+
+            _recordDot = dotGo.GetComponent<UnityEngine.UI.Image>();
+            _recordDot.sprite = MakeCircleSprite(64);
+            _recordDot.color = RecordDotColor;
+            _recordDot.raycastTarget = false;
+
+            var dotRect = _recordDot.rectTransform;
+            dotRect.anchorMin = new Vector2(0f, 1f);
+            dotRect.anchorMax = new Vector2(0f, 1f);
+            dotRect.pivot = new Vector2(0f, 1f);
+            dotRect.anchoredPosition = new Vector2(RecordDotMarginX, -RecordDotMarginY);
+            dotRect.sizeDelta = new Vector2(RecordDotSize, RecordDotSize);
+
+            _recordText = MakeText(_monitorArea, "RecordText", "REC",
+                TextAnchor.MiddleLeft, 34, RecordDotColor);
+            var textRect = _recordText.rectTransform;
+            textRect.anchorMin = new Vector2(0f, 1f);
+            textRect.anchorMax = new Vector2(0f, 1f);
+            textRect.pivot = new Vector2(0f, 1f);
+            textRect.anchoredPosition = new Vector2(
+                RecordDotMarginX + RecordDotSize + 14f, -RecordDotMarginY);
+            textRect.sizeDelta = new Vector2(140f, RecordDotSize);
+
             // 监控画面里的敌人立绘 —— 三个槽位，同一机位可以站多个
             _monitorCharacters = new Image[3];
 
@@ -10043,6 +10180,52 @@ namespace NailongFNAF.UI
 
             _revealPulse.color = new Color(1f, 0f, 0f, 0.55f * strength * fadeOut);
         }
+        /// <summary>
+        /// 生成一张带**抗锯齿边缘**的圆形贴图（REC 红点用）。
+        /// 不用 `Image.type = Filled` 画圆 —— 那个边缘是锯齿的，
+        /// 在 1920×1080 设计区缩到窗口大小后尤其难看。
+        /// </summary>
+        private static Sprite MakeCircleSprite(int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            float r = size * 0.5f;
+            float cx = r - 0.5f;
+            float cy = r - 0.5f;
+
+            var px = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Mathf.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                    // 边缘 1px 渐变做抗锯齿
+                    float a = Mathf.Clamp01(r - d);
+                    px[y * size + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+                }
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply(false);
+
+            return Sprite.Create(tex, new Rect(0f, 0f, size, size),
+                new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        /// <summary>REC 红点颜色：压暗的红，和 CRT 色温一致，不刺眼。</summary>
+        private static readonly Color RecordDotColor = new Color(0.75f, 0.12f, 0.10f);
+
+        /// <summary>红点直径（设计像素）。</summary>
+        private const float RecordDotSize = 26f;
+
+        /// <summary>红点距画面左边缘（设计像素）。</summary>
+        private const float RecordDotMarginX = 58f;
+
+        /// <summary>红点距画面上边缘（设计像素）。</summary>
+        private const float RecordDotMarginY = 52f;
+
         private static Sprite MakeSolidSprite()
         {
             var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false);

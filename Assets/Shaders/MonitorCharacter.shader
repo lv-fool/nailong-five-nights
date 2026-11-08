@@ -12,6 +12,9 @@ Shader "NailongFNAF/MonitorCharacter"
         // 立绘超出监控画面框的部分直接丢弃 —— 敌人半个身子探出画面外时，框外那截不能画。
         // 关闭裁剪：设成 (-10000,-10000,10000,10000) 即可。
         _ScreenRect ("Screen Rect (px)", Vector) = (-10000,-10000,10000,10000)
+        // 切台撕裂强度 —— 和 MonitorCRT / MonitorSticker 同一份公式同一个值。
+        // 立绘不跟着撕的话，切台瞬间就是「底图撕、人不动」的翻版。
+        _Burst ("Tear Burst", Range(0, 1)) = 0
     }
 
     SubShader
@@ -35,6 +38,7 @@ Shader "NailongFNAF/MonitorCharacter"
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma target 3.0     // ddx 算导数需要 SM3（见下面撕裂的换算）
             #include "UnityCG.cginc"
 
             struct appdata_t
@@ -59,6 +63,7 @@ Shader "NailongFNAF/MonitorCharacter"
             float4 _OccluderRect;
             float _DebugMode;
             float4 _ScreenRect;
+            float _Burst;
 
             v2f vert(appdata_t v)
             {
@@ -79,9 +84,42 @@ Shader "NailongFNAF/MonitorCharacter"
                 return OUT;
             }
 
+            // ⚠️ 和 MonitorCRT / MonitorSticker 里那份**逐字一致**。
+            // 哈希不同 → 三层撕出来的行对不上，切台瞬间画面像碎成三截。
+            float Hash(float2 p)
+            {
+                return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+            }
+
             fixed4 frag(v2f i) : SV_Target
             {
-                fixed4 c = tex2D(_MainTex, i.texcoord) * i.color;
+                // ⑥ 切台撕裂 —— 行号 / 阈值 / 幅度 / hash 参数和 MonitorCRT 逐字一致。
+                //
+                // 「屏幕 UV 偏移 → 贴图 UV 偏移」这里用**片元导数**换算：
+                // ddx(texcoord.x) = 每个屏幕像素走多少 u，立绘占多宽不用 C# 传参，
+                // 任何大小/位置的立绘都自动算对（插画层用的是另一套 _ScreenWidthRatio，
+                // 那边是 QuadGraphic 四角自己算的，两边殊途同归）。
+                // 每个屏幕像素走多少 u —— 线性插值，整个三角形是常数，
+                // 所以先取导数再改 uv，不存在「对自己求导」的歧义。
+                float duPerScreenPx = ddx(i.texcoord.x);
+
+                float tearRow = floor(i.screenUV.y * 40.0);
+                float tearTick = floor(_Time.y * 60.0);
+                float tearSel = step(0.80, Hash(float2(tearRow, tearTick)));
+                float tearScreen = tearSel * (Hash(float2(tearRow + 17.1, tearTick)) - 0.5) * 0.05 * _Burst;
+
+                // ⚠️ 换算用**监控区宽**（_ScreenRect），不是整屏宽：
+                // 底图/插画的撕裂位移都是「0.05 × 监控区在屏幕上的宽度」。
+                // 非 16:9 时监控区两侧有黑边（f < 1），立绘按整屏算会多甩 1/f 倍 ——
+                // 1280×960 窗口下差出 12px，人会和背景撕开（同「一动一静」那一类）。
+                float rectW = _ScreenRect.z - _ScreenRect.x;
+                float2 uv = i.texcoord;
+                uv.x += tearScreen * rectW * duPerScreenPx;
+
+                fixed4 c = tex2D(_MainTex, uv) * i.color;
+
+                // 被撕裂甩开的行顺带提亮（和底图同参数）
+                c.rgb *= 1.0 + tearSel * 0.18 * _Burst;
 
                 // 屏幕 UV（0..1，左下原点）→ 像素
                 float2 px = i.screenUV * _ScreenParams.xy;
