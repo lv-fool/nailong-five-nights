@@ -1508,6 +1508,22 @@ namespace NailongFNAF.UI
         /// <summary>上一帧虚影是不是显示着 —— 用来只在「刚出现」时炸一次雪花。</summary>
         private bool _cameoGhostWasOn;
 
+        // ---------------- 偷电态的"虚影化"（2026-11-09）----------------
+        //
+        // 用户要求：「直接把偷电形态替换成对应的虚影」，并明确**只要视觉**
+        // （A 方案）—— 不复用贝利亚那套「1.5 秒不放下监控就死」的机制。
+        //
+        // 做法：不新增物件，直接把偷电态那个槽位本身渲染成虚影 ——
+        // 半透明 + 和贝利亚虚影同一套 Perlin 抖动（错位/呼吸/透明度脉动）。
+        // 这样偷电态的奶龙在监控里就是「一团信号里的重影」，
+        // 而不是一个实心玩偶，和它的玩法定位（自以为没人看见）对得上。
+
+        /// <summary>偷电态虚影的基础透明度。和贝利亚虚影同值，保证两种重影观感一致。</summary>
+        private const float StealGhostAlpha = 0.72f;
+
+        /// <summary>偷电态虚影的抖动振幅（像素）。比贝利亚小 —— 它不是威胁，只是"信号不稳"。</summary>
+        private const float StealGhostJitter = 6f;
+
         /// <summary>
         /// 切机位的一瞬把噪点拉满，之后随时间衰减。
         /// 平时也可以偶尔来一下（低概率），让玩家不敢盯着发呆。
@@ -1879,6 +1895,87 @@ namespace NailongFNAF.UI
             _monitorHandle.gameObject.SetActive(!gm.HasPowerOut && !gm.HasBeenCaught);
 
             ApplyCameoGhost(gm, monitorUp);
+        }
+
+        /// <summary>
+        /// 把**偷电态的奶龙**渲染成虚影（2026-11-09 用户要求）。
+        ///
+        /// ## 为什么是"替换"而不是"叠加"
+        /// 用户原话：「直接把偷电形态替换成对应的虚影」。
+        /// 所以不是在本体上再盖一层，而是**本体自己变成半透明 + 抖动**。
+        ///
+        /// ## 和贝利亚虚影的关系
+        /// 只复用**视觉手法**（半透明 + Perlin 双轴抖动 + alpha 脉动），
+        /// **不复用机制** —— 不炸雪花、不要求放下监控、不参与任何致死判定。
+        /// 用户确认过是 A 方案（只要视觉）。
+        ///
+        /// ## 为什么不做"呼吸缩放"
+        /// 贝利亚虚影有 scale 抽动，但这里**不能照搬** ——
+        /// 槽位逻辑刚把 localScale 设成"远近档 × 机位抖动"的确定值，
+        /// 再乘一个呼吸系数会把这个值污染掉，下一帧读回来就是错的。
+        /// 想要缩放感，得让槽位逻辑参与，代价和收益不成正比。
+        /// 透明度脉动已经足够像"信号锁不住"。
+        ///
+        /// ## 为什么每帧都写 alpha
+        /// 槽位是复用的：上一帧可能是实心立绘，这一帧切成虚影。
+        /// 不每帧写的话，切回来时会残留上一次的透明度。
+        /// 同理，**非偷电态必须显式恢复 alpha = 1**，否则实心立绘一直是半透明的。
+        /// </summary>
+        private void ApplyStealGhostToMonitor(int cameraIndex, EnemyId[] ids,
+            CharacterPose[] poses, int count)
+        {
+            if (ids == null || poses == null || _monitorCharacters == null)
+            {
+                return;
+            }
+
+            float t = Time.unscaledTime;
+
+            for (int i = 0; i < _monitorCharacters.Length; i++)
+            {
+                var img = _monitorCharacters[i];
+                if (img == null)
+                {
+                    continue;
+                }
+
+                // 只有「偷电态」的奶龙才虚影化。
+                // 进攻态（IsApproaching）不算 —— 那时它是真的威胁，要看得清清楚楚。
+                bool isStealGhost = i < count
+                    && ids[i] == EnemyId.Nailong
+                    && poses[i] == CharacterPose.Steal;
+
+                if (!isStealGhost)
+                {
+                    // 恢复实心：alpha 归 1、位置交回槽位逻辑（此处只清我们加的那层抖动）
+                    if (Mathf.Abs(img.color.a - 1f) > 0.001f)
+                    {
+                        img.color = Color.white;
+                    }
+
+                    continue;
+                }
+
+                // 抖动：和 ApplyCameoGhost 同一套 Perlin，但振幅更小、没有"紧迫感"加速度
+                float jx = (Mathf.PerlinNoise(t * 22f, 0f) - 0.5f) * 2f * StealGhostJitter;
+                float jy = (Mathf.PerlinNoise(0f, t * 22f) - 0.5f) * 2f * StealGhostJitter;
+
+                RectTransform rect = img.rectTransform;
+
+                // ⚠️ **抖动只在「摆放位置」上叠加，而且用的就是槽位逻辑刚写好的值**。
+                // 不能缓存「基准位置」再累加 —— 槽位逻辑每帧都会重写 anchoredPosition，
+                // 缓存反而是第二份真相，切机位/换档时会打架。
+                // 这里的顺序是：槽位先写好位置 → 我们读出它 → 加上这一次的抖动写回去。
+                // 下一帧槽位会重新写干干净净的位置，所以不存在累加漂移。
+                Vector2 basePos = rect.anchoredPosition;
+                rect.anchoredPosition = new Vector2(basePos.x + jx, basePos.y + jy);
+
+                // 呼吸用**叠加层**做：不改 localScale（那是槽位逻辑算的远近缩放，
+                // 这里乘上去会把它污染掉），只让透明度脉动。
+                Color color = img.color;
+                color.a = StealGhostAlpha * (0.82f + 0.18f * Mathf.PerlinNoise(t * 30f, 11f));
+                img.color = color;
+            }
         }
 
         /// <summary>
@@ -3212,6 +3309,12 @@ namespace NailongFNAF.UI
                 }
                 rect.localScale = new Vector3(scale, scale, 1f);
             }
+
+            // 偷电态的奶龙渲染成"虚影"（用户 2026-11-09 要求：
+            // 直接把偷电形态替换成对应的虚影）。**只改视觉**，不动玩法。
+            //
+            // 放在摆位之后：抖动是在算好的位置上叠加，不会和槽位逻辑打架。
+            ApplyStealGhostToMonitor(cam, ids, poses, count);
 
             // 只给「远档」的敌人套遮挡（近档站在家具前面，不裁）
             ApplyOccluderToCharacters(cam);
