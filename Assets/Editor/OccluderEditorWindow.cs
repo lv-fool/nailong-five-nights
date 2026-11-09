@@ -71,6 +71,54 @@ namespace NailongFNAF.EditorTools
             new Color(0.95f, 0.55f, 0.55f)    // 奶龙
         };
 
+        // ---------------- 敌人会出现在哪些机位（2026-11-09 新增）----------------
+        //
+        // 之前编辑器把四只敌人**无条件**全画在每个机位上，于是：
+        //   · 在 CAM 1C（海盗湾）也画着牛来和袋鼠 —— 它们根本不去那儿
+        //   · 摆点位时被不存在的敌人干扰，判断不了构图
+        //
+        // 这里抄一份和 EnemyDirector 默认值一致的巡逻路径（那边是 [SerializeField]，
+        // 编辑器拿不到实例 —— 那玩意儿只在运行时 AddComponent 出来）。
+        // ⚠️ **改 EnemyDirector 的路径时，这张表要同步改**，否则编辑器和运行时对不上。
+        //    下标 = EnemyId 整数值：0=牛来 1=袋鼠 2=噜噜 3=奶龙。
+        private static readonly int[][] EnemyPaths =
+        {
+            new int[] { 0, 1, 10, 9, 6, 7 },   // 牛来：0=1A 1=1B 10=7厕所 9=6厨房 6=4A 7=4B
+            new int[] { 0, 1, 5, 3, 4 },       // 袋鼠：0=1A 1=1B 5=3储藏室 3=2A 4=2B
+            new int[] { 2, 1 },                // 噜噜：2=1C海盗湾 1=1B餐厅
+            new int[] { 1, 6, 7 }              // 奶龙：1=1B 6=4A 7=4B
+        };
+
+        /// <summary>
+        /// 这只敌人会不会出现在机位 <paramref name="room"/>。
+        ///
+        /// 判据 = 机位在它的巡逻路径上。厨房（9）没有画面，编辑器里也画不出东西，
+        /// 所以不特殊处理 —— 它本来就不在任何机位的画布上。
+        /// </summary>
+        private static bool EnemyAppearsIn(int enemy, int room)
+        {
+            if (enemy < 0 || enemy >= EnemyPaths.Length)
+            {
+                return false;
+            }
+
+            int[] path = EnemyPaths[enemy];
+            if (path == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < path.Length; i++)
+            {
+                if (path[i] == room)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private Mode _mode = Mode.Occluders;
         private int _room;
         private Texture2D _tex;
@@ -810,6 +858,15 @@ namespace NailongFNAF.EditorTools
                 _current.Clear();
                 _selShape = -1;
                 _dragKind = 0;
+
+                // ⚠️ **必须清敌人立绘缓存**：每只敌人的参考图是"这个房间的专属图"，
+                // 切机位后旧图就错了（_enemyArt 是按敌人索引缓存，不含机位）。
+                // 不清的话，从 1B 切到 1A，噜噜还会显示 1B 那张趴姿。
+                for (int i = 0; i < _enemyArt.Length; i++)
+                {
+                    _enemyArt[i] = null;
+                }
+
                 LoadTexture();
             }
 
@@ -947,6 +1004,40 @@ namespace NailongFNAF.EditorTools
                         _selEnemy = i;
                     }
                     GUI.color = old;
+                }
+
+                // ---- 当前选中敌人的缩放（2026-11-09 新增）----
+                //
+                // 之前 scale 字段只有数据、**没有 UI**，只能手改 json。
+                // 而不同敌人的立绘宽高比差很多（噜噜趴姿 0.68、牛来站姿 2.03），
+                // 运行时一律按高度 380 铺 —— 横向构图的就会显得特别大。
+                // 所以每只敌人 × 每个机位 × 每个档位都得能单独调。
+                if (EnemyAppearsIn(_selEnemy, _room))
+                {
+                    GUILayout.Space(10f);
+                    GUILayout.Label("缩放", EditorStyles.miniLabel, GUILayout.Width(30f));
+
+                    float cur = GetPointScale(_room, _selEnemy, _tier);
+                    float next = EditorGUILayout.Slider(cur, 0.3f, 1.6f, GUILayout.Width(120f));
+                    if (!Mathf.Approximately(next, cur))
+                    {
+                        SetPointScale(_room, _selEnemy, _tier, next);
+                        Repaint();
+                    }
+
+                    string pct = Mathf.RoundToInt(next * 100f) + "%";
+                    GUILayout.Label(pct, EditorStyles.miniLabel, GUILayout.Width(44f));
+
+                    if (GUILayout.Button("100%", EditorStyles.toolbarButton, GUILayout.Width(48f)))
+                    {
+                        SetPointScale(_room, _selEnemy, _tier, 1f);
+                        Repaint();
+                    }
+                }
+                else
+                {
+                    GUILayout.Space(8f);
+                    GUILayout.Label("（这只不来这个机位）", EditorStyles.miniLabel);
                 }
             }
             else
@@ -1312,7 +1403,28 @@ namespace NailongFNAF.EditorTools
                 return _enemyArt[index];
             }
 
-            string path = "Assets/Art/Characters/char_" + EnemyCodes[index] + "_idle.png";
+            // ⚠️ **优先用这个房间的专属立绘**，没有才退回 idle（2026-11-09 改）。
+            //
+            // 之前写死 idle，于是你在编辑器里摆 CAM 1B 的噜噜点位时，
+            // 看到的还是它站着的那张 —— 而运行时（改过优先级之后）用的是
+            // char_lulu_mon_1b 那张趴姿。**编辑器参考图和实际效果对不上**，
+            // 摆出来的位置自然也不对。
+            //
+            // 命名约定见 PrototypeScene.RoomPoseFileName()。
+            string code = EnemyCodes[index];
+            string room = PrototypeScene.RoomCode(_room);
+            if (!string.IsNullOrEmpty(room))
+            {
+                string roomPath = "Assets/Art/Characters/char_" + code + "_" + room + ".png";
+                var roomArt = AssetDatabase.LoadAssetAtPath<Texture2D>(roomPath);
+                if (roomArt != null)
+                {
+                    _enemyArt[index] = roomArt;
+                    return _enemyArt[index];
+                }
+            }
+
+            string path = "Assets/Art/Characters/char_" + code + "_idle.png";
             _enemyArt[index] = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
             return _enemyArt[index];
         }
@@ -2027,6 +2139,20 @@ namespace NailongFNAF.EditorTools
         {
             for (int e = 0; e < EnemyNames.Length; e++)
             {
+                // ⚠️ **不在这条巡逻路线上的敌人不画**（2026-11-09 改）。
+                //
+                // 之前四只无条件全画，于是 CAM 1C（海盗湾）上也飘着牛来和袋鼠的
+                // 参考图 —— 它们根本不去那儿。摆点位时被不存在的敌人干扰，
+                // 判断不了真实构图（用户反馈）。
+                //
+                // 判据见 EnemyAppearsIn()。当前选中的那只**始终画**，
+                // 否则你在顶栏选了一只不在这屋的敌人，画面里什么都没有，
+                // 会以为编辑器坏了。
+                if (!EnemyAppearsIn(e, _room) && e != _selEnemy)
+                {
+                    continue;
+                }
+
                 Vector2 norm = PointNorm(_room, e);
                 Vector2 g = ToGui(r, norm);
 
@@ -2335,6 +2461,13 @@ namespace NailongFNAF.EditorTools
         {
             for (int i = 0; i < EnemyNames.Length; i++)
             {
+                // 和绘制保持一致：不在这条路线上的敌人不响应点击/拖动，
+                // 否则能"抓到"一个画面上根本看不见的点（2026-11-09）。
+                if (!EnemyAppearsIn(i, _room))
+                {
+                    continue;
+                }
+
                 Vector2 g = ToGui(r, PointNorm(_room, i));
                 if ((g - e.mousePosition).sqrMagnitude <= 196f)   // 14px
                 {
@@ -2586,6 +2719,67 @@ namespace NailongFNAF.EditorTools
                 x = Mathf.Clamp01(norm.x),
                 y = Mathf.Clamp01(norm.y),
                 scale = 1f
+            });
+            l.points = list.ToArray();
+        }
+
+        // ---- 敌人缩放的读写（2026-11-09 新增）----
+        //
+        // 和 SetPoint 一样：没有对应点位就现建一个（scale=1、坐标取运行时自动布局）。
+        // 这样滑条拖一下就能生成点位，不用先去画布上点一下。
+
+        /// <summary>取某敌人某档位的缩放；没配过返回 1。</summary>
+        private float GetPointScale(int room, int enemy, int tier)
+        {
+            var l = Layout(room);
+            if (l.points == null)
+            {
+                return 1f;
+            }
+
+            foreach (var p in l.points)
+            {
+                if (p != null && p.enemy == enemy && p.tier == tier)
+                {
+                    return p.scale <= 0.01f ? 1f : p.scale;
+                }
+            }
+
+            return 1f;
+        }
+
+        /// <summary>写某敌人某档位的缩放；没有点位就用自动布局的位置新建。</summary>
+        private void SetPointScale(int room, int enemy, int tier, float scale)
+        {
+            _dirty = true;
+            var l = Layout(room);
+
+            if (l.points == null)
+            {
+                l.points = new LayoutPoint[0];
+            }
+
+            foreach (var p in l.points)
+            {
+                if (p != null && p.enemy == enemy && p.tier == tier)
+                {
+                    p.scale = Mathf.Clamp(scale, 0.05f, 4f);
+                    return;
+                }
+            }
+
+            // 没有点位 → 用运行时自动摆的那个位置建一个，免得新点位跳到画面角落
+            Vector2 px = PrototypeScene.MonitorSlotPosition((EnemyId)enemy, room);
+            Vector2 norm = new Vector2(0.5f + px.x / DesignW, Mathf.Clamp01(px.y / DesignH));
+
+            var list = new List<LayoutPoint>(l.points);
+            list.Add(new LayoutPoint
+            {
+                enemy = enemy,
+                tier = tier,
+                x = Mathf.Clamp01(norm.x),
+                y = Mathf.Clamp01(norm.y),
+                scale = Mathf.Clamp(scale, 0.05f, 4f)
             });
             l.points = list.ToArray();
         }

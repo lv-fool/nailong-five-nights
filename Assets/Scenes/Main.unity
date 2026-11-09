@@ -542,7 +542,7 @@ MonoBehaviour:
     Steal: {fileID: 0}
     RoomPoses:
     - {fileID: 0}
-    - {fileID: 0}
+    - {fileID: 21300000, guid: c59894dc2cd8705428ce358c23af735c, type: 3}
     - {fileID: 0}
     - {fileID: 0}
     - {fileID: 0}

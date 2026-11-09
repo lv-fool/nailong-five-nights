@@ -2847,24 +2847,41 @@ namespace NailongFNAF.UI
 
             if (art != null)
             {
-                // ⚠️ **先看调用方要的姿态，再看房间专属图**。
+                // ⚠️ **房间专属图优先级最高**（2026-11-09 改）。
                 //
-                // 原先反了：先 GetRoomPose()、再用 fallbackPose 兜底 ——
-                // 而 GetRoomPose 内部会一路兜到 Idle，永远不为 null，
-                // 所以 fallbackPose 从来没用上（奶龙的偷电图就这么一直显示不出来）。
+                // 历史：原先先看调用方姿态、再看房间图，当时的理由是
+                // 「GetRoomPose 内部会兜到 Idle，永远不为 null，导致 fallbackPose 用不上」。
+                // 那个顾虑在**只画了通用姿态**时是对的，但代价是：
+                // 噜噜在监控里永远是 `CharacterPose.Peek`（非 Idle），
+                // 于是它的餐厅趴姿 `char_lulu_mon_1b` 永远轮不到 ——
+                // 用户在 CAM 1B 看到它还是站着的那张。
                 //
                 // 现在的顺序：
-                //   · 明确指定了非 Idle 的姿态（偷电 / 探头 / 受惊…）→ 就用它
-                //   · 只给了 Idle（普通站立）→ 优先用这个房间画好的专属图
-                Sprite wanted = fallbackPose != CharacterPose.Idle
-                    ? art.Get(fallbackPose)
+                //   1. 这个房间画了专属图 → 就用它（「它在哪个房间」比「它在干嘛」重要，
+                //      同一张图在不同房间的构图差异正是房间专属图要解决的问题）
+                //   2. 没有房间图 → 用调用方要的姿态
+                //   3. 连那张也没有 → GetRoomPose 内部会一路兜到 Idle（不为 null）
+                //
+                // 需要注意：`GetRoomPose` 在**没有房间图**时返回的是 Idle，
+                // 不是 null，所以不能直接拿它当「有没有房间图」的判据。
+                // 这里显式查 `RoomPoses` 数组，只有真配了才认。
+                Sprite roomPose = art.RoomPoses != null
+                    && cameraIndex >= 0
+                    && cameraIndex < art.RoomPoses.Length
+                    ? art.RoomPoses[cameraIndex]
                     : null;
 
-                sprite = wanted != null ? wanted : art.GetRoomPose(cameraIndex);
-
-                if (sprite == null)
+                if (roomPose != null)
                 {
-                    sprite = art.Get(fallbackPose);
+                    sprite = roomPose;
+                }
+                else
+                {
+                    Sprite wanted = fallbackPose != CharacterPose.Idle
+                        ? art.Get(fallbackPose)
+                        : null;
+
+                    sprite = wanted != null ? wanted : art.Get(fallbackPose);
                 }
             }
 
