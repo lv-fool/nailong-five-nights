@@ -273,6 +273,9 @@ namespace NailongFNAF.Core
         /// <summary>奶包最近一次出场 —— 表现层拿它决定显示哪张立绘、说哪句话。</summary>
         public NaibaoCue LastNaibaoCue { get; private set; }
 
+        /// <summary>本次通话开始时的 unscaled 时间（秒），用于算通话时长。</summary>
+        private float _naibaoCallStartTime;
+
         /// <summary>距 <see cref="LastNaibaoCue"/> 过了多少秒，表现层用它决定什么时候收起来。</summary>
         public float LastNaibaoCueAge { get; private set; }
 
@@ -1078,6 +1081,9 @@ namespace NailongFNAF.Core
             NaibaoCallCount++;
             NaibaoCallSerial++;
 
+            // 记录通话开始时间，挂断时算出已听时长，用来按比例减少冷却
+            _naibaoCallStartTime = Time.unscaledTime;
+
             // 接通就让她撒手：抢着的监控立刻还回去（玩家的意图本来就没被改），
             // 挂在身上的「偷加一档」也一并熄掉
             _naibaoMonitorTimer = 0f;
@@ -1112,11 +1118,16 @@ namespace NailongFNAF.Core
                 return;
             }
 
+            // 已听时长 = 挂断时刻 − 接通时刻；设定总时长由 NaibaoCall 提供
+            float talkDuration = Time.unscaledTime - _naibaoCallStartTime;
+            float totalVoiceDuration = NaibaoCall.TotalDurationSeconds;
+
             NaibaoCall = null;
             NaibaoCallSerial++;
+
             if (Naibao != null)
             {
-                Naibao.EndTalk();
+                Naibao.EndTalk(talkDuration, totalVoiceDuration);
             }
         }
 

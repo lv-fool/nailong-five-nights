@@ -223,10 +223,22 @@ namespace NailongFNAF.Gameplay
         private readonly NaibaoCallLine[] _lines;
         private int _index;
 
+        /// <summary>每句台词的设定播放时长（秒）。用来算「已听比例」，不影响实际播放。</summary>
+        private const float DefaultSecondsPerLine = 3f;
+
+        /// <summary>所有语音的设定总时长（秒）＝ 句数 × 每句设定时长。</summary>
+        public float TotalDurationSeconds { get; private set; }
+
         public NaibaoCall(NaibaoCallLine[] lines)
+            : this(lines, DefaultSecondsPerLine)
+        {
+        }
+
+        public NaibaoCall(NaibaoCallLine[] lines, float secondsPerLine)
         {
             _lines = lines ?? new NaibaoCallLine[0];
             _index = 0;
+            TotalDurationSeconds = _lines.Length * secondsPerLine;
         }
 
         /// <summary>这一次通话一共几句。</summary>

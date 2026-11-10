@@ -210,10 +210,15 @@ namespace NailongFNAF.Gameplay
         }
 
         /// <summary>
-        /// 挂断：她重新开始盘算，但要等满一个间隔才出手。
-        /// 不能挂完立刻闹 —— 那样「打电话换平安」就永远是亏的。
+        /// 挂断：她重新开始盘算，但要等满剩余的冷却才出手。
+        /// 通话不再完全重置时间，而是与通话时长有关：以「挂断这一刻距离下次出手的
+        /// 剩余冷却」为基础，按「已听时长 / 设定总时长」的比例把它增加最多一半
+        /// （完整听完 = 增加一半，奶包出手变慢）。
+        /// 引导期不适用此规则，保持原行为。
         /// </summary>
-        public void EndTalk()
+        /// <param name="talkDuration">本次通话实际持续了多久（秒），由外部传入。</param>
+        /// <param name="totalVoiceDuration">所有语音的设定总时长（秒）。</param>
+        public void EndTalk(float talkDuration, float totalVoiceDuration)
         {
             if (!_talking)
             {
@@ -221,7 +226,45 @@ namespace NailongFNAF.Gameplay
             }
 
             _talking = false;
-            _nextMischiefAt = _elapsed + NextGap();
+
+            // 基础 = 挂断这一刻距离下次出手的剩余冷却。
+            // 通话期间 _elapsed 不推进，所以它就等于接通那一刻的剩余冷却。
+            float remaining = _nextMischiefAt - _elapsed;
+            if (remaining < 0f)
+            {
+                remaining = 0f;
+            }
+
+            // 引导期：只做教学，不进入捣乱冷却，保持原行为。
+            if (_guide)
+            {
+                _nextMischiefAt = _elapsed + NextGap();
+                return;
+            }
+
+            // 按比例增加剩余冷却。ratio=1（完整听完）时乘 1.5，即增加一半。
+            if (totalVoiceDuration > 0f && talkDuration > 0f)
+            {
+                float ratio = talkDuration / totalVoiceDuration;
+                if (ratio < 0f)
+                {
+                    ratio = 0f;
+                }
+                else if (ratio > 1f)
+                {
+                    ratio = 1f;
+                }
+
+                remaining *= (1f + 0.5f * ratio);
+            }
+
+            _nextMischiefAt = _elapsed + remaining;
+        }
+
+        /// <summary>无参版本：视为未听任何语音，冷却不增加（保留给旧调用方）。</summary>
+        public void EndTalk()
+        {
+            EndTalk(0f, 0f);
         }
 
         /// <summary>推进时间。到点就把该出的场排进队列，等外面用 <see cref="TryTakeCue"/> 取。</summary>

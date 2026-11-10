@@ -78,7 +78,7 @@ namespace NailongFNAF.Tests
         }
 
         [Test]
-        public void 挂断之后要等满一个间隔才再出手()
+        public void 挂断之后按剩余冷却继续走()
         {
             var director = new NaibaoDirector(false, new FixedRandom(0));
             director.BeginTalk();
@@ -87,11 +87,38 @@ namespace NailongFNAF.Tests
 
             Assert.IsFalse(director.IsTalking);
 
-            director.Tick(NaibaoDirector.MischiefMinGap - 1f);
-            Assert.AreEqual(0, Drain(director), "挂断瞬间就闹，打电话就永远是亏的");
+            // 还没出手过：剩余冷却就是 MischiefFirstDelay（30 秒），通话期间冻结
+            director.Tick(NaibaoDirector.MischiefFirstDelay - 1f);
+            Assert.AreEqual(0, Drain(director), "剩余冷却没走完她不该出手");
 
             director.Tick(2f);
-            Assert.AreEqual(1, Drain(director), "等满一个间隔以后她照常出手");
+            Assert.AreEqual(1, Drain(director), "剩余冷却走完以后她照常出手");
+        }
+
+        [Test]
+        public void 挂断后以剩余冷却为基础而不是重新取完整间隔()
+        {
+            var director = new NaibaoDirector(false, new FixedRandom(0));
+
+            // 第一次出手：elapsed = 30，下一次出手在 30 + 38 = 68
+            director.Tick(NaibaoDirector.MischiefFirstDelay);
+            Assert.AreEqual(1, Drain(director));
+
+            // 再走 10 秒：elapsed = 40，距离下次出手还剩 28 秒
+            director.Tick(10f);
+
+            // 接通 → 挂断（没听任何语音）：剩余冷却应保持 28 秒
+            director.BeginTalk();
+            director.EndTalk();
+
+            // 若错误地重新取完整间隔（38 秒），要等到 78 秒才出手；
+            // 以剩余为准则是 68 秒。这里卡在 68 秒那一帧。
+            director.Tick(27f);   // elapsed = 67
+            Assert.AreEqual(0, Drain(director), "剩余冷却还没走完");
+
+            director.Tick(1f);    // elapsed = 68
+            Assert.AreEqual(1, Drain(director),
+                "应该以剩余 28 秒为基础出手，而不是重新取完整间隔");
         }
 
         [Test]

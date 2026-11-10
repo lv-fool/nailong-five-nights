@@ -256,5 +256,97 @@ namespace NailongFNAF.Tests
             Assert.IsTrue(director.TryTakeCue(out cue));
             Assert.IsFalse(string.IsNullOrEmpty(cue.Line));
         }
+
+        [Test]
+        public void 手欠期不接电话冷却不变()
+        {
+            var director = new NaibaoDirector(false, new FixedRandom(0));
+
+            director.Tick(NaibaoDirector.MischiefFirstDelay);
+            NaibaoCue cue;
+            director.TryTakeCue(out cue);
+
+            // 没接电话：EndTalk() 视为未听任何语音，冷却不变
+            director.EndTalk();
+
+            // 最短间隔差 1 秒，不该出手
+            director.Tick(NaibaoDirector.MischiefMinGap - 1f);
+            Assert.IsFalse(director.TryTakeCue(out cue), "间隔没到就又来了");
+
+            // 补够 1 秒就该出手
+            director.Tick(1f);
+            Assert.IsTrue(director.TryTakeCue(out cue), "间隔到了应该出手");
+            Assert.AreEqual(2, director.MischiefCount);
+        }
+
+        [Test]
+        public void 手欠期完整听完冷却增加一半()
+        {
+            var director = new NaibaoDirector(false, new FixedRandom(0));
+
+            director.Tick(NaibaoDirector.MischiefFirstDelay);
+            director.TryTakeCue(out _);
+
+            // 接通 → 挂断，完整听完：通话时长 = 设定总时长，冷却增加一半
+            director.BeginTalk();
+            director.EndTalk(60f, 60f);
+
+            // 原本需 38 秒，现在需 57 秒
+            director.Tick(56f);
+            NaibaoCue cue;
+            Assert.IsFalse(director.TryTakeCue(out cue), "57秒内不该出手");
+
+            director.Tick(1f);
+            Assert.IsTrue(director.TryTakeCue(out cue), "57秒后应该出手");
+        }
+
+        [Test]
+        public void 手欠期听了一半冷却增加四分之一()
+        {
+            var director = new NaibaoDirector(false, new FixedRandom(0));
+
+            director.Tick(NaibaoDirector.MischiefFirstDelay);
+            director.TryTakeCue(out _);
+
+            // 接通 → 挂断，听了一半：ratio=0.5，gap = 38 * 1.25 = 47.5
+            director.BeginTalk();
+            director.EndTalk(30f, 60f);
+
+            director.Tick(47f);
+            NaibaoCue cue;
+            Assert.IsFalse(director.TryTakeCue(out cue), "47.5秒内不该出手");
+
+            director.Tick(1f);
+            Assert.IsTrue(director.TryTakeCue(out cue), "47.5秒后应该出手");
+        }
+
+        [Test]
+        public void 引导期挂断后不捣乱()
+        {
+            var director = new NaibaoDirector(true, new FixedRandom(0));
+
+            // 先让第一句引导台词出队
+            director.Tick(NaibaoDirector.GuideFirstDelay);
+            NaibaoCue cue;
+            director.TryTakeCue(out cue);
+
+            // 接通 → 挂断，即使通话很长，引导期也不进入捣乱冷却
+            director.BeginTalk();
+            director.EndTalk(60f, 60f);
+
+            // 把整夜的引导时刻表走完，剩下的台词应该照常按序播完
+            director.Tick(NaibaoDirector.GuideTimes[NaibaoDirector.GuideTimes.Length - 1]);
+
+            // 引导期永远不捣乱：队列里只允许出现 Line，捣乱次数保持 0
+            int lines = 0;
+            while (director.TryTakeCue(out cue))
+            {
+                Assert.AreEqual(NaibaoAction.Line, cue.Action, "引导期不该捣乱");
+                lines++;
+            }
+
+            Assert.AreEqual(NaibaoDirector.GuideLines.Length - 1, lines, "剩下的引导台词应该照常播完");
+            Assert.AreEqual(0, director.MischiefCount);
+        }
     }
 }
