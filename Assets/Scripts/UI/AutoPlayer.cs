@@ -347,6 +347,15 @@ namespace NailongFNAF.UI
                 return;
             }
 
+            // ── 2.5 门口的外卖（袋鼠被挡走后留下的，补电用）──
+            //
+            // 优先级放在「门/噜噜」之后、「抬头」之前：
+            //   · 有威胁时不该为了捡外卖冒险（HANDLE 里会自己判 leftThreat）
+            //   · 但要在抬头之前处理 —— 因为**捡外卖要求监控放下**
+            //     （HandleDeliveryClick 里 `if (gm.MonitorUp) return`），
+            //     一旦先抬了头，这一帧就捡不成了，而外卖只有 20 秒。
+            HandleDelivery(leftThreat);
+
             // ── 3. 监控：只在两侧都安全时抬头 ──
             if (!leftThreat && !rightThreat)
             {
@@ -357,6 +366,81 @@ namespace NailongFNAF.UI
                 // 有威胁时一定放下监控（否则看不见门口，也放不下门）
                 SetMonitor(false);
                 _monitorSweepTimer = 0f;
+            }
+        }
+
+        /// <summary>
+        /// 捡门口的外卖（2026-11-13 加）。
+        ///
+        /// ## 外卖是什么
+        /// 袋鼠敲完门被挡走之后，门口会留一份外卖，捡起来补 1 / 2 / 5 点电
+        /// （见 <see cref="NailongFNAF.Gameplay.DeliveryDrop"/>）。**只放 20 秒**，
+        /// 到点就凉。
+        ///
+        /// ## 为什么以前 AI 捡不到
+        /// 拾取入口是 UI 层的鼠标点击（`PrototypeScene.HandleDeliveryClick`），
+        /// AI 不模拟鼠标，所以从来没捡过。但底下其实有个干净的公开接口
+        /// `EnemyDirector.TryCollectDelivery()` —— 直接调它就行，不用碰 UI。
+        ///
+        /// ## 三个前提（全部来自 UI 层的实际判据，不能拍脑袋）
+        ///   1. `Delivery.Available` —— 有货
+        ///   2. **左门必须开着** —— 外卖摆在门外地上，门关着袋子会被藏起来
+        ///      （`ApplyDeliveryBag`：`show = available && doorOpen && gm.Operable`）。
+        ///      门关着去调 TryCollectDelivery 虽然也能成功，但那是「隔空取物」，
+        ///      和玩家看到的不一样，不诚实。
+        ///   3. **监控必须放下** —— 玩家是「看着门外地上点它」，
+        ///      抬头时根本看不到门外（`HandleDeliveryClick` 里有 `MonitorUp` 早退）。
+        ///
+        /// ## 什么情况下放弃
+        ///   · 左边有威胁：命比几度电重要，让 <paramref name="leftThreat"/> 决定
+        ///   · 门开着但门外站着人（威胁中）→ 同上，先关门
+        /// 其余情况（包括电量满）都捡 —— 反正不花电，捡了不亏。
+        /// </summary>
+        private void HandleDelivery(bool leftThreat)
+        {
+            if (_director == null || _director.Delivery == null)
+            {
+                return;
+            }
+
+            // 有威胁时别为几度电冒险 —— 关门保命优先
+            if (leftThreat)
+            {
+                return;
+            }
+
+            if (!_director.Delivery.Available)
+            {
+                return;
+            }
+
+            // 条件 2：左门要开着（否则就是隔空取物）
+            if (_gm.LeftDoorClosed)
+            {
+                return;
+            }
+
+            // 条件 3：监控要放下
+            if (_gm.MonitorUp)
+            {
+                SetMonitor(false);
+                return;   // 这一帧先放监控，下一帧再捡（放下有动画，不能立即生效）
+            }
+
+            // 玩家此刻必须能动（通话中 CanOperate() 是 false，UI 那边也点不动）
+            if (!_gm.Operable)
+            {
+                return;
+            }
+
+            // ⚠️ **先存下收益再捡** —— TryCollectDelivery() 成功后
+            // `Delivery.Available` 就是 false 了，`Gain` 跟着变 0，
+            // 捡完再读会是「+0 电」（踩过）。
+            float gain = _director.Delivery.Gain;
+
+            if (_director.TryCollectDelivery())
+            {
+                LastAction = "捡外卖 +" + Mathf.RoundToInt(gain) + " 电";
             }
         }
 
