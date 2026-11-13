@@ -459,6 +459,40 @@ namespace NailongFNAF.Core
             return BreachedSide.HasValue && BreachedSide.Value == side;
         }
 
+        /// <summary>
+        /// 画质/帧率设置（2026-11-12）。
+        ///
+        /// 为什么强制 Low + 关垂直同步：
+        ///   构建时的默认档是 Ultra（`m_CurrentQuality = 5`），而 Ultra 的
+        ///   `vSyncCount = 1` —— 帧数被显示器刷新率钉死在 60，
+        ///   `Application.targetFrameRate` 又没设置。结果是：
+        ///     · 本机是 AMD 核显，Ultra 档跑不满 60fps，白白掉帧
+        ///     · 垂直同步把帧率锁死，帧间隔被钳在 1/60 秒
+        ///
+        /// 这个游戏是 2D 为主的 UGUI + 一条圆柱全景，**根本用不上 Ultra**：
+        /// 没有实时阴影、没有后处理、没有多光源。Low 档的画质损失肉眼几乎看不出，
+        /// 但帧率能稳到 60 以上，帧间隔不再被 vsync 限制。
+        ///
+        /// ⚠️ 用 `RuntimeInitializeOnLoadMethod` 而不是 Awake：
+        /// 这条在**任何场景加载之前**执行，不依赖 GameManager 什么时候被创建
+        /// （本项目的 GameManager 是 PrototypeScene 运行时 AddComponent 出来的）。
+        /// 而且在编辑器里 Play 也照样生效，行为和打包版一致。
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void ApplyPerformanceDefaults()
+        {
+            // 1 = Low（Very Low=0 / Low=1 / Medium=2 / High=3 / Very High=4 / Ultra=5）
+            // 只有 Low 和 Very Low 的 vSyncCount 是 0，Medium 以上都是 1。
+            QualitySettings.SetQualityLevel(1, true);
+
+            // 明确关掉垂直同步 —— SetQualityLevel 已经把它设成 0 了，
+            // 但这行是**兜底**：万一以后有人改了质量档配置，这里仍然保证不锁帧。
+            QualitySettings.vSyncCount = 0;
+
+            // -1 = 不限帧，让显卡跑满
+            Application.targetFrameRate = -1;
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
