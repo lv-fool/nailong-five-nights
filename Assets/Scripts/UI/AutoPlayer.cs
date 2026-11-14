@@ -84,8 +84,10 @@ namespace NailongFNAF.UI
         private System.Reflection.FieldInfo _flashlightHeld;
 
         // 注：早先这里还有 _pan / _panTarget 两个反射字段，用来每帧把视角钉在正前方。
-        // 2026-11-03 用户改成「只有闪手电时才回正」，改走 PrototypeScene.ViewExternalControl
-        // 那个正式开关，反射字段就没用了 —— 别再捡回来，直接写 _pan 会被 UpdateView 冲掉。
+        // 2026-11-03 改成「只有闪手电时才回正」，走 PrototypeScene.ViewExternalControl。
+        // 2026-11-13 用户又定：**做行为必须转到对应角度，行为结束不必回正** ——
+        // 所以现在代打期间一直持有 ViewExternalControl，用 ViewExternalPan 指定目标角度，
+        // 统一走 TurnTo()；别再直接写 _pan（会被 UpdateView 冲掉）。
 
         private static readonly System.Reflection.BindingFlags Flags =
             System.Reflection.BindingFlags.Instance |
@@ -93,53 +95,30 @@ namespace NailongFNAF.UI
             System.Reflection.BindingFlags.NonPublic;
 
         /// <summary>
-        /// 把手电要照的那一段视角收回正前方（**只在闪手电期间**用）。
+        /// 把镜头转到指定角度（左 / 正前 / 右）。
+        ///
+        /// 用户 2026-11-13 定：**AI 做行为必须转到对应角度，行为结束后不必回正**。
+        /// 所以代打期间视角一直由 AI 接管（<see cref="PrototypeScene.ViewExternalControl"/> = true），
+        /// 这里只负责改目标角度；**不要在任何行为结束后调「回正」**。
         ///
         /// 两件事都要做：
         ///   · 让 PrototypeScene 别再按鼠标算转头（ViewExternalControl）——
         ///     否则它在 Update 里每帧重算 _panTarget，外面写的值立刻被冲掉
-        ///   · gm.SetView(Front) —— 噜噜认的是这个标记（EnemyContext.IsShiningAtFront）
-        ///
-        /// ⚠️ 用户 2026-11-03 定：**只有闪手电的时候**才回正，其余时间视角归玩家。
-        /// 早先这里每帧无条件钉死正前方，等于把玩家唯一的操作自由也抢了。
+        ///   · gm.SetView(...) —— CurrentView 立刻改成目标边（不等镜头转完），
+        ///     噜噜的手电判定以及其它按视角判断的逻辑马上生效
         /// </summary>
-        private void SetFrontViewHold(bool hold)
+        private void TurnTo(ViewSide side)
         {
             if (_scene != null)
             {
-                _scene.ViewExternalControl = hold;
+                _scene.ViewExternalControl = true;
+                _scene.ViewExternalPan = AutoPlayerViewPolicy.PanFor(side);
             }
 
-            if (!hold)
+            if (_gm.CurrentView != side)
             {
-                return;
+                _gm.SetView(side);
             }
-
-            // CurrentView 由 PrototypeScene.UpdateView 按 _pan 反推，
-            // 我们刚把手电接管起来，标记立刻改成 Front —— 手电这一帧就生效，
-            // 不用等镜头平滑转回来（转的过程玩家看得见，判定不用等它）。
-            if (_gm.CurrentView != ViewSide.Front)
-            {
-                _gm.SetView(ViewSide.Front);
-            }
-        }
-
-        /// <summary>
-        /// 关这侧门时的转头 —— **已停用**（用户 2026-11-01 定）。
-        ///
-        /// 早先会朝关的那侧偏 ±0.55（约 38°），想让玩家看见「AI 转头去关门」。
-        /// 但手电是**贴在桌面世界点上**的，相机一转它就跟着画面跑出原来位置，
-        /// 看起来像「手电不固定了」。
-        ///
-        /// 2026-11-03 又补了一条更硬的理由：**AI 代打期间视角默认归玩家**，
-        /// 关个门就抢镜头属于越权。现在整份代码里唯一允许动视角的地方
-        /// 是闪手电（见 SetFrontViewHold）。
-        ///
-        /// 留着这个空方法是为了调用点不用改，也不容易再被误加回来。
-        /// </summary>
-        private void PeekAtSide(Side side)
-        {
-            // 故意留空
         }
 
         /// <summary>最近一次决策的说明，供调试面板显示。</summary>
@@ -184,6 +163,11 @@ namespace NailongFNAF.UI
             if (_scene != null)
             {
                 _scene.FlashlightExternalControl = true;
+
+                // 代打期间视角也归 AI：做行为转到对应角度，行为结束不必回正
+                // （用户 2026-11-13 定）。开局先摆正前方，等具体行为再转。
+                _scene.ViewExternalControl = true;
+                _scene.ViewExternalPan = 0f;
             }
 
             _running = true;
@@ -290,19 +274,20 @@ namespace NailongFNAF.UI
 
             bool lowPower = _gm.Power.Level < LowPowerThreshold;
 
-            // ── 视角：平时完全交给玩家 ──
+            // ── 视角：代打期间由 AI 接管 ──
             //
-            // ⚠️ 用户 2026-11-03 定：**只有闪手电时才把视角收回正前方**，
-            // 其余时候一律不碰（早先是每帧无条件钉死正前方）。
+            // ⚠️ 用户 2026-11-13 定：**AI 做行为必须转到对应角度**
+            // （关门/开灯去那一侧、闪正门噜噜回正前方），**行为结束不必回正**。
+            // 所以 Begin() 里就打开 ViewExternalControl，之后由各行为调 TurnTo(...)
+            // 指定目标角度；TurnTo 见下方。
             //
-            // 为什么闪的时候必须回正：噜噜的手电判定是
+            // 为什么闪噜噜时必须正前方：手电判定是
             // EnemyContext.IsShiningAtFront() = FlashlightOn && !MonitorUp && View == Front，
-            // 玩家把镜头歪到左边时，AI 就算把手电打开也照不到正门。
+            // 镜头歪在侧边时，AI 就算把手电打开也照不到正门。
             //
-            // 接管交给 PrototypeScene.ViewExternalControl —— 不能直接写 _pan：
-            // UpdateView 每帧按鼠标重算 _panTarget，外面写的一律被冲掉（踩过）。
-            // 开/关都集中在 HandleLulu（HandleLulu 每帧都会跑，所以「不闪了要放掉」
-            // 也在那里统一处理，这里不需要再兜一次）。
+            // 接管交给 PrototypeScene.ViewExternalControl + ViewExternalPan ——
+            // 不能直接写 _pan：UpdateView 每帧按鼠标重算 _panTarget，
+            // 外面写的一律被冲掉（踩过）。
 
             // ── 噜噜到门口时，一律优先处理它 ──
             //
@@ -438,6 +423,9 @@ namespace NailongFNAF.UI
             // 捡完再读会是「+0 电」（踩过）。
             float gain = _director.Delivery.Gain;
 
+            // 外卖在左门外地上 —— 做这个行为先转到左边（用户 2026-11-13 定）
+            TurnTo(AutoPlayerViewPolicy.ForSide(Side.Left));
+
             if (_director.TryCollectDelivery())
             {
                 LastAction = "捡外卖 +" + Mathf.RoundToInt(gain) + " 电";
@@ -476,6 +464,10 @@ namespace NailongFNAF.UI
             {
                 if (_naibaoCooldown <= 0f)
                 {
+                    // 桌上那部手机在正前方 —— 打电话这个行为先转到正前方
+                    // （用户 2026-11-13 定：做行为必须转到对应角度）
+                    TurnTo(ViewSide.Front);
+
                     _gm.StartNaibaoCall(0, false);
                     _naibaoCooldown = NaibaoCallIntervalSeconds;
 
@@ -557,14 +549,17 @@ namespace NailongFNAF.UI
             if (threat == null)
             {
                 // 门口没人 → 门开着省电，灯也关
+                // 做这些行为都要先转到对应那一侧（用户 2026-11-13 定）
                 if (closed)
                 {
+                    TurnTo(AutoPlayerViewPolicy.ForSide(side));
                     ToggleDoor(side);
                     LastAction = side + " 无人，开门省电";
                 }
 
                 if (lightOn)
                 {
+                    TurnTo(AutoPlayerViewPolicy.ForSide(side));
                     ToggleLight(side);
                 }
 
@@ -575,10 +570,10 @@ namespace NailongFNAF.UI
             // 先关门（这是唯一能挡住的），关门之后关灯省电
             if (!closed)
             {
+                // 关门这个行为转到对应那一侧（用户 2026-11-13 定：
+                // 做行为必须转到对应角度；关完不必回正）
+                TurnTo(AutoPlayerViewPolicy.ForSide(side));
                 ToggleDoor(side);
-
-                // 关门时朝那侧偏一下头 —— 让玩家看见 AI「转头去关门」了
-                PeekAtSide(side);
 
                 LastAction = side + " 来人了，关门";
                 return true;
@@ -589,6 +584,7 @@ namespace NailongFNAF.UI
             // 每多一样开着的设备，耗电倍率就 +1 档。
             if (lightOn)
             {
+                TurnTo(AutoPlayerViewPolicy.ForSide(side));
                 ToggleLight(side);
             }
 
@@ -617,18 +613,11 @@ namespace NailongFNAF.UI
             if (lulu == null)
             {
                 SetFlashlight(false);
-                SetFrontViewHold(false);
                 return;
             }
 
             bool atDoor = lulu.Stage >= lulu.MaxStage;
             bool needsFlash = lulu.FlashCount < LuluFlashThreshold;
-
-            // ⚠️ 视角接管的唯一判据走 AutoPlayerViewPolicy（有单元测试盯着）：
-            //   只有「噜噜堵在正门 + 还没闪够 + 没在扑人」这一段才回正，
-            //   其余时候视角完全归玩家（用户 2026-11-03 定）。
-            SetFrontViewHold(AutoPlayerViewPolicy.ShouldHoldView(
-                atDoor, lulu.FlashCount, LuluFlashThreshold, lulu.IsAttacking));
 
             if (!atDoor || !needsFlash || lulu.IsAttacking)
             {
@@ -638,12 +627,18 @@ namespace NailongFNAF.UI
                     _luluFlashing = false;
                 }
 
+                // 不闪的时候不动视角 —— 用户 2026-11-13 定「行为结束不必回正」，
+                // 所以这里也**不要**把 ViewExternalControl 关掉。
                 return;
             }
 
+            // 闪它之前必须正对正门 —— 手电判定只认 View == Front
+            // （用户 2026-11-13 定：做行为必须转到对应角度）。
+            TurnTo(ViewSide.Front);
+
             // 手电只在「监控放下 + 视角朝正前方」时才算数
-            // （EnemyContext.IsShiningAtFront）—— 视角在闪之前接管回正，
-            // 监控在 Think 里 LuluNeedsFlash 那条分支已经放下了。
+            // （EnemyContext.IsShiningAtFront）—— 监控在 Think 里
+            // LuluNeedsFlash 那条分支已经放下了。
 
             // 站到门口 + 还没闪够 → 开手电闪它
             // 提前闪没用（要它站到门口才算），所以只在 atDoor 时闪

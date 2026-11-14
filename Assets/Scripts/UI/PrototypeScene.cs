@@ -1297,13 +1297,21 @@ namespace NailongFNAF.UI
             }
             else if (ViewExternalControl)
             {
-                // AI 代打要「用手电照正门」时临时接管视角：把镜头收回正前方。
-                //
-                // ⚠️ **只管这一小段**（用户 2026-11-03 定）：其余时候视角必须还给玩家。
-                // 转头是这个游戏唯一的操作自由，代打不该连它一起抢走。
-                // 这里只改目标值，转的过程仍交给下面的 SmoothDamp ——
-                // 所以是「转回来」而不是「啪一下跳回来」。
-                _panTarget = 0f;
+                // AI 代打接管视角：转到它指定的角度（-1 左 / 0 正前 / 1 右）。
+                // 用户 2026-11-13 定：「做行为必须转到对应角度，不必回正」。
+                // 这里只改目标值，转的过程仍交给下面的 SmoothDamp。
+                float pan = ViewExternalPan;
+
+                if (pan < -1f)
+                {
+                    pan = -1f;
+                }
+                else if (pan > 1f)
+                {
+                    pan = 1f;
+                }
+
+                _panTarget = pan;
             }
             else
             {
@@ -1331,13 +1339,27 @@ namespace NailongFNAF.UI
             ViewSide view;
             if (ViewExternalControl)
             {
-                // ⚠️ 接管期间**直接判正前方**，不要按 _pan 反推。
+                // ⚠️ 接管期间按 AI 指定的**目标角度**判边，不要按 _pan 反推。
                 //
-                // 镜头是 SmoothDamp 慢慢转回来的（约 0.3 秒），这期间 _pan 还停在
-                // ±0.6 以上，按阈值算仍是 Left/Right —— 于是这一帧把 AI 刚设的 Front
-                // 又改回去，噜噜的 IsShiningAtFront 时灵时不灵，表现为「手电闪了但它不退」。
-                // 谁先跑（AutoPlayer 还是 UpdateView）也不该影响结果，所以干脆在这里定死。
-                view = ViewSide.Front;
+                // 镜头是 SmoothDamp 慢慢转过去的（约 0.3 秒），这期间 _pan 还停在
+                // 原方向上，按阈值算会和 AI 刚设的方向打架 —— 于是这一帧把 AI 的
+                // 意图又改回去，噜噜的 IsShiningAtFront 时灵时不灵，表现为
+                // 「手电闪了但它不退」。谁先跑（AutoPlayer 还是 UpdateView）也不该
+                // 影响结果，所以干脆在这里按目标值定死。
+                float targetPan = ViewExternalPan;
+
+                if (targetPan <= -ViewSideThreshold)
+                {
+                    view = ViewSide.Left;
+                }
+                else if (targetPan >= ViewSideThreshold)
+                {
+                    view = ViewSide.Right;
+                }
+                else
+                {
+                    view = ViewSide.Front;
+                }
             }
             else if (_pan <= -ViewSideThreshold)
             {
@@ -2461,16 +2483,24 @@ namespace NailongFNAF.UI
         public bool ExternalFlashlightOn { get; set; }
 
         /// <summary>
-        /// AI 代打临时接管转头时为 true —— 期间鼠标不再驱动镜头，镜头回正前方。
+        /// AI 代打接管转头时为 true —— 期间鼠标不再驱动镜头，改用
+        /// <see cref="ViewExternalPan"/> 指定的角度。
         ///
-        /// **只该在「手电要照正门」的那一小段打开**（见 AutoPlayer.HandleLulu），
-        /// 别的时候必须关掉：玩家转头是这个游戏唯一的操作自由。
+        /// 用户 2026-11-13 定：**AI 做行为必须转到对应角度**（关门去左边、
+        /// 关右门去右边、闪正门噜噜回正前方），**行为结束不必回正**。
+        /// 所以代打期间这个开关一直开着，直到 AI 停止 / 这一夜结束才关。
         ///
         /// 为什么要这个开关而不是让 AI 直接写 `_panTarget`：
         /// UpdateView 每帧都会按鼠标重算 `_panTarget`，AI 从外面写会被立刻冲掉
         /// （和手电那边 `FlashlightExternalControl` 是同一个坑）。
         /// </summary>
         public bool ViewExternalControl { get; set; }
+
+        /// <summary>
+        /// AI 接管视角时镜头要转到的位置：**-1 = 全左，0 = 正前方，1 = 全右**。
+        /// 仅在 <see cref="ViewExternalControl"/> 为真时生效。
+        /// </summary>
+        public float ViewExternalPan { get; set; }
 
         /// <summary>
         /// 手电的视觉部分：光斑亮度、按钮明暗。
