@@ -71,6 +71,12 @@ namespace NailongFNAF.UI
         private GameObject _pauseView;
         private GameObject _customView;
         private GameObject _achvView;
+        private GameObject _settingsView;
+
+        // 设置页：后处理开关 / 强度 / 画质的显示文字
+        private Text _settingsPostText;
+        private Text _settingsIntensityText;
+        private Text _settingsQualityText;
 
         // 自定义夜界面：每只敌人一行的活动度数字（下标 = (int)EnemyId）
         private readonly Text[] _customLevelTexts = new Text[EnemyIds.All.Length];
@@ -164,6 +170,7 @@ namespace NailongFNAF.UI
             BuildAchievementsView();
             BuildEndView();
             BuildPauseView();
+            BuildSettingsView();
 
             OpenTitle();
         }
@@ -324,6 +331,10 @@ namespace NailongFNAF.UI
                 new Vector2(0.5f, 0.27f), OnAchievementsClicked);
             MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
                 new Vector2(0.5f, 0.17f), OnQuitClicked);
+
+            // 设置：放在右上角，不挤占主按钮的纵向节奏
+            MakeMenuButton(_titleView.transform, "设置", Vector2.zero,
+                new Vector2(0.90f, 0.945f), OnSettingsClicked);
 
             MakeLabel(_titleView.transform, "撑过 12 点到 6 点。鼠标看左右、升起监控、关门开灯、按手电筒。",
                 20, new Color(0.55f, 0.55f, 0.6f),
@@ -933,6 +944,174 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
+        /// 设置页：氛围后处理开关 / 强度 / 画质。
+        ///
+        /// 画质只放低 / 中 / 高三档 —— Bloom 只在 Medium 以上才跑
+        /// （见 <see cref="ScreenPostPolicy.BloomAllowed"/>），所以想看到 Bloom 要切到中。
+        /// 关闭后处理时直接 Blit 透传，不跑任何 pass。
+        /// </summary>
+        private void BuildSettingsView()
+        {
+            _settingsView = MakeFullScreenPanel("SettingsView",
+                new Color(0.02f, 0.02f, 0.03f, 0.96f), _menuRoot.transform);
+
+            MakeLabel(_settingsView.transform, "设置", 52, new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.5f, 0.84f), new Vector2(0.5f, 0.84f),
+                Vector2.zero, new Vector2(900f, 90f));
+
+            MakeLabel(_settingsView.transform, "画面", 28, new Color(0.75f, 0.75f, 0.8f),
+                new Vector2(0.5f, 0.76f), new Vector2(0.5f, 0.76f),
+                Vector2.zero, new Vector2(900f, 50f));
+
+            // ── 氛围后处理 开 / 关 ──
+            MakeLabel(_settingsView.transform, "氛围后处理", 30, Color.white,
+                new Vector2(0.36f, 0.62f), new Vector2(0.36f, 0.62f),
+                Vector2.zero, new Vector2(420f, 60f));
+
+            Button postButton = MakeMenuButton(_settingsView.transform, "开", Vector2.zero,
+                new Vector2(0.66f, 0.62f), OnTogglePostFx);
+            _settingsPostText = postButton.GetComponentInChildren<Text>();
+
+            // ── 后处理强度 ──
+            MakeLabel(_settingsView.transform, "后处理强度", 30, Color.white,
+                new Vector2(0.36f, 0.50f), new Vector2(0.36f, 0.50f),
+                Vector2.zero, new Vector2(420f, 60f));
+
+            MakeStepperButton(_settingsView.transform, "-", new Vector2(0.56f, 0.50f),
+                () => OnStepPostIntensity(-1));
+
+            _settingsIntensityText = MakeLabel(_settingsView.transform, "85%", 32,
+                new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.64f, 0.50f), new Vector2(0.64f, 0.50f),
+                Vector2.zero, new Vector2(120f, 64f));
+
+            MakeStepperButton(_settingsView.transform, "+", new Vector2(0.72f, 0.50f),
+                () => OnStepPostIntensity(1));
+
+            // ── 画质（Bloom 门槛）──
+            MakeLabel(_settingsView.transform, "画质（Bloom 需中画质以上）", 26,
+                Color.white,
+                new Vector2(0.36f, 0.38f), new Vector2(0.36f, 0.38f),
+                Vector2.zero, new Vector2(520f, 50f));
+
+            Button qualityButton = MakeMenuButton(_settingsView.transform, "低", Vector2.zero,
+                new Vector2(0.66f, 0.38f), OnCycleQuality);
+            _settingsQualityText = qualityButton.GetComponentInChildren<Text>();
+
+            MakeLabel(_settingsView.transform,
+                "氛围后处理只影响办公室画面；HUD 与监控不受影响。",
+                20, new Color(0.55f, 0.55f, 0.6f),
+                new Vector2(0.5f, 0.24f), new Vector2(0.5f, 0.24f),
+                Vector2.zero, new Vector2(1200f, 40f));
+
+            MakeMenuButton(_settingsView.transform, "返回", Vector2.zero,
+                new Vector2(0.5f, 0.12f), OpenTitle);
+
+            _settingsView.SetActive(false);
+        }
+
+        /// <summary>标题页「设置」。</summary>
+        private void OnSettingsClicked()
+        {
+            _menuOpen = true;
+            _menuRoot.SetActive(true);
+            _menuRoot.transform.SetAsLastSibling();
+            _titleView.SetActive(false);
+            _levelView.SetActive(false);
+            _endView.SetActive(false);
+            _customView.SetActive(false);
+            _achvView.SetActive(false);
+            _settingsView.SetActive(true);
+
+            RefreshSettingsLabels();
+        }
+
+        /// <summary>把设置页的三个值刷新成当前实际状态。</summary>
+        private void RefreshSettingsLabels()
+        {
+            var fx = ScreenPostFx.Find();
+
+            bool enabled = fx != null
+                ? fx.UserEnabled
+                : PlayerPrefs.GetInt(ScreenPostFx.EnabledKey, 1) != 0;
+            float intensity = fx != null
+                ? fx.UserIntensity
+                : PlayerPrefs.GetFloat(ScreenPostFx.IntensityKey, 0.85f);
+
+            if (_settingsPostText != null)
+            {
+                _settingsPostText.text = enabled ? "开" : "关";
+            }
+
+            if (_settingsIntensityText != null)
+            {
+                _settingsIntensityText.text = Mathf.RoundToInt(intensity * 100f) + "%";
+            }
+
+            if (_settingsQualityText != null)
+            {
+                _settingsQualityText.text = QualityLabel(QualitySettings.GetQualityLevel());
+            }
+        }
+
+        /// <summary>画质档 → 菜单文字（只认低 / 中 / 高）。</summary>
+        private static string QualityLabel(int level)
+        {
+            if (level <= 1)
+            {
+                return "低";
+            }
+
+            return level == 2 ? "中" : "高";
+        }
+
+        private void OnTogglePostFx()
+        {
+            var fx = ScreenPostFx.Find();
+            bool next = fx != null
+                ? !fx.UserEnabled
+                : PlayerPrefs.GetInt(ScreenPostFx.EnabledKey, 1) == 0;
+
+            if (fx != null)
+            {
+                fx.UserEnabled = next;
+            }
+
+            PlayerPrefs.SetInt(ScreenPostFx.EnabledKey, next ? 1 : 0);
+            PlayerPrefs.Save();
+            RefreshSettingsLabels();
+        }
+
+        private void OnStepPostIntensity(int delta)
+        {
+            var fx = ScreenPostFx.Find();
+            float current = fx != null
+                ? fx.UserIntensity
+                : PlayerPrefs.GetFloat(ScreenPostFx.IntensityKey, 0.85f);
+
+            float next = ScreenPostPolicy.StepIntensity(current, delta);
+
+            if (fx != null)
+            {
+                fx.UserIntensity = next;
+            }
+
+            PlayerPrefs.SetFloat(ScreenPostFx.IntensityKey, next);
+            PlayerPrefs.Save();
+            RefreshSettingsLabels();
+        }
+
+        private void OnCycleQuality()
+        {
+            int next = ScreenPostPolicy.NextQuality(QualitySettings.GetQualityLevel());
+
+            QualitySettings.SetQualityLevel(next, true);
+            PlayerPrefs.SetInt(ScreenPostFx.QualityKey, next);
+            PlayerPrefs.Save();
+            RefreshSettingsLabels();
+        }
+
+        /// <summary>
         /// 每帧调一次。返回 true 表示这一帧已经被暂停逻辑接管（外面别再跑游戏更新）。
         /// 只有永夜模式能暂停 —— 故事模式按 Esc 什么都不做，免得把时钟停住刷时间。
         /// </summary>
@@ -1231,6 +1410,11 @@ namespace NailongFNAF.UI
                 _pauseView.SetActive(false);
             }
 
+            if (_settingsView != null)
+            {
+                _settingsView.SetActive(false);
+            }
+
             _paused = false;
             _savedToastTimer = 0f;
             RefreshTitleButtons();
@@ -1256,6 +1440,7 @@ namespace NailongFNAF.UI
             _endView.SetActive(false);
             _customView.SetActive(false);
             _achvView.SetActive(false);
+            _settingsView.SetActive(false);
 
             // 刷新关卡按钮的锁态（可能刚通关解锁了下一夜）
             RefreshLevelButtons();
@@ -1276,6 +1461,7 @@ namespace NailongFNAF.UI
             _levelView.SetActive(false);
             _endView.SetActive(false);
             _achvView.SetActive(false);
+            _settingsView.SetActive(false);
             _customView.SetActive(true);
 
             _customConfig = CustomNightConfig.Load();
@@ -1292,6 +1478,7 @@ namespace NailongFNAF.UI
             _levelView.SetActive(false);
             _endView.SetActive(false);
             _customView.SetActive(false);
+            _settingsView.SetActive(false);
             _achvView.SetActive(true);
 
             RefreshAchievementsView();

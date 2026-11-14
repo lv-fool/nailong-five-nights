@@ -67,5 +67,39 @@ namespace NailongFNAF.Tests
                 Assert.LessOrEqual(result, 1f);
             }
         }
+
+        [Test]
+        public void 强度步进一次是百分之五()
+        {
+            Assert.AreEqual(0.90f, ScreenPostPolicy.StepIntensity(0.85f, 1), 0.0001f);
+            Assert.AreEqual(0.80f, ScreenPostPolicy.StepIntensity(0.85f, -1), 0.0001f);
+        }
+
+        [Test]
+        public void 强度步进不会越过零到一()
+        {
+            Assert.AreEqual(1f, ScreenPostPolicy.StepIntensity(0.99f, 1), 0.0001f);
+            Assert.AreEqual(0f, ScreenPostPolicy.StepIntensity(0.01f, -1), 0.0001f);
+            Assert.AreEqual(1f, ScreenPostPolicy.StepIntensity(1f, 5), 0.0001f);
+            Assert.AreEqual(0f, ScreenPostPolicy.StepIntensity(0f, -5), 0.0001f);
+        }
+
+        [Test]
+        public void 画质只在低中高之间循环()
+        {
+            Assert.AreEqual(2, ScreenPostPolicy.NextQuality(1));   // Low → Medium
+            Assert.AreEqual(3, ScreenPostPolicy.NextQuality(2));   // Medium → High
+            Assert.AreEqual(1, ScreenPostPolicy.NextQuality(3));   // High → Low
+        }
+
+        [Test]
+        public void 不规范画质回到低档()
+        {
+            // 0 = Very Low、4/5 = Very High/Ultra、负数 = 未初始化 —— 都统一回 Low
+            Assert.AreEqual(1, ScreenPostPolicy.NextQuality(0));
+            Assert.AreEqual(1, ScreenPostPolicy.NextQuality(4));
+            Assert.AreEqual(1, ScreenPostPolicy.NextQuality(5));
+            Assert.AreEqual(1, ScreenPostPolicy.NextQuality(-1));
+        }
     }
 }

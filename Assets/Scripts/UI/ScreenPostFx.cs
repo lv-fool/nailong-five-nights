@@ -25,10 +25,22 @@ namespace NailongFNAF.UI
     {
         private const string MaterialResourcePath = "ScreenPostMaterial";
 
+        /// <summary>设置菜单：氛围后处理开关（0 = 关，1 = 开）。</summary>
+        public const string EnabledKey = "nailong.postFxEnabled";
+
+        /// <summary>设置菜单：后处理强度（0 ~ 1）。</summary>
+        public const string IntensityKey = "nailong.postFxIntensity";
+
+        /// <summary>设置菜单：画质档（0 ~ 5）。没存过就沿用 GameManager 的默认 Low。</summary>
+        public const string QualityKey = "nailong.quality";
+
         [Header("总开关 / 强度")]
         [Range(0f, 1f)]
         [Tooltip("0 = 完全关闭；1 = 全强度。监控升起时自动减半。")]
         [SerializeField] private float _intensity = 0.85f;
+
+        /// <summary>设置菜单里的「开 / 关」—— 关掉时不跑任何后处理 pass。</summary>
+        [SerializeField] private bool _userEnabled = true;
 
         [Header("Bloom（仅 Medium 以上画质生效）")]
         [Range(0f, 2f)]
@@ -54,7 +66,6 @@ namespace NailongFNAF.UI
         [SerializeField] private float _saturation = 1.05f;
 
         private Material _material;
-        private Camera _camera;
 
         /// <summary>最近一次实际生效的强度（调试 / 截图验证用）。</summary>
         public float LastIntensity { get; private set; }
@@ -62,9 +73,49 @@ namespace NailongFNAF.UI
         /// <summary>最近一次是否真的跑了 Bloom（调试 / 截图验证用）。</summary>
         public bool LastBloomRan { get; private set; }
 
+        /// <summary>设置菜单的「开 / 关」。关掉 = 直接 Blit 透传，不跑任何 pass。</summary>
+        public bool UserEnabled
+        {
+            get { return _userEnabled; }
+            set { _userEnabled = value; }
+        }
+
+        /// <summary>设置菜单的强度（0 ~ 1）。</summary>
+        public float UserIntensity
+        {
+            get { return _intensity; }
+            set { _intensity = ScreenPostPolicy.Clamp01(value); }
+        }
+
+        /// <summary>找主相机上的后处理组件；没有就返回 null（菜单用，不硬依赖）。</summary>
+        public static ScreenPostFx Find()
+        {
+            var cam = Camera.main;
+            return cam != null ? cam.GetComponent<ScreenPostFx>() : null;
+        }
+
+        /// <summary>
+        /// 把 PlayerPrefs 里的设置读回来。
+        /// 画质档也在这里补一刀：GameManager 的 ApplyPerformanceDefaults 在任何场景加载前
+        /// 强制 Low，这里是之后才跑，所以玩家存过的档位能覆盖它。
+        /// </summary>
+        private void LoadPreferences()
+        {
+            _userEnabled = PlayerPrefs.GetInt(EnabledKey, 1) != 0;
+            _intensity = ScreenPostPolicy.Clamp01(
+                PlayerPrefs.GetFloat(IntensityKey, _intensity));
+
+            int quality = PlayerPrefs.GetInt(QualityKey, -1);
+
+            if (quality >= 0 && quality <= 5)
+            {
+                QualitySettings.SetQualityLevel(quality, true);
+            }
+        }
+
         private void Awake()
         {
-            _camera = GetComponent<Camera>();
+            LoadPreferences();
 
             Material source = Resources.Load<Material>(MaterialResourcePath);
 
@@ -100,7 +151,9 @@ namespace NailongFNAF.UI
 
             var gm = GameManager.Instance;
             bool monitorUp = gm != null && gm.MonitorUp;
-            float intensity = ScreenPostPolicy.EffectiveIntensity(_intensity, monitorUp);
+            float intensity = _userEnabled
+                ? ScreenPostPolicy.EffectiveIntensity(_intensity, monitorUp)
+                : 0f;
             bool bloom = ScreenPostPolicy.BloomAllowed(QualitySettings.GetQualityLevel());
 
             LastIntensity = intensity;
