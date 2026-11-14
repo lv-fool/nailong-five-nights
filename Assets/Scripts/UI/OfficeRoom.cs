@@ -206,6 +206,13 @@ namespace NailongFNAF.UI
             // 相机必须正好落在圆柱中轴上：位置偏一点就不是「转头」而是「平移」了。
             _cam.transform.position = new Vector3(0f, EyeHeight, EyeZ);
             _cam.transform.rotation = Quaternion.identity;
+
+            // 全屏氛围后处理（方案 A，docs/11-画面技术对照.md）：
+            // 挂在主相机上；缺失才补，EnsureCamera 被多次调用也安全。
+            if (_cam.GetComponent<ScreenPostFx>() == null)
+            {
+                _cam.gameObject.AddComponent<ScreenPostFx>();
+            }
         }
 
         /// <summary>
