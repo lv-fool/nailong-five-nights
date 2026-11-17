@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using NailongFNAF.Audio;
 using NailongFNAF.Core;
 using NailongFNAF.Gameplay;
 using UnityEngine;
@@ -73,10 +74,13 @@ namespace NailongFNAF.UI
         private GameObject _achvView;
         private GameObject _settingsView;
 
-        // 设置页：后处理开关 / 强度 / 画质的显示文字
+        // 设置页：后处理开关 / 强度 / 画质 / 灵敏度 / 音量的显示文字
         private Text _settingsPostText;
         private Text _settingsIntensityText;
         private Text _settingsQualityText;
+        private Text _settingsSensitivityText;
+        private Text _settingsVolumeText;
+        private Text _settingsDisplayAspectText;
 
         // 自定义夜界面：每只敌人一行的活动度数字（下标 = (int)EnemyId）
         private readonly Text[] _customLevelTexts = new Text[EnemyIds.All.Length];
@@ -161,7 +165,7 @@ namespace NailongFNAF.UI
 
         private void BuildMenu()
         {
-            _menuRoot = MakeFullScreenPanel("MenuRoot", new Color(0.02f, 0.02f, 0.03f, 1f), _canvas.transform);
+            _menuRoot = MakeFullScreenPanel("MenuRoot", new Color(0.02f, 0.02f, 0.03f, 1f), UiParent);
             _menuRoot.transform.SetAsLastSibling();
 
             BuildTitleView();
@@ -374,18 +378,34 @@ namespace NailongFNAF.UI
                 new Color(0.84f, 0.85f, 0.89f),
                 new Vector2(0.5f, 0.79f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1100f, 44f));
 
-            // 6 个夜晚按钮排两行。⚠️ 按钮 320px 宽 ≈ 画布 0.20，列距必须 ≥ 0.21 才不互相压边；
-            // 锁着的按钮**不加「未解锁」后缀** —— 字一长就撑破按钮、和隔壁撞在一起，
-            // 靠 interactable = false 的灰色已经够区分了。
+            // 6 个夜晚按钮排两行。
+            //
+            // ⚠️ 卡片宽度**必须跟着父容器走**，不能用固定像素：
+            // 显示比例切 4:3 时安全区只剩 1440 宽（16:9 时是 1920），
+            // 写死 470px 会变成「列距 0.27 × 1440 ≈ 389px < 470px」，相邻卡片互相压住、
+            // 盖住对方文字（2026-11-15 用户报「关卡 UI 重叠」）。
+            //
+            // ⚠️ 也不能「建的时候算一次父宽」：BuildMenu 跑在安全区布局之前，
+            // 那时读到的还是初始全屏宽度（1920），照样 470。所以这里用
+            // **比例锚点**（anchorMin/anchorMax 按比例铺），父容器一变宽自动跟着变。
+            const float CardWidthRatio = 0.24f;   // < 列距 0.27，留出缝
+            const float CardHeight = 270f;
+            const float ColumnGap = 0.27f;
+            const float ButtonWidthRatio = 0.18f;
+            const float ButtonHeight = 84f;
+
             for (int i = 0; i < NightCount; i++)
             {
                 int night = i;
                 int col = i % 3;
                 int row = i / 3;
-                float x = (col - 1) * 0.27f;
+                float x = (col - 1) * ColumnGap;
                 float y = 0.65f - row * 0.29f;
-                MakeMenuCard(_levelView.transform, "NightCard" + i,
-                    new Vector2(0.5f + x, y - 0.065f), new Vector2(470f, 270f));
+                PlaceRatioRect(
+                    (RectTransform)MakeMenuCard(_levelView.transform, "NightCard" + i,
+                        new Vector2(0.5f + x, y - 0.065f), new Vector2(0f, CardHeight))
+                        .transform,
+                    0.5f + x, y - 0.065f, CardWidthRatio, CardHeight);
 
                 bool unlocked = i <= UnlockedNight;
                 string label = NightName(i);
@@ -397,16 +417,35 @@ namespace NailongFNAF.UI
                 // 那一刻还锁着的夜**永远没有监听器**，之后通关解锁时
                 // RefreshLevelButtons 只把 interactable 打开，点下去毫无反应 ——
                 // 玩家必须重启游戏才恢复（2026-10-27 定位）。
-                var btn = MakeMenuButton(_levelView.transform, label, Vector2.zero,
+                Button btn = MakeMenuButton(_levelView.transform, label, Vector2.zero,
                     new Vector2(0.5f + x, y),
                     (UnityEngine.Events.UnityAction)(() => OnNightClicked(night)));
                 btn.interactable = unlocked;
                 _nightButtons[i] = btn;
+                PlaceRatioRect((RectTransform)btn.transform,
+                    0.5f + x, y, ButtonWidthRatio, ButtonHeight);
+
+                // ⚠️ 按钮文字是**按钮的子物体**，只能用「铺满父物体」来定位。
+                // 早先这里错用了 PlaceRatioRect（那是给关卡页坐标系用的），
+                // 结果文字被锚到按钮宽度的 0.23 处 —— 卡片缩了、文字却飞出按钮
+                // （2026-11-17 用户报「只有 UI 动了，文字还是错位」）。
+                var labelText = btn.GetComponentInChildren<Text>();
+                if (labelText != null)
+                {
+                    RectTransform textRect = labelText.rectTransform;
+                    textRect.anchorMin = Vector2.zero;
+                    textRect.anchorMax = Vector2.one;
+                    textRect.pivot = new Vector2(0.5f, 0.5f);
+                    textRect.offsetMin = Vector2.zero;
+                    textRect.offsetMax = Vector2.zero;
+                }
 
                 // 独立于开局按钮：已解锁的夜晚可在局外慢慢读，不打断防守。
                 Text fragment = MakeLabel(_levelView.transform, unlocked ? StoryFragments.Night(i) : "……", 28,
                     new Color(0.91f, 0.90f, 0.85f), new Vector2(0.5f + x, y - 0.115f),
-                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(414f, 132f));
+                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(0f, 132f));
+                PlaceRatioRect(fragment.rectTransform,
+                    0.5f + x, y - 0.115f, CardWidthRatio * 0.88f, 132f);
                 fragment.horizontalOverflow = HorizontalWrapMode.Wrap;
                 fragment.verticalOverflow = VerticalWrapMode.Truncate;
                 fragment.lineSpacing = 1.15f;
@@ -809,7 +848,7 @@ namespace NailongFNAF.UI
             // AudioSource 和 VideoPlayer 都不会播放。挂 canvas 上则随调随响，
             // 「离开结算页就停」由 StopEndQuoteVoice() 负责。
             var voiceGo = new GameObject("EndQuoteVoice");
-            voiceGo.transform.SetParent(_canvas.transform, false);
+            voiceGo.transform.SetParent(UiParent, false);
             _endQuoteAudio = voiceGo.AddComponent<AudioSource>();
             _endQuoteAudio.playOnAwake = false;
             _endQuoteAudio.loop = false;
@@ -944,11 +983,15 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 设置页：氛围后处理开关 / 强度 / 画质。
+        /// 设置页：氛围后处理开关 / 强度 / 画质 / 灵敏度 / 音量 / 显示比例。
         ///
         /// 画质只放低 / 中 / 高三档 —— Bloom 只在 Medium 以上才跑
         /// （见 <see cref="ScreenPostPolicy.BloomAllowed"/>），所以想看到 Bloom 要切到中。
         /// 关闭后处理时直接 Blit 透传，不跑任何 pass。
+        ///
+        /// ⚠️ 左侧标签的宽度**按安全区比例**给（<see cref="SettingsLabelWidthRatio"/>），
+        /// 不写死像素：4:3 下安全区只有 1440 宽，原来 420/520 的固定框配上
+        /// 左锚点 0.36 会往左压出画面（2026-11-17 用户报「4:3 设置少了一截」）。
         /// </summary>
         private void BuildSettingsView()
         {
@@ -959,55 +1002,140 @@ namespace NailongFNAF.UI
                 new Vector2(0.5f, 0.84f), new Vector2(0.5f, 0.84f),
                 Vector2.zero, new Vector2(900f, 90f));
 
-            MakeLabel(_settingsView.transform, "画面", 28, new Color(0.75f, 0.75f, 0.8f),
-                new Vector2(0.5f, 0.76f), new Vector2(0.5f, 0.76f),
+            MakeLabel(_settingsView.transform, "画面与声音", 26, new Color(0.75f, 0.75f, 0.8f),
+                new Vector2(0.5f, 0.77f), new Vector2(0.5f, 0.77f),
                 Vector2.zero, new Vector2(900f, 50f));
 
             // ── 氛围后处理 开 / 关 ──
-            MakeLabel(_settingsView.transform, "氛围后处理", 30, Color.white,
-                new Vector2(0.36f, 0.62f), new Vector2(0.36f, 0.62f),
-                Vector2.zero, new Vector2(420f, 60f));
-
-            Button postButton = MakeMenuButton(_settingsView.transform, "开", Vector2.zero,
-                new Vector2(0.66f, 0.62f), OnTogglePostFx);
-            _settingsPostText = postButton.GetComponentInChildren<Text>();
+            MakeSettingsLabel("氛围后处理", 0.72f);
+            _settingsPostText = MakeSettingsValueButton("开", 0.72f, OnTogglePostFx)
+                .GetComponentInChildren<Text>();
 
             // ── 后处理强度 ──
-            MakeLabel(_settingsView.transform, "后处理强度", 30, Color.white,
-                new Vector2(0.36f, 0.50f), new Vector2(0.36f, 0.50f),
-                Vector2.zero, new Vector2(420f, 60f));
-
-            MakeStepperButton(_settingsView.transform, "-", new Vector2(0.56f, 0.50f),
+            MakeSettingsLabel("后处理强度", 0.63f);
+            MakeStepperButton(_settingsView.transform, "-", new Vector2(0.545f, 0.63f),
                 () => OnStepPostIntensity(-1));
-
             _settingsIntensityText = MakeLabel(_settingsView.transform, "85%", 32,
                 new Color(0.95f, 0.85f, 0.3f),
-                new Vector2(0.64f, 0.50f), new Vector2(0.64f, 0.50f),
+                new Vector2(0.63f, 0.63f), new Vector2(0.63f, 0.63f),
                 Vector2.zero, new Vector2(120f, 64f));
-
-            MakeStepperButton(_settingsView.transform, "+", new Vector2(0.72f, 0.50f),
+            MakeStepperButton(_settingsView.transform, "+", new Vector2(0.715f, 0.63f),
                 () => OnStepPostIntensity(1));
 
             // ── 画质（Bloom 门槛）──
-            MakeLabel(_settingsView.transform, "画质（Bloom 需中画质以上）", 26,
-                Color.white,
-                new Vector2(0.36f, 0.38f), new Vector2(0.36f, 0.38f),
-                Vector2.zero, new Vector2(520f, 50f));
+            MakeSettingsLabel("画质（Bloom 需中画质以上）", 0.54f);
+            _settingsQualityText = MakeSettingsValueButton("低", 0.54f, OnCycleQuality)
+                .GetComponentInChildren<Text>();
 
-            Button qualityButton = MakeMenuButton(_settingsView.transform, "低", Vector2.zero,
-                new Vector2(0.66f, 0.38f), OnCycleQuality);
-            _settingsQualityText = qualityButton.GetComponentInChildren<Text>();
+            // ── 鼠标灵敏度 ──
+            MakeSettingsLabel("鼠标灵敏度", 0.45f);
+            MakeStepperButton(_settingsView.transform, "-", new Vector2(0.545f, 0.45f),
+                () => OnStepSensitivity(-1));
+            _settingsSensitivityText = MakeLabel(_settingsView.transform, "1.0×", 32,
+                new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.63f, 0.45f), new Vector2(0.63f, 0.45f),
+                Vector2.zero, new Vector2(120f, 64f));
+            MakeStepperButton(_settingsView.transform, "+", new Vector2(0.715f, 0.45f),
+                () => OnStepSensitivity(1));
 
-            MakeLabel(_settingsView.transform,
-                "氛围后处理只影响办公室画面；HUD 与监控不受影响。",
+            // ── 主音量 ──
+            MakeSettingsLabel("主音量", 0.36f);
+            MakeStepperButton(_settingsView.transform, "-", new Vector2(0.545f, 0.36f),
+                () => OnStepVolume(-1));
+            _settingsVolumeText = MakeLabel(_settingsView.transform, "100%", 32,
+                new Color(0.95f, 0.85f, 0.3f),
+                new Vector2(0.63f, 0.36f), new Vector2(0.63f, 0.36f),
+                Vector2.zero, new Vector2(120f, 64f));
+            MakeStepperButton(_settingsView.transform, "+", new Vector2(0.715f, 0.36f),
+                () => OnStepVolume(1));
+
+            // ── 显示比例 ──
+            MakeSettingsLabel("显示比例", 0.27f);
+            _settingsDisplayAspectText = MakeSettingsValueButton("自动", 0.27f, OnCycleDisplayAspect)
+                .GetComponentInChildren<Text>();
+
+            // 说明文字：宽度按安全区比例给，别再固定 1400（4:3 会顶满整屏被截）
+            Text hint = MakeLabel(_settingsView.transform,
+                "显示比例在原窗口内加黑边，不改变窗口大小；自动 = 满屏。",
                 20, new Color(0.55f, 0.55f, 0.6f),
-                new Vector2(0.5f, 0.24f), new Vector2(0.5f, 0.24f),
-                Vector2.zero, new Vector2(1200f, 40f));
+                new Vector2(0.5f, 0.17f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(0f, 40f));
+            hint.horizontalOverflow = HorizontalWrapMode.Wrap;
+            PlaceRatioRect(hint.rectTransform, 0.5f, 0.17f, SettingsHintWidthRatio, 44f);
 
             MakeMenuButton(_settingsView.transform, "返回", Vector2.zero,
-                new Vector2(0.5f, 0.12f), OpenTitle);
+                new Vector2(0.5f, 0.08f), OpenTitle);
 
             _settingsView.SetActive(false);
+        }
+
+        /// <summary>
+        /// 设置页左侧标签宽度占安全区宽度的比例。
+        ///
+        /// ⚠️ 不能让它顶到右侧控件：「-」按钮左沿在 0.545 - 半宽(64/2 设计像素)，
+        /// 标签右对齐到 0.36 + 0.34/2 = 0.53 就只剩一点点缝，4:3 下看着像贴在一起
+        /// （2026-11-17 截图确认）。0.30 让右沿落在 0.51，留出明确间距。
+        /// </summary>
+        private const float SettingsLabelWidthRatio = 0.30f;
+
+        /// <summary>设置页底部说明文字的宽度比例。</summary>
+        private const float SettingsHintWidthRatio = 0.9f;
+
+        /// <summary>
+        /// 设置页左侧那种「标题」标签：左锚固定、宽度按安全区比例。
+        /// 和右侧控件分居两栏，窄比例（4:3）下也不会压出画面。
+        /// </summary>
+        private void MakeSettingsLabel(string content, float centerY)
+        {
+            Text label = MakeLabel(_settingsView.transform, content, 30, Color.white,
+                new Vector2(0.5f, centerY), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(0f, 60f));
+
+            label.alignment = TextAnchor.MiddleRight;
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            PlaceRatioRect(label.rectTransform, 0.36f, centerY, SettingsLabelWidthRatio, 60f);
+        }
+
+        /// <summary>设置页右侧的「值按钮」：位置按比例给，宽度固定 200 设计像素。</summary>
+        private Button MakeSettingsValueButton(string label, float centerY,
+            UnityEngine.Events.UnityAction onClick)
+        {
+            var go = new GameObject("SettingsValue",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            go.transform.SetParent(_settingsView.transform, false);
+
+            var rect = (RectTransform)go.transform;
+            PlaceRect(rect, new Vector2(0.66f, centerY), new Vector2(0.5f, 0.5f), Vector2.zero,
+                new Vector2(200f, 64f));
+
+            var image = go.GetComponent<Image>();
+            image.sprite = MakeRoundedSprite();
+            image.color = new Color(0.22f, 0.22f, 0.28f, 0.98f);
+            image.type = Image.Type.Sliced;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            SetMenuButtonColors(button);
+
+            if (onClick != null)
+            {
+                button.onClick.AddListener(onClick);
+            }
+
+            // 文字铺满按钮（用比例锚点会让它飞出按钮，2026-11-17 踩过）
+            Text labelText = MakeLabel(go.transform, label, 30,
+                new Color(1f, 0.96f, 0.85f),
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(200f, 64f));
+            labelText.raycastTarget = false;
+
+            RectTransform textRect = labelText.rectTransform;
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+
+            return button;
         }
 
         /// <summary>标题页「设置」。</summary>
@@ -1051,6 +1179,23 @@ namespace NailongFNAF.UI
             if (_settingsQualityText != null)
             {
                 _settingsQualityText.text = QualityLabel(QualitySettings.GetQualityLevel());
+            }
+
+            if (_settingsSensitivityText != null)
+            {
+                _settingsSensitivityText.text = ViewSensitivity.ToString("F1") + "×";
+            }
+
+            if (_settingsVolumeText != null)
+            {
+                _settingsVolumeText.text =
+                    Mathf.RoundToInt(AudioManager.LoadMasterVolume() * 100f) + "%";
+            }
+
+            if (_settingsDisplayAspectText != null)
+            {
+                _settingsDisplayAspectText.text =
+                    DisplayAspectPolicy.Label(DisplayAspectController.Current);
             }
         }
 
@@ -1108,6 +1253,39 @@ namespace NailongFNAF.UI
             QualitySettings.SetQualityLevel(next, true);
             PlayerPrefs.SetInt(ScreenPostFx.QualityKey, next);
             PlayerPrefs.Save();
+            RefreshSettingsLabels();
+        }
+
+        /// <summary>设置页：灵敏度 ±0.1，夹在 ViewPanMapping 的合法范围。</summary>
+        private void OnStepSensitivity(int delta)
+        {
+            float next = Mathf.Clamp(
+                ViewSensitivity + delta * ViewPanMapping.SensitivityStep,
+                ViewPanMapping.MinSensitivity, ViewPanMapping.MaxSensitivity);
+
+            ViewSensitivity = next;
+            PlayerPrefs.SetFloat(ViewSensitivityKey, next);
+            PlayerPrefs.Save();
+            RefreshSettingsLabels();
+        }
+
+        /// <summary>设置页：主音量 ±10%，直接作用于 AudioListener（所有音源）。</summary>
+        private void OnStepVolume(int delta)
+        {
+            float current = AudioManager.LoadMasterVolume();
+            float next = Mathf.Clamp01(current + delta * 0.1f);
+
+            AudioManager.SetMasterVolume(next);
+            RefreshSettingsLabels();
+        }
+
+        /// <summary>设置页：显示比例 自动 → 16:9 → 16:10 → 4:3 循环（直接改窗口）。</summary>
+        private void OnCycleDisplayAspect()
+        {
+            DisplayAspect next = DisplayAspectPolicy.Next(DisplayAspectController.Current);
+
+            DisplayAspectController.Apply(next);
+            ApplyAspectLayout();
             RefreshSettingsLabels();
         }
 
@@ -2387,6 +2565,31 @@ namespace NailongFNAF.UI
         // 小工具（菜单专用，和主文件里的辅助并存）
         // ---------------------------------------------------------------
 
+        /// <summary>
+        /// 把元素摆成「以 <paramref name="centerX"/> 为中心、宽度占父宽 <paramref name="widthRatio"/>、
+        /// 高度固定 <paramref name="height"/>」。
+        ///
+        /// 为什么用比例锚点而不是算像素：父容器（安全区）在 BuildMenu 时还没布局完，
+        /// 那时算出来的像素是初始全屏宽度那套，切显示比例后不会跟着变
+        /// （2026-11-15 关卡 UI 重叠就是这么来的）。锚点按比例铺，父容器一变宽自动重排。
+        /// </summary>
+        private static void PlaceRatioRect(RectTransform rect, float centerX, float centerY,
+            float widthRatio, float height)
+        {
+            if (rect == null)
+            {
+                return;
+            }
+
+            float half = widthRatio * 0.5f;
+
+            rect.anchorMin = new Vector2(centerX - half, centerY);
+            rect.anchorMax = new Vector2(centerX + half, centerY);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.offsetMin = new Vector2(0f, -height * 0.5f);
+            rect.offsetMax = new Vector2(0f, height * 0.5f);
+        }
+
         private Image MakeMenuCard(Transform parent, string name, Vector2 anchor, Vector2 size)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
@@ -2400,6 +2603,30 @@ namespace NailongFNAF.UI
             outline.effectColor = new Color(0.42f, 0.49f, 0.61f, 0.55f);
             outline.effectDistance = new Vector2(1f, -1f);
             return image;
+        }
+
+        /// <summary>
+        /// 取父容器的**设计像素宽度**（用于按比例算卡片宽度）。
+        ///
+        /// ⚠️ 建界面时（BuildMenu → Awake）父 Rect 可能还没被 Canvas 布局过、
+        /// 读到 0；这时退回 Canvas 安全区宽度，最后再退 1920。
+        /// 直接用 0 会让卡片变成零宽 —— 看起来像"卡片没了"。
+        /// </summary>
+        private float GetParentWidth(Transform parent)
+        {
+            var parentRect = parent as RectTransform;
+            if (parentRect != null && parentRect.rect.width > 1f)
+            {
+                return parentRect.rect.width;
+            }
+
+            var safe = UiRect;
+            if (safe != null && safe.rect.width > 1f)
+            {
+                return safe.rect.width;
+            }
+
+            return 1920f;
         }
 
         private static void SetMenuButtonColors(Button button)

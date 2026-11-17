@@ -138,5 +138,74 @@ namespace NailongFNAF.Tests
             Assert.AreEqual(0.75f, saturationStart, Epsilon,
                 "饱和起点变了 —— 墙按钮在宽屏下会点不着，先看 ViewPanMapping 的注释");
         }
+
+        [Test]
+        public void 灵敏度不改变满转端点()
+        {
+            // 灵敏度只掰弯中间曲线，两端必须还是严格 ±1 ——
+            // 否则低灵敏度会把墙按钮/门洞锁在画面外
+            for (float s = ViewPanMapping.MinSensitivity;
+                s <= ViewPanMapping.MaxSensitivity + Epsilon; s += 0.1f)
+            {
+                Assert.AreEqual(1f, ViewPanMapping.Map(1f, DeadZone, Span, s), Epsilon,
+                    "s=" + s + " 时屏幕最右没满转");
+                Assert.AreEqual(-1f, ViewPanMapping.Map(0f, DeadZone, Span, s), Epsilon,
+                    "s=" + s + " 时屏幕最左没满转");
+            }
+        }
+
+        [Test]
+        public void 灵敏度不改变死区()
+        {
+            for (float x = 0.5f - DeadZone; x <= 0.5f + DeadZone + Epsilon; x += 0.005f)
+            {
+                Assert.AreEqual(0f, ViewPanMapping.Map(x, DeadZone, Span, 2f), Epsilon,
+                    "灵敏度不该让死区里的镜头动起来");
+            }
+        }
+
+        [Test]
+        public void 调高灵敏度更灵敏()
+        {
+            // 死区内 0.5 到饱和点之间取一个点：s=2 的转头量必须大于 s=1
+            float x = 0.5f + DeadZone + Span * 0.5f;
+
+            float normal = ViewPanMapping.Map(x, DeadZone, Span, 1f);
+            float fast = ViewPanMapping.Map(x, DeadZone, Span, 2f);
+            float slow = ViewPanMapping.Map(x, DeadZone, Span, 0.5f);
+
+            Assert.Greater(fast, normal, "灵敏度 2 应该比默认转得多");
+            Assert.Less(slow, normal, "灵敏度 0.5 应该比默认转得少");
+        }
+
+        [Test]
+        public void 灵敏度两端夹在合法范围()
+        {
+            // 传极端值也不能炸；结果与边界值一致
+            Assert.AreEqual(
+                ViewPanMapping.Map(0.7f, DeadZone, Span, ViewPanMapping.MaxSensitivity),
+                ViewPanMapping.Map(0.7f, DeadZone, Span, 99f), Epsilon);
+
+            Assert.AreEqual(
+                ViewPanMapping.Map(0.7f, DeadZone, Span, ViewPanMapping.MinSensitivity),
+                ViewPanMapping.Map(0.7f, DeadZone, Span, -99f), Epsilon);
+        }
+
+        [Test]
+        public void 最大灵敏度仍然单调不反向()
+        {
+            float previous = 0f;
+
+            for (float x = 0.5f + DeadZone; x <= 0.75f + Epsilon; x += 0.002f)
+            {
+                float pan = ViewPanMapping.Map(x, DeadZone, Span,
+                    ViewPanMapping.MaxSensitivity);
+
+                Assert.GreaterOrEqual(pan, previous - Epsilon,
+                    "x=" + x + " 处转头量回退了（" + previous + " → " + pan + "）");
+
+                previous = pan;
+            }
+        }
     }
 }

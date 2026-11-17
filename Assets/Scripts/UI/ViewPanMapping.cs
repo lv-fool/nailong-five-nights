@@ -93,5 +93,68 @@ namespace NailongFNAF.UI
         {
             return Map(mouseX01, DefaultDeadZone, DefaultSpan);
         }
+
+        /// <summary>
+        /// 带**灵敏度**的映射（设置菜单用）。
+        ///
+        /// 灵敏度不改变死区和饱和起点 —— 两端仍然严格落在 0 / ±1，
+        /// 所以墙按钮的可达性、宽屏余量都不受影响（这是这里最容易被改坏的地方）。
+        /// 它只把中间那段曲线掰弯：
+        ///   · s = 1   原样（分段线性）
+        ///   · s &gt; 1   同样鼠标位移转头更多（更灵敏）
+        ///   · s &lt; 1   转头更慢（更稳）
+        ///
+        /// 曲线用 <c>t + (s-1)·t·(1-t)</c>：f(0)=0、f(1)=1 两头不动，
+        /// 在 t=0 处斜率为 s。s 夹在 [0.5, 2]，保证全程单调、不会反向。
+        /// </summary>
+        /// <param name="sensitivity">灵敏度倍数，夹在 0.5 ~ 2.0；传 1 = 原行为</param>
+        public static float Map(float mouseX01, float deadZone, float span, float sensitivity)
+        {
+            float pan = Map(mouseX01, deadZone, span);
+
+            if (sensitivity < MinSensitivity)
+            {
+                sensitivity = MinSensitivity;
+            }
+            else if (sensitivity > MaxSensitivity)
+            {
+                sensitivity = MaxSensitivity;
+            }
+
+            if (sensitivity == 1f)
+            {
+                return pan;
+            }
+
+            float sign = pan < 0f ? -1f : 1f;
+            float t = pan < 0f ? -pan : pan;
+
+            if (t <= 0f)
+            {
+                return 0f;
+            }
+
+            float shaped = t + (sensitivity - 1f) * t * (1f - t);
+
+            if (shaped < 0f)
+            {
+                shaped = 0f;
+            }
+            else if (shaped > 1f)
+            {
+                shaped = 1f;
+            }
+
+            return sign * shaped;
+        }
+
+        /// <summary>灵敏度下限（设置菜单里的最小档）。</summary>
+        public const float MinSensitivity = 0.5f;
+
+        /// <summary>灵敏度上限（设置菜单里的最大档）。</summary>
+        public const float MaxSensitivity = 2f;
+
+        /// <summary>设置菜单一步加 / 减多少灵敏度。</summary>
+        public const float SensitivityStep = 0.1f;
     }
 }

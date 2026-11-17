@@ -179,14 +179,225 @@ namespace NailongFNAF.UI
         {
             get
             {
-                if (_canvas == null)
+                var rect = UiRect;
+                if (rect == null)
                 {
                     return 1080f;
                 }
 
-                float height = _canvas.GetComponent<RectTransform>().rect.height;
+                float height = rect.rect.height;
                 return height > 1f ? height : 1080f;
             }
+        }
+
+        // ---------------------------------------------------------------
+        // 显示比例安全区
+        //
+        // 设置里的「显示比例」（16:9 / 16:10 / 4:3）不是改窗口，而是把**相机和整套 UGUI**
+        // 一起收进一个居中的安全区，外面留黑边。做法：
+        //   · `_uiRoot`：Canvas 下的第一层「安全区」，锚点按黑边比例收进去；
+        //   · 相机 `rect` 设成同一个比例，3D 画面也只渲在安全区里；
+        //   · OfficeRoom 另有一台全屏黑底相机，负责把黑边涂黑。
+        // 所有 UGUI 都挂在 `_uiRoot` 下（不是直接挂 Canvas），这样锚点自动跟着缩。
+        // ---------------------------------------------------------------
+
+        /// <summary>UGUI 安全区（Canvas 的子节点）。所有界面元素都挂它下面。</summary>
+        private RectTransform _uiRoot;
+
+        /// <summary>
+        /// 四条纯黑遮条 —— 挂在 Canvas 上、排在安全区之后，专门盖住安全区外的像素。
+        ///
+        /// 为什么需要它们（2026-11-15 踩过）：
+        ///   · 相机的 rect 收进安全区后，rect 外的像素没人清（后处理 Blit 还会把
+        ///     上一帧的内容铺过去），会露出旧画面 / 噪点；
+        ///   · UI 元素（比如标题页剪影）本来就会故意超出自己的锚点，也会漏到黑边里。
+        /// 这四条黑条在最上层、`raycastTarget=false`，盖住一切但不挡点击。
+        /// </summary>
+        private UnityEngine.UI.Image _barLeft;
+        private UnityEngine.UI.Image _barRight;
+        private UnityEngine.UI.Image _barTop;
+        private UnityEngine.UI.Image _barBottom;
+
+        /// <summary>建 UI 时的父节点：有安全区就用安全区，没有才退回 Canvas。</summary>
+        private Transform UiParent
+        {
+            get { return _uiRoot != null ? (Transform)_uiRoot : _canvas.transform; }
+        }
+
+        /// <summary>UI 坐标系的矩形（安全区）。换算/摆位一律用它，不要用整块 Canvas。</summary>
+        private RectTransform UiRect
+        {
+            get
+            {
+                if (_uiRoot != null)
+                {
+                    return _uiRoot;
+                }
+
+                return _canvas != null ? _canvas.transform as RectTransform : null;
+            }
+        }
+
+        /// <summary>上一帧应用过的安全区尺寸/档位 —— 窗口一变就重算。</summary>
+        private int _lastAspectScreenWidth = -1;
+        private int _lastAspectScreenHeight = -1;
+        private DisplayAspect _lastAspect = DisplayAspect.Auto;
+
+        /// <summary>创建 UGUI 安全区（只建一次）。必须在 BuildUi 的最开始调。</summary>
+        private void EnsureUiRoot()
+        {
+            if (_uiRoot != null || _canvas == null)
+            {
+                return;
+            }
+
+            var go = new GameObject("UiSafeArea", typeof(RectTransform));
+            go.transform.SetParent(UiParent, false);
+
+            _uiRoot = go.GetComponent<RectTransform>();
+            _uiRoot.anchorMin = Vector2.zero;
+            _uiRoot.anchorMax = Vector2.one;
+            _uiRoot.offsetMin = Vector2.zero;
+            _uiRoot.offsetMax = Vector2.zero;
+            _uiRoot.pivot = new Vector2(0.5f, 0.5f);
+
+            // 四条黑条排在安全区之后（更晚 = 更上层），盖住安全区外的一切
+            _barLeft = CreateLetterboxBar("BarLeft");
+            _barRight = CreateLetterboxBar("BarRight");
+            _barTop = CreateLetterboxBar("BarTop");
+            _barBottom = CreateLetterboxBar("BarBottom");
+        }
+
+        /// <summary>建一条纯黑遮条（不挡点击）。</summary>
+        private UnityEngine.UI.Image CreateLetterboxBar(string name)
+        {
+            var go = new GameObject(name,
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(UnityEngine.UI.Image));
+            go.transform.SetParent(_canvas.transform, false);
+
+            var image = go.GetComponent<UnityEngine.UI.Image>();
+            image.sprite = _solidSprite;
+            image.color = Color.black;
+            image.raycastTarget = false;
+
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.zero;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            return image;
+        }
+
+        /// <summary>把一条黑条摆到 (x0,y0)-(x1,y1)（归一化屏幕坐标）；零面积就隐藏。</summary>
+        private static void SetLetterboxBar(UnityEngine.UI.Image bar,
+            float x0, float y0, float x1, float y1)
+        {
+            if (bar == null)
+            {
+                return;
+            }
+
+            var rect = bar.rectTransform;
+            rect.anchorMin = new Vector2(x0, y0);
+            rect.anchorMax = new Vector2(x1, y1);
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            bool visible = x1 - x0 > 0.0001f && y1 - y0 > 0.0001f;
+            bar.gameObject.SetActive(visible);
+
+            if (visible)
+            {
+                bar.transform.SetAsLastSibling();   // 始终压在所有 UI 之上
+            }
+        }
+
+        /// <summary>安全区在屏幕上的像素矩形（左下原点）。</summary>
+        private Rect UiScreenRect()
+        {
+            var rect = UiRect;
+            if (rect == null || Screen.width <= 0 || Screen.height <= 0)
+            {
+                return new Rect(0f, 0f, Mathf.Max(1f, Screen.width), Mathf.Max(1f, Screen.height));
+            }
+
+            var corners = new Vector3[4];
+            rect.GetWorldCorners(corners);
+
+            // Overlay Canvas 传 null 相机：世界坐标就是画布坐标，直接换成屏幕像素
+            Vector2 bl = RectTransformUtility.WorldToScreenPoint(null, corners[0]);
+            Vector2 tr = RectTransformUtility.WorldToScreenPoint(null, corners[2]);
+
+            return new Rect(bl.x, bl.y, Mathf.Max(1f, tr.x - bl.x), Mathf.Max(1f, tr.y - bl.y));
+        }
+
+        /// <summary>
+        /// 按当前「显示比例」摆安全区、相机 rect，并让下一帧重算依赖屏幕尺寸的东西。
+        /// 窗口尺寸变了会自动再调一次（见 <see cref="UpdateAspectIfNeeded"/>）。
+        /// </summary>
+        private void ApplyAspectLayout()
+        {
+            if (_uiRoot == null || _canvas == null)
+            {
+                return;
+            }
+
+            DisplayAspect aspect = DisplayAspectController.Current;
+
+            float x, y, w, h;
+            LetterboxPolicy.Compute(aspect, Screen.width, Screen.height, out x, out y, out w, out h);
+
+            _uiRoot.anchorMin = new Vector2(x, y);
+            _uiRoot.anchorMax = new Vector2(x + w, y + h);
+            _uiRoot.offsetMin = Vector2.zero;
+            _uiRoot.offsetMax = Vector2.zero;
+
+            // 安全区外的四条黑边（也是相机 rect 外那圈）
+            SetLetterboxBar(_barLeft, 0f, 0f, x, 1f);
+            SetLetterboxBar(_barRight, x + w, 0f, 1f, 1f);
+            SetLetterboxBar(_barBottom, x, 0f, x + w, y);
+            SetLetterboxBar(_barTop, x, y + h, x + w, 1f);
+
+            var cam = _room != null ? _room.Camera : Camera.main;
+            if (cam != null)
+            {
+                // rect 一改，Unity 会自己重算 camera.aspect；
+                // OfficeRoom.ApplyFieldOfView 下一帧读的就是新的
+                cam.rect = new Rect(x, y, w, h);
+            }
+
+            // 菜单打开时主循环不跑 UpdateVisuals（SetPan 不会被调），
+            // 这里主动刷一次，标题页背后的办公室画面和切比例同帧生效
+            if (_room != null)
+            {
+                _room.SetPan(_pan);
+            }
+
+            if (_room != null)
+            {
+                _room.EnsureLetterboxBackground();
+            }
+
+            _lastAspect = aspect;
+            _lastAspectScreenWidth = Screen.width;
+            _lastAspectScreenHeight = Screen.height;
+        }
+
+        /// <summary>窗口尺寸或档位变了就重新摆一次安全区。</summary>
+        private void UpdateAspectIfNeeded()
+        {
+            int sw = Screen.width;
+            int sh = Screen.height;
+            DisplayAspect aspect = DisplayAspectController.Current;
+
+            if (sw == _lastAspectScreenWidth && sh == _lastAspectScreenHeight
+                && aspect == _lastAspect)
+            {
+                return;
+            }
+
+            ApplyAspectLayout();
         }
 
         /// <summary>
@@ -393,6 +604,23 @@ namespace NailongFNAF.UI
         private const float PanDeadZone = ViewPanMapping.DefaultDeadZone;
 
         private const float PanActiveSpan = ViewPanMapping.DefaultSpan;
+
+        /// <summary>设置菜单：鼠标灵敏度存档键。</summary>
+        public const string ViewSensitivityKey = "nailong.sensitivity";
+
+        /// <summary>当前鼠标灵敏度（0.5 ~ 2.0，1 = 默认）。</summary>
+        private float _viewSensitivity = 1f;
+
+        /// <summary>设置菜单用：读 / 改鼠标灵敏度，立刻生效（下一帧映射就会用）。</summary>
+        public float ViewSensitivity
+        {
+            get { return _viewSensitivity; }
+            set
+            {
+                _viewSensitivity = Mathf.Clamp(value,
+                    ViewPanMapping.MinSensitivity, ViewPanMapping.MaxSensitivity);
+            }
+        }
 
         /// <summary>
         /// 判「玩家在看哪一边」的 |_pan| 阈值。只有噜噜的手电筒在用（`IsShiningAtFront`）。
@@ -1097,6 +1325,9 @@ namespace NailongFNAF.UI
             EnsureAudioManager();
             EnsureRoom();
 
+            // 设置菜单的持久化项：灵敏度在映射前读回来
+            ViewSensitivity = PlayerPrefs.GetFloat(ViewSensitivityKey, 1f);
+
             _font = Resources.Load<Font>(FontResourcePath);
             if (_font == null)
             {
@@ -1115,6 +1346,9 @@ namespace NailongFNAF.UI
 
             // 开始界面 / 关卡选择（见 PrototypeScene.Menu.cs）
             BuildMenu();
+
+            // 显示比例：把相机 + UGUI 一起收进安全区（黑边）
+            ApplyAspectLayout();
         }
 
         /// <summary>断电演出的音乐段有多长，由音频素材决定 —— 换素材不用改代码。</summary>
@@ -1157,6 +1391,9 @@ namespace NailongFNAF.UI
             // 那一帧把人弄死（timeScale = 0），那种情况下后面的分支全被挡掉，
             // 倒计时要是排在末尾就永远没人推，游戏卡在一片红里出不去。
             TickBelialQuit();
+
+            // 显示比例 / 窗口尺寸变了：菜单开着也要重摆安全区（放在 menu return 之前）
+            UpdateAspectIfNeeded();
 
             // 菜单开着 / 出现结算面板时，冻住这一夜，等玩家选择
             HandleMenu(gm);
@@ -1315,13 +1552,16 @@ namespace NailongFNAF.UI
             }
             else
             {
-                float width = Screen.width;
-                float x = width > 0f ? Input.mousePosition.x / width : 0.5f;
+                Rect safe = UiScreenRect();
+                float x = safe.width > 0f
+                    ? Mathf.Clamp01((Input.mousePosition.x - safe.x) / safe.width)
+                    : 0.5f;
 
                 // 鼠标位置映射成转头量：中心一段**死区**（鼠标怎么晃都不动），
                 // 然后线性跟手，推到饱和点之后不再变。曲线在 ViewPanMapping 里，
                 // 有单元测试盯着，别在这儿临时调参。
-                _panTarget = ViewPanMapping.Map(x, PanDeadZone, PanActiveSpan);
+                // 灵敏度只掰弯中间曲线，两端仍严格落在 ±1（墙按钮可达性不变）。
+                _panTarget = ViewPanMapping.Map(x, PanDeadZone, PanActiveSpan, ViewSensitivity);
             }
 
             // 缓动：吃掉鼠标的高频抖动（真正治手抖的是 ViewPanMapping 的死区，
@@ -1437,7 +1677,7 @@ namespace NailongFNAF.UI
             float eased = 1f - Mathf.Pow(1f - _monitorAnim, 3f);
 
             // 平板从屏幕底部抬起来：位移 + 轻微透视倾斜
-            float h = Screen.height;
+            float h = UiScreenRect().height;
             float rise = (1f - eased) * h * 0.85f;
 
             _monitorTablet.anchoredPosition = new Vector2(0f, -rise);
@@ -1710,8 +1950,9 @@ namespace NailongFNAF.UI
                 ToggleMonitor(gm);
             }
 
-            float height = Screen.height;
-            bool inZone = height > 0f && Input.mousePosition.y / height <= MonitorZone;
+            Rect safe = UiScreenRect();
+            bool inZone = safe.height > 0f
+                && (Input.mousePosition.y - safe.y) / safe.height <= MonitorZone;
 
             if (inZone && !_wasInMonitorZone && CanOperate(gm))
             {
@@ -2732,7 +2973,8 @@ namespace NailongFNAF.UI
             // 看起来像个巨人贴在左边，不像从门里冒出来。
             var door = _doorLeft3D;
             var cam = Camera.main;
-            var canvasRect = (RectTransform)_canvas.transform;
+            var canvasRect = UiRect;
+            Rect safe = UiScreenRect();
 
             float height;
             Vector2 anchor;
@@ -2747,13 +2989,14 @@ namespace NailongFNAF.UI
 
                 // 门的屏幕像素高度 → 占屏幕高度的比例 → 乘画布高。
                 // 这样和 CanvasScaler 怎么缩放无关，永远和门板同比例。
-                float doorFrac = Mathf.Abs(high.y - low.y) / Mathf.Max(1f, Screen.height);
+                float doorFrac = Mathf.Abs(high.y - low.y) / Mathf.Max(1f, safe.height);
                 height = doorFrac * canvasRect.rect.height * BlackoutHeightVsDoor;
 
                 // 门中心的屏幕 x → 画布本地 x。
                 // 屏幕归一化 (0..1) 乘以画布宽，再减半个画布 = 相对中心的本地坐标。
                 float doorCx = (low.x + high.x) * 0.5f;
-                float cxLocal = (doorCx / Mathf.Max(1f, Screen.width) - 0.5f) * canvasRect.rect.width;
+                float cxLocal = ((doorCx - safe.x) / Mathf.Max(1f, safe.width) - 0.5f)
+                                 * canvasRect.rect.width;
 
                 // ⚠️ **纵向对齐门板底部**。
                 // pivot = 底边中点，所以 anchoredPosition.y 就是立绘底边的本地 y。
@@ -2773,7 +3016,7 @@ namespace NailongFNAF.UI
                 // 屏幕归一化 (0..1) 乘画布高，再减半个画布高 = 相对画布中心的本地 y。
                 // ⚠️ 不能写成 (screenY - Screen.height*0.5) * 系数 ——
                 // 那样只在缩放恰好 1 时成立，CanvasScaler 缩放后整体会偏。
-                float bottomLocal = (doorBottomScreen / Mathf.Max(1f, Screen.height) - 0.5f)
+                float bottomLocal = ((doorBottomScreen - safe.y) / Mathf.Max(1f, safe.height) - 0.5f)
                                     * canvasRect.rect.height;
 
                 anchor = new Vector2(cxLocal * BlackoutWidthVsDoor, bottomLocal);
@@ -4024,7 +4267,7 @@ namespace NailongFNAF.UI
 
             // 世界坐标 → canvas 本地（Overlay canvas 的世界坐标 ≈ 屏幕像素，
             // 但要转进 canvas 的本地系才能直接当 anchoredPosition 用）
-            RectTransform canvasRt = _canvas.transform as RectTransform;
+            RectTransform canvasRt = UiRect;
             Vector2 mapSize = new Vector2(MapPanelWidth, MapPanelHeight);
 
             // 摆位规则：**右沿贴屏幕右边（留 8px），左沿最多压住黑壳 120px**。
@@ -4040,7 +4283,8 @@ namespace NailongFNAF.UI
             // 挂外时地图可以比原始设计尺寸更大（框外空间有限，用户要求更大可读性）
             const float MaxOutsideScale = 1.5f;
 
-            float rightEdge = Screen.width - RightGap;
+            Rect safe = UiScreenRect();
+            float rightEdge = safe.x + safe.width - RightGap;
             float leftLimit = cs[2].x - OverlapBezel;
             float availW = rightEdge - leftLimit;
 
@@ -4067,9 +4311,9 @@ namespace NailongFNAF.UI
             }
 
             // 挂外时保持 canvas 直属（可能上一帧退回过 Area 里）
-            if (_mapOutside.parent != _canvas.transform)
+            if (_mapOutside.parent != UiParent)
             {
-                _mapOutside.SetParent(_canvas.transform, false);
+                _mapOutside.SetParent(UiParent, false);
             }
 
             _mapOutside.localScale = new Vector3(outsideScale, outsideScale, 1f);
@@ -4196,8 +4440,9 @@ namespace NailongFNAF.UI
                 return;
             }
 
-            int w = Mathf.Max(8, Screen.width / MonitorBlurDownscale);
-            int h = Mathf.Max(8, Screen.height / MonitorBlurDownscale);
+            Rect safe = UiScreenRect();
+            int w = Mathf.Max(8, (int)(safe.width / MonitorBlurDownscale));
+            int h = Mathf.Max(8, (int)(safe.height / MonitorBlurDownscale));
 
             if (_blurRT == null || _blurRT.width != w || _blurRT.height != h)
             {
@@ -5506,7 +5751,7 @@ namespace NailongFNAF.UI
             // 挂在 overlay 下面的话会被那层的红色扩散盖住（那层是 RedSpread 材质，
             // 跳杀中会整片变红，把贝利亚的大头糊掉）。
             var go = new GameObject("BelialLunge", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
 
             // 排到跳杀 overlay 之后 = 盖在它上面
             if (_jumpscareOverlay != null)
@@ -6240,7 +6485,7 @@ namespace NailongFNAF.UI
             }
 
             _supportPanel = new GameObject("SupportPanel", typeof(RectTransform), typeof(Image));
-            _supportPanel.transform.SetParent(_canvas.transform, false);
+            _supportPanel.transform.SetParent(UiParent, false);
 
             var rect = _supportPanel.GetComponent<RectTransform>();
             rect.anchorMin = Vector2.zero;
@@ -7663,6 +7908,7 @@ namespace NailongFNAF.UI
         {
             _canvas = GetOrCreateCanvas();
             _solidSprite = MakeSolidSprite();
+            EnsureUiRoot();   // 所有界面元素都挂安全区下面（显示比例黑边）
 
             BuildWorldObjects();
             BuildBackgroundLayers();
@@ -7938,7 +8184,7 @@ namespace NailongFNAF.UI
         {
             // 不用 MakeFullScreenImage（那个会 StretchToParent 铺满整个画布）
             var go = new GameObject("FlashlightGlow", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
 
             var rect = go.GetComponent<RectTransform>();
             rect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -8508,7 +8754,7 @@ namespace NailongFNAF.UI
             // （显隐由 _monitorMapGroup.alpha 管，和以前一致）。
             // 每帧按黑壳位置重新定位，见 UpdateMapOutside()。
             var map = new GameObject("MonitorMap", typeof(RectTransform), typeof(CanvasGroup), typeof(Image));
-            map.transform.SetParent(_canvas.transform, false);
+            map.transform.SetParent(UiParent, false);
 
             _mapOutside = map.GetComponent<RectTransform>();
 
@@ -8652,7 +8898,7 @@ namespace NailongFNAF.UI
         private void BuildMonitorHandle()
         {
             var go = new GameObject("MonitorHandle", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
 
             var rect = go.GetComponent<RectTransform>();
             PlaceRect(rect, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
@@ -8675,7 +8921,7 @@ namespace NailongFNAF.UI
         private void BuildBlackoutLayer()
         {
             var go = new GameObject("BlackoutCharacter", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
 
             // ⚠️ 锚点用**画布中心**（0.5, 0.5）而不是左下角 ——
             // ApplyBlackoutCharacter 按门板屏幕坐标算位置，那是相对屏幕中心的，
@@ -8699,7 +8945,7 @@ namespace NailongFNAF.UI
         private void BuildHud()
         {
             var hud = new GameObject("Hud", typeof(RectTransform));
-            hud.transform.SetParent(_canvas.transform, false);
+            hud.transform.SetParent(UiParent, false);
             StretchToParent(hud.GetComponent<RectTransform>());
 
             // 时钟：右上角
@@ -8822,7 +9068,7 @@ namespace NailongFNAF.UI
         private void BuildNaibao()
         {
             var go = new GameObject("Naibao", typeof(RectTransform), typeof(CanvasGroup));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
             StretchToParent(go.GetComponent<RectTransform>());
 
             _naibaoGroup = go.GetComponent<CanvasGroup>();
@@ -8876,7 +9122,7 @@ namespace NailongFNAF.UI
         /// </summary>
         private void BuildNaibaoPhoneHint()
         {
-            _naibaoPhoneHint = MakeText(_canvas.transform, "NaibaoPhoneHint", string.Empty,
+            _naibaoPhoneHint = MakeText(UiParent, "NaibaoPhoneHint", string.Empty,
                 TextAnchor.MiddleCenter, 22, new Color(1f, 0.86f, 0.52f, 0.95f));
             _naibaoPhoneHint.horizontalOverflow = HorizontalWrapMode.Overflow;
             PlaceRect(_naibaoPhoneHint.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
@@ -8896,7 +9142,7 @@ namespace NailongFNAF.UI
         {
             var root = new GameObject("NaibaoCall",
                 typeof(RectTransform), typeof(CanvasGroup));
-            root.transform.SetParent(_canvas.transform, false);
+            root.transform.SetParent(UiParent, false);
             StretchToParent(root.GetComponent<RectTransform>());
 
             _naibaoCallGroup = root.GetComponent<CanvasGroup>();
@@ -9025,7 +9271,7 @@ namespace NailongFNAF.UI
         private void BuildDebugLayer()
         {
             var go = new GameObject("DebugLayer", typeof(RectTransform), typeof(CanvasGroup));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
             StretchToParent(go.GetComponent<RectTransform>());
 
             _debugGroup = go.GetComponent<CanvasGroup>();
@@ -9878,7 +10124,7 @@ namespace NailongFNAF.UI
         private CanvasGroup MakeGroup(string name)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasGroup));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
             StretchToParent(go.GetComponent<RectTransform>());
 
             var group = go.GetComponent<CanvasGroup>();
@@ -9924,7 +10170,7 @@ namespace NailongFNAF.UI
 
             // overlay 画布没有相机 → camera 参数传 null。缩放（CanvasScaler）它已经算进去了。
             return RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                (RectTransform)_canvas.transform, screen, null, out canvasLocal);
+                UiRect, screen, null, out canvasLocal);
         }
 
         /// <summary>
@@ -9992,7 +10238,7 @@ namespace NailongFNAF.UI
         /// <summary>投影点是不是落在画布内（留半个按钮的余量，让按钮能贴着边露出半个）。</summary>
         private bool InsideCanvas(Vector2 canvasLocal)
         {
-            var rect = (RectTransform)_canvas.transform;
+            var rect = UiRect;
             Vector2 half = rect.rect.size * 0.5f + WallButtonSize * 0.5f;
             return Mathf.Abs(canvasLocal.x) <= half.x && Mathf.Abs(canvasLocal.y) <= half.y;
         }
@@ -10000,7 +10246,7 @@ namespace NailongFNAF.UI
         private Image MakeFullScreenImage(string name, Color color, bool raycast = false)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_canvas.transform, false);
+            go.transform.SetParent(UiParent, false);
 
             StretchToParent(go.GetComponent<RectTransform>());
 

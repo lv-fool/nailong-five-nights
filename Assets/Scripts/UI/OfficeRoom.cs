@@ -216,6 +216,40 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
+        /// 显示比例的黑底：一台**全屏、不画任何物体**的相机，只负责把整块屏幕清黑。
+        /// 主相机裁进安全区之后，安全区外的像素归它管 —— 不加这台，
+        /// 主相机 rect 之外会是上一帧残留 / 垃圾色。
+        /// </summary>
+        private Camera _letterboxBackCam;
+
+        /// <summary>创建全屏黑底相机（只建一次）。显示比例一变就调它一次，安全。</summary>
+        public void EnsureLetterboxBackground()
+        {
+            if (_letterboxBackCam != null)
+            {
+                return;
+            }
+
+            var go = new GameObject("LetterboxBackground");
+            go.transform.SetParent(transform, false);
+
+            var cam = go.AddComponent<Camera>();
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = Color.black;
+            cam.cullingMask = 0;                 // 不画任何东西，只清屏
+            cam.depth = (_cam != null ? _cam.depth : 0f) - 10f;
+            cam.rect = new Rect(0f, 0f, 1f, 1f);
+            cam.orthographic = true;
+            cam.nearClipPlane = 0.1f;
+            cam.farClipPlane = 1f;
+            cam.useOcclusionCulling = false;
+            cam.allowHDR = false;
+            cam.allowMSAA = false;
+
+            _letterboxBackCam = cam;
+        }
+
+        /// <summary>
         /// 造圆柱内壁。列对应偏航角、行对应斜率 p；高度 = 眼高 + 半径 × p，
         /// 这样「相机沿某个方向看过去」正好落在贴图对得上的那一格上。
         /// </summary>
@@ -327,19 +361,30 @@ namespace NailongFNAF.UI
         }
 
         /// <summary>
-        /// 视角照渲染时的 16:9 水平 85° 定。窗口拉宽了水平视场随之变大，得夹住，
-        /// 否则超广角会看到全景条（±145°）之外的空。边界：满转 <see cref="MaxYaw"/> + 半视场
-        /// 不能超过 145°，所以半视场最多 145 − 70 = 75°，取 70° 留一截余量。
-        /// 竖向只剩 BaseVFov 一途，只会被压小 —— 全景上下各留到 35.75°，够用。
+        /// **水平视野固定 85°**（和渲染基准一致），垂直 FOV 由窗口比例反推。
+        ///
+        /// 为什么固定水平而不是垂直：墙按钮在满转时相对视线约 36.6°，
+        /// 16:9 时半水平视野 42.5° 还能看见；如果固定垂直 FOV（54.49°），
+        /// 4:3 时半水平视野会缩到 34.4°，按钮正好被挤出画面 —— 切 4:3 就点不着门。
+        ///
+        /// 上限：满转 <see cref="MaxYaw"/> + 半水平视野不能超过 145° 全景边界，
+        /// 所以半水平视野最多 75°，取 70° 留余量（超宽窗口会压缩水平视野来兜住）。
         /// </summary>
         private void ApplyFieldOfView()
         {
             float aspect = _cam.aspect > 0.01f ? _cam.aspect : 16f / 9f;
 
+            // ⚠️ 水平视野固定 85°（和 16:9 渲染基准一致），垂直 FOV 随窗口比例反推。
+            // 不能沿用「固定垂直 FOV」：4:3 时水平视野会缩到 69°，满转 70° 后
+            // 墙角按钮（相对视线约 36.6°）会正好被挤出画面 —— 显示比例切 4:3 就点不着门。
+            const float HalfHFov = 42.5f;
+
             const float MaxHalfHFov = 70f;                          // 70° 满转 + 70° ≤ 145° 全景边界
             float tanHalfVMax = Mathf.Tan(MaxHalfHFov * Mathf.Deg2Rad) / aspect;
             float maxVFov = 2f * Mathf.Atan(tanHalfVMax) * Mathf.Rad2Deg;
-            float vfov = Mathf.Min(BaseVFov, maxVFov);
+
+            float tanHalfV = Mathf.Tan(HalfHFov * Mathf.Deg2Rad) / aspect;
+            float vfov = Mathf.Min(2f * Mathf.Atan(tanHalfV) * Mathf.Rad2Deg, maxVFov);
 
             if (Mathf.Abs(vfov - _appliedVFov) > 0.01f)
             {

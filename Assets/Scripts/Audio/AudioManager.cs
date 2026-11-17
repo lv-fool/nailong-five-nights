@@ -130,6 +130,27 @@ namespace NailongFNAF.Audio
         [Range(0f, 1f)]
         [SerializeField] private float _musicVolume = 0.62f;
 
+        /// <summary>设置菜单：主音量存档键（0 ~ 1）。</summary>
+        public const string MasterVolumeKey = "nailong.volume";
+
+        /// <summary>读主音量存档（没存过 = 1.0，满音量）。</summary>
+        public static float LoadMasterVolume()
+        {
+            return Mathf.Clamp01(PlayerPrefs.GetFloat(MasterVolumeKey, 1f));
+        }
+
+        /// <summary>
+        /// 设置主音量并落盘。走 <see cref="AudioListener.volume"/> —— 它乘在
+        /// 所有音源上（环境、音效、语音、音乐、视频音轨），不需要逐个 AudioSource 去改。
+        /// </summary>
+        public static void SetMasterVolume(float volume)
+        {
+            volume = Mathf.Clamp01(volume);
+            AudioListener.volume = volume;
+            PlayerPrefs.SetFloat(MasterVolumeKey, volume);
+            PlayerPrefs.Save();
+        }
+
         private AudioSource _ambientA;
         private AudioSource _ambientB;
         private AudioSource _sfx;
@@ -186,6 +207,9 @@ namespace NailongFNAF.Audio
 
         private void Awake()
         {
+            // 设置菜单的主音量：开局先套上（AudioListener 是全局乘数）
+            AudioListener.volume = LoadMasterVolume();
+
             _ambientA = CreateSource("AmbientA", true, _ambientVolume);
             _ambientB = CreateSource("AmbientB", true, _ambientVolume);
 
