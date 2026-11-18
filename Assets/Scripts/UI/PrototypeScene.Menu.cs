@@ -336,9 +336,11 @@ namespace NailongFNAF.UI
             MakeMenuButton(_titleView.transform, "退出", Vector2.zero,
                 new Vector2(0.5f, 0.17f), OnQuitClicked);
 
-            // 设置：放在右上角，不挤占主按钮的纵向节奏
+            // 设置：放在右上角，不挤占主按钮的纵向节奏。
+            // ⚠️ 锚点 0.90 在 4:3 下会让 320 宽的按钮右沿超出安全区（实测 16px），
+            // 收到 0.86 后右沿落在 0.86 + 160/1440 ≈ 0.97，安全。
             MakeMenuButton(_titleView.transform, "设置", Vector2.zero,
-                new Vector2(0.90f, 0.945f), OnSettingsClicked);
+                new Vector2(0.86f, 0.945f), OnSettingsClicked);
 
             MakeLabel(_titleView.transform, "撑过 12 点到 6 点。鼠标看左右、升起监控、关门开灯、按手电筒。",
                 20, new Color(0.55f, 0.55f, 0.6f),
@@ -530,8 +532,10 @@ namespace NailongFNAF.UI
                 new Vector2(0.86f, 0.14f), OnCustomStartClicked);
 
             // 左上返回
+            // ⚠️ 锚点 0.10 在 4:3 下会让 320 宽的按钮左沿超出安全区（实测 16px），
+            // 收到 0.14 后左沿落在 0.14 - 160/1440 ≈ 0.03，安全。
             MakeMenuButton(_customView.transform, "返回", Vector2.zero,
-                new Vector2(0.10f, 0.92f), OpenTitle);
+                new Vector2(0.14f, 0.92f), OpenTitle);
 
             _customView.SetActive(false);
         }
